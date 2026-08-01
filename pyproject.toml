@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gapmodel"
+version = "0.1.0"
+description = "Probability model for predicting global stock market opens from key indicators"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scikit-learn>=1.3",
+    "yfinance>=0.2.40",
+]
+
+[project.scripts]
+gapmodel = "gapmodel.cli:main"
+
+[tool.setuptools]
+packages = ["gapmodel"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
