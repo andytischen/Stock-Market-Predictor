@@ -170,11 +170,14 @@ python -m pm need 1 "paid intraday data feed"
 python -m pm status 1 doing
 python -m pm list --status doing
 python -m pm report --out STATUS.md
+python -m pm deck                      # the same board as a reveal.js slide deck
 ```
 
 The live board is `project.json` and the current update is checked in as
 [STATUS.md](STATUS.md); regenerate it with `python -m pm report --out STATUS.md`
-after changing the board.
+after changing the board. `pm deck` writes the same content as slides to
+[docs/status-deck.html](docs/status-deck.html) — open it in a browser to
+present the update rather than read it.
 
 `report` prints a markdown status update: percentage complete, what is done, in
 progress, blocked or next, overdue tasks, and a "Resources needed" section

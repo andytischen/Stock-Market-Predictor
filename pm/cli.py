@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from .board import DEFAULT_BOARD, STATUSES, Board
+from .deck import render_deck
 from .report import render_report
 
 
@@ -62,6 +63,14 @@ def _cmd_report(args: argparse.Namespace) -> None:
         print(f"wrote {args.out}")
 
 
+def _cmd_deck(args: argparse.Namespace) -> None:
+    out = Path(args.out)
+    if out.parent != Path(""):
+        out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_deck(_board(args)))
+    print(f"wrote {args.out}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pm", description=__doc__)
     parser.add_argument("--file", default=str(DEFAULT_BOARD), help="board JSON file")
@@ -96,6 +105,10 @@ def build_parser() -> argparse.ArgumentParser:
     report = sub.add_parser("report", help="markdown status update")
     report.add_argument("--out", help="also write the report here")
     report.set_defaults(func=_cmd_report)
+
+    deck = sub.add_parser("deck", help="render the board as a reveal.js slide deck")
+    deck.add_argument("--out", default="docs/status-deck.html", help="where to write the deck")
+    deck.set_defaults(func=_cmd_deck)
 
     return parser
 
