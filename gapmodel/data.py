@@ -21,6 +21,22 @@ def _cache_path(cache_dir: Path, symbol: str) -> Path:
     return cache_dir / f"{safe}.csv"
 
 
+def _cached_start(path: Path) -> pd.Timestamp | None:
+    """Start date the cache was downloaded with, or None if unknown.
+
+    The first bar in the file cannot serve as this date: it is a trading day,
+    always later than the requested start, and for young instruments later by
+    years — comparing against it would re-download the whole panel every run.
+    """
+    meta = path.with_suffix(".start")
+    if not meta.exists():
+        return None
+    try:
+        return pd.Timestamp(meta.read_text().strip())
+    except ValueError:
+        return None
+
+
 def _download(symbol: str, start: str) -> pd.DataFrame:
     raw = yf.download(symbol, start=start, interval="1d", auto_adjust=False, progress=False)
     if raw is None or raw.empty:
@@ -40,17 +56,18 @@ def load_symbol(
 ) -> pd.DataFrame:
     """Return daily bars for ``symbol``, using an on-disk CSV cache."""
     path = _cache_path(cache_dir, symbol)
+    requested = pd.Timestamp(start)
     frame = None
     if path.exists() and not refresh:
-        cached = pd.read_csv(path, index_col=0, parse_dates=True)
-        # Only reuse the cache when it reaches back at least as far as asked.
-        if not cached.empty and cached.index.min() <= pd.Timestamp(start):
-            frame = cached
+        covered = _cached_start(path)
+        if covered is not None and covered <= requested:
+            frame = pd.read_csv(path, index_col=0, parse_dates=True)
     if frame is None:
         frame = _download(symbol, start)
         cache_dir.mkdir(parents=True, exist_ok=True)
         frame.to_csv(path)
-    return frame.loc[frame.index >= pd.Timestamp(start)]
+        path.with_suffix(".start").write_text(requested.date().isoformat())
+    return frame.loc[frame.index >= requested]
 
 
 def load_panel(
