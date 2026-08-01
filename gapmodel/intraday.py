@@ -26,6 +26,10 @@ MOMENTUM_HOURS = 3
 # Yahoo timestamps an hourly bar with the *start* of the hour it covers, so a
 # bar is only complete — and only usable — one hour after its timestamp.
 BAR_DURATION = pd.Timedelta(hours=1)
+# The bell of the session being forecast lies in the future, so the newest bar
+# is allowed to stand in for it — but only for this long, after which the cache
+# is treated as too stale to describe the pre-open state.
+MAX_STALENESS = pd.Timedelta(hours=24)
 
 
 def _cache_path(cache_dir: Path, symbol: str) -> Path:
@@ -38,7 +42,11 @@ def load_hourly(symbol: str, cache_dir: Path = DEFAULT_CACHE, refresh: bool = Fa
     path = _cache_path(cache_dir, symbol)
     if path.exists() and not refresh:
         close = pd.read_csv(path, index_col=0, parse_dates=True)["Close"]
-        return close.tz_localize("UTC") if close.index.tz is None else close.tz_convert("UTC")
+        close = close.tz_localize("UTC") if close.index.tz is None else close.tz_convert("UTC")
+        # Unlike daily bars, a stale hourly cache is useless: it cannot describe
+        # the run-up to the next bell, so refresh it instead of reusing it.
+        if not close.empty and pd.Timestamp.now(tz="UTC") - close.index[-1] <= MAX_STALENESS:
+            return close
 
     raw = yf.download(
         symbol,
@@ -75,13 +83,25 @@ def load_hourly_panel(
     return panel
 
 
-def _last_before(close: pd.Series, cutoffs: pd.DatetimeIndex) -> np.ndarray:
-    """Most recent close completed before each cutoff (NaN when none exists)."""
+def _positions_before(close: pd.Series, cutoffs: pd.DatetimeIndex) -> np.ndarray:
+    """Index of the last bar completed before each cutoff, or -1 if there is none.
+
+    A cutoff past the end of the series resolves to the final bar only while it
+    is within ``MAX_STALENESS``; beyond that the series simply does not cover
+    the moment asked about, and pretending otherwise would report a zero move.
+    """
     positions = close.index.searchsorted(cutoffs - BAR_DURATION, side="right") - 1
-    values = np.full(len(cutoffs), np.nan)
-    valid = positions >= 0
-    values[valid] = close.to_numpy()[positions[valid]]
-    return values
+    covered = cutoffs <= close.index[-1] + BAR_DURATION + MAX_STALENESS
+    return np.where(covered, positions, -1)
+
+
+def _move(close: pd.Series, to_pos: np.ndarray, from_pos: np.ndarray) -> np.ndarray:
+    """Log move between two bars, NaN unless both exist and differ."""
+    values = close.to_numpy()
+    usable = (to_pos >= 0) & (from_pos >= 0) & (to_pos != from_pos)
+    out = np.full(len(to_pos), np.nan)
+    out[usable] = np.log(values[to_pos[usable]] / values[from_pos[usable]])
+    return out
 
 
 def preopen_features(
@@ -100,7 +120,11 @@ def preopen_features(
     columns: dict[str, np.ndarray] = {}
     for symbol, close in hourly.items():
         name = symbol.replace("=", "_").replace("-", "_").lower()
-        at_bell = _last_before(close, bell)
-        columns[f"pre_{name}_overnight"] = np.log(at_bell / _last_before(close, previous_close))
-        columns[f"pre_{name}_momentum"] = np.log(at_bell / _last_before(close, momentum_from))
+        at_bell = _positions_before(close, bell)
+        columns[f"pre_{name}_overnight"] = _move(
+            close, at_bell, _positions_before(close, previous_close)
+        )
+        columns[f"pre_{name}_momentum"] = _move(
+            close, at_bell, _positions_before(close, momentum_from)
+        )
     return pd.DataFrame(columns, index=dates).replace([np.inf, -np.inf], np.nan)

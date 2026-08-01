@@ -99,6 +99,11 @@ An hourly bar is stamped with the *start* of the hour it covers, so a bar counts
 as known only one hour later — otherwise the bar straddling the bell would leak
 the answer into the features.
 
+`predict --intraday` only produces a forecast when futures have actually traded
+since the target's previous close, which is the point of the feature: run it in
+the hours before the bell. Over a weekend it refuses rather than reporting a
+fabricated zero overnight move.
+
 ### Data caveats
 
 Yahoo publishes a stale opening price for some indices (it repeats the previous

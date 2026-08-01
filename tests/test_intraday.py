@@ -35,6 +35,29 @@ def test_overnight_window_starts_at_the_previous_close():
     assert frame.loc[dates[0], "pre_es_f_overnight"] == np.log(bell_value / reference)
 
 
+def test_dates_beyond_the_hourly_history_are_nan_not_zero():
+    close = hourly_series(start="2024-01-01", hours=24 * 5)
+    late = pd.DatetimeIndex(["2024-01-20"])  # well past the last bar
+    frame = preopen_features(market("^GSPC"), late, {"ES=F": close})
+    assert frame.isna().all().all()
+
+
+def test_recent_but_incomplete_history_still_measures_a_move():
+    # Ends at 20:00 the evening before: short of the bell but past the previous
+    # close, so the overnight window is real, if truncated.
+    close = hourly_series(start="2024-01-01", hours=24 * 8 + 21)
+    frame = preopen_features(market("^GSPC"), pd.DatetimeIndex(["2024-01-10"]), {"ES=F": close})
+    assert (frame["pre_es_f_overnight"] != 0).all()
+
+
+def test_a_window_collapsing_onto_one_bar_is_nan():
+    # Ends at the previous close itself: both ends of the overnight window
+    # resolve to the same bar, which must read as unknown, not as "no move".
+    close = hourly_series(start="2024-01-01", hours=24 * 8 + 20)
+    frame = preopen_features(market("^GSPC"), pd.DatetimeIndex(["2024-01-10"]), {"ES=F": close})
+    assert frame["pre_es_f_overnight"].isna().all()
+
+
 def test_dates_before_the_hourly_history_are_nan():
     close = hourly_series(start="2024-01-01")
     frame = preopen_features(market("^GSPC"), pd.DatetimeIndex(["2023-06-01"]), {"ES=F": close})

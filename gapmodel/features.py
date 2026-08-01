@@ -123,11 +123,15 @@ def build_features(
     label = gap.gt(0).astype(float).where(gap.notna() & real_open)
 
     complete = frame.notna().all(axis=1)
+    missing = frame.columns[frame.iloc[-1].isna()].tolist() if len(frame) else []
     frame, label = frame.loc[complete], label.loc[complete]
     if int(label.notna().sum()) < MIN_HISTORY:
         raise ValueError(f"{target_symbol}: only {len(frame)} complete feature rows")
     if forecast_row and (frame.empty or frame.index[-1] != dates[-1]):
-        raise ValueError(f"{target_symbol}: indicators missing for the next session")
+        detail = ", ".join(missing[:4]) or "unknown"
+        if all(name.startswith("pre_") for name in missing):
+            detail += " (no futures trading since the previous close)"
+        raise ValueError(f"{target_symbol}: indicators missing for the next session: {detail}")
     return frame, label
 
 
