@@ -27,7 +27,7 @@ def synthetic_bars(n: int = 900, seed: int = 0) -> pd.DataFrame:
 def panel() -> dict[str, pd.DataFrame]:
     return {
         symbol: synthetic_bars(seed=seed)
-        for seed, symbol in enumerate(["^GSPC", "^N225", "^FTSE", "^VIX", "ES=F"])
+        for seed, symbol in enumerate(["^GSPC", "^N225", "^FTSE", "^VIX", "ES=F", "CL=F"])
     }
 
 
@@ -66,6 +66,30 @@ def test_build_features_is_aligned_and_finite(panel):
     assert any(col.startswith("ind_") for col in features.columns)
 
 
+def test_oil_carries_shock_features(panel):
+    features, _ = build_features("^GSPC", panel)
+    assert {
+        "ind_cl_f_return",
+        "ind_cl_f_return_5",
+        "ind_cl_f_vol_20",
+        "ind_cl_f_shock",
+    } <= set(features.columns)
+    assert (features["ind_cl_f_vol_20"] > 0).all()
+
+
+def test_oil_shock_is_the_move_scaled_by_known_volatility(panel):
+    close = panel["CL=F"]["Close"]
+    returns = np.log(close / close.shift(1))
+    vol = returns.rolling(20).std().shift(1)
+    features, _ = build_features("^GSPC", panel)
+    # Wall Street opens at 13:30 UTC, before crude's 21:00 close -> yesterday's bar,
+    # carried forward over the weekend like every other as-of lookup.
+    shock = returns / vol
+    calendar = pd.date_range(shock.index.min(), shock.index.max())
+    expected = shock.reindex(calendar).ffill().reindex(features.index - pd.Timedelta(days=1))
+    assert features["ind_cl_f_shock"].to_numpy() == pytest.approx(expected.to_numpy())
+
+
 def test_forecast_row_is_unlabelled_and_last(panel):
     features, labels = build_features("^GSPC", panel, forecast_row=True)
     assert np.isnan(labels.iloc[-1])
@@ -85,3 +109,18 @@ def test_walk_forward_is_out_of_sample_and_calibratable(panel):
 def test_unknown_market_raises():
     with pytest.raises(KeyError):
         market("^NOPE")
+
+
+def test_calibration_pulls_overconfident_probabilities_back():
+    from gapmodel.model import Backtest, calibrator
+
+    index = pd.date_range("2020-01-01", periods=400, freq="B")
+    rng = np.random.default_rng(0)
+    # Out of sample the model never went past 0.8 and was right 70% of the time.
+    probabilities = pd.Series(rng.uniform(0.2, 0.8, len(index)), index=index)
+    outcomes = pd.Series(rng.binomial(1, probabilities), index=index)
+
+    calibrate = calibrator(Backtest(probabilities=probabilities, outcomes=outcomes))
+    assert calibrate(np.array([0.9999]))[0] < 0.9
+    # Probabilities inside the earned range are left broadly alone.
+    assert abs(calibrate(np.array([0.6]))[0] - 0.6) < 0.1

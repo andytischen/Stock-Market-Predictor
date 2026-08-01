@@ -5,9 +5,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .markets import INDICATORS, MARKETS, Market, market
+from .intraday import preopen_features
+from .markets import INDICATORS, MARKETS, OIL_SYMBOLS, Market, market
 
 MIN_HISTORY = 60
+OIL_VOL_WINDOW = 20
 # A gap of exactly zero means the source repeated the previous close instead of
 # publishing a real opening print; such sessions cannot be labelled.
 STALE_GAP_TOLERANCE = 1e-9
@@ -35,6 +37,14 @@ def _as_of(source: pd.Series, dates: pd.DatetimeIndex, lag_days: int) -> pd.Seri
     return pd.Series(source.reindex(calendar).ffill().reindex(cut).to_numpy(), index=dates)
 
 
+def _column_name(symbol: str) -> str:
+    """Symbol turned into a feature-name fragment."""
+    cleaned = symbol.lstrip("^")
+    for character in "=-.":
+        cleaned = cleaned.replace(character, "_")
+    return cleaned.lower()
+
+
 def _lag_days(source_close_utc: float, target: Market) -> int:
     """0 if the source bar closes before the target opens, otherwise 1."""
     return 0 if source_close_utc < target.open_utc else 1
@@ -44,12 +54,16 @@ def build_features(
     target_symbol: str,
     panel: dict[str, pd.DataFrame],
     forecast_row: bool = False,
+    hourly: dict[str, pd.Series] | None = None,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """Build the design matrix and the up/down label for one market.
 
     With ``forecast_row`` the frame is extended by one row for the next
     session, whose label is unknown and whose features only use information
     available before that session's opening auction.
+
+    With ``hourly`` the pre-open futures moves are added, which restricts the
+    sample to the window those hourly bars cover.
     """
     target = market(target_symbol)
     if target_symbol not in panel:
@@ -84,7 +98,7 @@ def build_features(
             continue
         close = panel[other.symbol]["Close"].dropna()
         lag = _lag_days(other.close_utc, target)
-        name = other.symbol.lstrip("^").lower()
+        name = _column_name(other.symbol)
         features[f"mkt_{name}_return"] = _as_of(log_return(close), dates, lag)
         features[f"mkt_{name}_return_5"] = _as_of(log_return(close, 5), dates, lag)
 
@@ -93,18 +107,23 @@ def build_features(
             continue
         close = panel[indicator.symbol]["Close"].dropna()
         lag = _lag_days(indicator.close_utc, target)
-        name = (
-            indicator.symbol.lstrip("^")
-            .replace("=", "_")
-            .replace("-", "_")
-            .replace(".", "_")
-            .lower()
-        )
-        features[f"ind_{name}_return"] = _as_of(log_return(close), dates, lag)
+        name = _column_name(indicator.symbol)
+        returns = log_return(close)
+        features[f"ind_{name}_return"] = _as_of(returns, dates, lag)
         if indicator.symbol == "^VIX":
             features["ind_vix_level"] = _as_of(close, dates, lag)
+        if indicator.symbol in OIL_SYMBOLS:
+            # Volatility is taken as of the previous bar so the shock is scaled
+            # by a regime the market already knew about.
+            vol = returns.rolling(OIL_VOL_WINDOW).std().shift(1)
+            features[f"ind_{name}_return_5"] = _as_of(log_return(close, 5), dates, lag)
+            features[f"ind_{name}_vol_{OIL_VOL_WINDOW}"] = _as_of(vol, dates, lag)
+            features[f"ind_{name}_shock"] = _as_of(returns / vol.where(vol > 0), dates, lag)
 
-    frame = pd.DataFrame(features, index=dates).replace([np.inf, -np.inf], np.nan)
+    frame = pd.DataFrame(features, index=dates)
+    if hourly:
+        frame = frame.join(preopen_features(target, dates, hourly))
+    frame = frame.replace([np.inf, -np.inf], np.nan)
     real_open = gap.abs() > STALE_GAP_TOLERANCE
     stale_fraction = float((~real_open & gap.notna()).sum() / max(gap.notna().sum(), 1))
     if stale_fraction > MAX_STALE_FRACTION:
@@ -115,11 +134,15 @@ def build_features(
     label = gap.gt(0).astype(float).where(gap.notna() & real_open)
 
     complete = frame.notna().all(axis=1)
+    missing = frame.columns[frame.iloc[-1].isna()].tolist() if len(frame) else []
     frame, label = frame.loc[complete], label.loc[complete]
     if int(label.notna().sum()) < MIN_HISTORY:
         raise ValueError(f"{target_symbol}: only {len(frame)} complete feature rows")
     if forecast_row and (frame.empty or frame.index[-1] != dates[-1]):
-        raise ValueError(f"{target_symbol}: indicators missing for the next session")
+        detail = ", ".join(missing[:4]) or "unknown"
+        if all(name.startswith("pre_") for name in missing):
+            detail += " (no futures trading since the previous close)"
+        raise ValueError(f"{target_symbol}: indicators missing for the next session: {detail}")
     return frame, label
 
 
@@ -132,8 +155,10 @@ def next_session_date(last_session: pd.Timestamp) -> pd.Timestamp:
 
 
 def live_feature_row(
-    target_symbol: str, panel: dict[str, pd.DataFrame]
+    target_symbol: str,
+    panel: dict[str, pd.DataFrame],
+    hourly: dict[str, pd.Series] | None = None,
 ) -> tuple[pd.DataFrame, pd.Timestamp]:
     """Feature row for the next, not yet observed, opening auction."""
-    frame, _ = build_features(target_symbol, panel, forecast_row=True)
+    frame, _ = build_features(target_symbol, panel, forecast_row=True, hourly=hourly)
     return frame.iloc[[-1]], frame.index[-1]

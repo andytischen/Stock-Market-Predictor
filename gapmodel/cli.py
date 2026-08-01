@@ -8,15 +8,52 @@ from pathlib import Path
 
 import pandas as pd
 
+from .dashboard import build_dashboard, render_html, render_text
 from .data import DEFAULT_CACHE, load_panel
 from .features import build_features
-from .markets import INDICATORS, MARKETS
-from .model import walk_forward
+from .intraday import load_hourly_panel
+from .markets import INDICATORS, MARKETS, MARKETS_BY_SYMBOL, REGIONS
+from .model import MIN_TRAIN, walk_forward
 from .predict import forecast_all, to_frame
+
+# The hourly window is short, so the intraday variant needs a smaller warm-up.
+INTRADAY_MIN_TRAIN = 200
+
+
+def _market_symbol(value: str) -> str:
+    if value not in MARKETS_BY_SYMBOL:
+        known = ", ".join(MARKETS_BY_SYMBOL)
+        raise argparse.ArgumentTypeError(f"unknown market {value!r}; choose from {known}")
+    return value
+
+
+def _positive_float(value: str) -> float:
+    try:
+        number = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a number") from exc
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    return number
+
+
+def _utc_time(value: str) -> float:
+    """``HH:MM`` (UTC) as hours from midnight."""
+    try:
+        moment = pd.Timestamp(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a time of day (use HH:MM)") from exc
+    return moment.hour + moment.minute / 60
 
 
 def _panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     return load_panel(start=args.start, cache_dir=Path(args.cache), refresh=args.refresh)
+
+
+def _hourly(args: argparse.Namespace) -> dict[str, pd.Series] | None:
+    if not getattr(args, "intraday", False):
+        return None
+    return load_hourly_panel(cache_dir=Path(args.cache), refresh=args.refresh)
 
 
 def _cmd_markets(_: argparse.Namespace) -> None:
@@ -29,7 +66,14 @@ def _cmd_markets(_: argparse.Namespace) -> None:
 
 
 def _cmd_predict(args: argparse.Namespace) -> None:
-    forecasts = forecast_all(_panel(args), symbols=args.market, c=args.regularisation)
+    hourly = _hourly(args)
+    forecasts = forecast_all(
+        _panel(args),
+        symbols=args.market,
+        c=args.regularisation,
+        hourly=hourly,
+        min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
+    )
     frame = to_frame(forecasts).sort_values("p_open_up", ascending=False)
     print(frame.to_string(index=False))
     if args.explain:
@@ -44,11 +88,17 @@ def _cmd_predict(args: argparse.Namespace) -> None:
 
 def _cmd_backtest(args: argparse.Namespace) -> None:
     panel = _panel(args)
+    hourly = _hourly(args)
     rows = []
     for symbol in args.market or [m.symbol for m in MARKETS]:
         try:
-            features, labels = build_features(symbol, panel)
-            result = walk_forward(features, labels, c=args.regularisation)
+            features, labels = build_features(symbol, panel, hourly=hourly)
+            result = walk_forward(
+                features,
+                labels,
+                min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
+                c=args.regularisation,
+            )
         except Exception as exc:
             print(f"skipping {symbol}: {exc}")
             continue
@@ -59,6 +109,32 @@ def _cmd_backtest(args: argparse.Namespace) -> None:
     if not rows:
         raise SystemExit("nothing to back-test")
     print("\n" + pd.DataFrame(rows).round(4).to_string(index=False))
+
+
+def _cmd_dashboard(args: argparse.Namespace) -> None:
+    panel = _panel(args)
+    hourly = _hourly(args)
+    symbols = [m.symbol for m in MARKETS if m.region == args.region]
+    forecasts = forecast_all(
+        panel,
+        symbols=symbols,
+        c=args.regularisation,
+        hourly=hourly,
+        min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
+    )
+    board = build_dashboard(panel, forecasts, as_of=_as_of(args.at), region=args.region)
+    print(render_text(board), end="")
+    if args.html:
+        Path(args.html).write_text(render_html(board))
+        print(f"\nwrote {args.html}")
+
+
+def _as_of(hours: float | None) -> pd.Timestamp | None:
+    """Today's date at the given UTC hour, or now when no hour is given."""
+    if hours is None:
+        return None
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    return now.normalize() + pd.Timedelta(hours=hours)
 
 
 def _cmd_fetch(args: argparse.Namespace) -> None:
@@ -73,7 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start", default="2005-01-01", help="first date to download")
     parser.add_argument("--cache", default=str(DEFAULT_CACHE), help="cache directory")
     parser.add_argument("--refresh", action="store_true", help="re-download prices")
-    parser.add_argument("--regularisation", type=float, default=0.1, help="logistic C")
+    parser.add_argument("--regularisation", type=_positive_float, default=0.1, help="logistic C")
     parser.add_argument("--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -84,15 +160,44 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.set_defaults(func=_cmd_fetch)
 
     predict = sub.add_parser("predict", help="probability that the next open is up")
-    predict.add_argument("--market", action="append", help="restrict to a symbol")
+    predict.add_argument(
+        "--market", action="append", type=_market_symbol, help="restrict to a symbol"
+    )
     predict.add_argument("--explain", action="store_true", help="show top drivers")
     predict.add_argument("--csv", help="also write the table to this path")
+    predict.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
     predict.set_defaults(func=_cmd_predict)
 
     backtest = sub.add_parser("backtest", help="walk-forward out-of-sample metrics")
-    backtest.add_argument("--market", action="append", help="restrict to a symbol")
+    backtest.add_argument(
+        "--market", action="append", type=_market_symbol, help="restrict to a symbol"
+    )
     backtest.add_argument("--reliability", action="store_true", help="calibration table")
+    backtest.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
     backtest.set_defaults(func=_cmd_backtest)
+
+    dashboard = sub.add_parser(
+        "dashboard", help="crude readings next to one region's session state and open calls"
+    )
+    dashboard.add_argument("--region", choices=REGIONS, default="Asia")
+    dashboard.add_argument(
+        "--at", type=_utc_time, help="UTC time of day to render for, e.g. 05:00 (default: now)"
+    )
+    dashboard.add_argument("--html", help="also write an HTML dashboard here")
+    dashboard.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
+    dashboard.set_defaults(func=_cmd_dashboard)
 
     return parser
 
@@ -103,7 +208,12 @@ def main(argv: list[str] | None = None) -> None:
         level=logging.INFO if args.verbose else logging.WARNING,
         format="%(levelname)s %(message)s",
     )
-    args.func(args)
+    try:
+        args.func(args)
+    except (RuntimeError, ValueError, KeyError, OSError) as exc:
+        # A failed run is an expected outcome (no data, too little history, an
+        # unwritable cache): report it as an error, not as a crash.
+        raise SystemExit(f"error: {exc}") from exc
 
 
 if __name__ == "__main__":

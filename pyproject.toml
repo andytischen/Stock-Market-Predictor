@@ -16,9 +16,10 @@ dependencies = [
 
 [project.scripts]
 gapmodel = "gapmodel.cli:main"
+pm = "pm.cli:main"
 
 [tool.setuptools]
-packages = ["gapmodel"]
+packages = ["gapmodel", "pm"]
 
 [tool.ruff]
 line-length = 100

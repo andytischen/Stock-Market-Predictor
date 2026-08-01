@@ -1,0 +1,202 @@
+{
+  "name": "Stock-Market-Predictor",
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Model 16 global indices with per-market logistic models",
+      "status": "done",
+      "owner": "",
+      "due": "",
+      "resources": [],
+      "notes": [
+        "2026-08-01: 16 indices across Asia, Europe and the Americas, each with its own fitted model."
+      ],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 2,
+      "title": "Walk-forward backtest with reliability tables",
+      "status": "done",
+      "owner": "",
+      "due": "",
+      "resources": [],
+      "notes": [
+        "2026-08-01: Expanding-window refits; AUC, Brier skill and calibration reported per market."
+      ],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 3,
+      "title": "Pre-open futures features from hourly bars (--intraday)",
+      "status": "done",
+      "owner": "",
+      "due": "",
+      "resources": [],
+      "notes": [
+        "2026-08-01: Merged in #4; limited to the ~2 years of hourly history Yahoo serves."
+      ],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 4,
+      "title": "Brent and oil shock features as a geopolitical risk read",
+      "status": "done",
+      "owner": "",
+      "due": "",
+      "resources": [],
+      "notes": [
+        "2026-08-01: Merged in #6."
+      ],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 5,
+      "title": "Project tracker (pm) for status updates and resource requests",
+      "status": "done",
+      "owner": "",
+      "due": "",
+      "resources": [],
+      "notes": [
+        "2026-08-01: Merged in #7."
+      ],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 6,
+      "title": "Replace stale Yahoo opening prints with real auction data",
+      "status": "blocked",
+      "owner": "",
+      "due": "",
+      "resources": [
+        "Paid exchange opening-auction data (FTSE, ASX, Bovespa)"
+      ],
+      "notes": [
+        "2026-08-01: Tracker proxies (ISF.L, STW.AX) patch the worst cases; Bovespa still drops a quarter of its sessions as unlabelled."
+      ],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 7,
+      "title": "Extend the intraday window beyond ~2 years",
+      "status": "blocked",
+      "owner": "",
+      "due": "",
+      "resources": [
+        "Intraday futures history vendor (Databento or similar)"
+      ],
+      "notes": [
+        "2026-08-01: Yahoo caps hourly history at ~730 days, so the intraday model warms up on 200 rows instead of the usual minimum."
+      ],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 8,
+      "title": "Nightly scheduled run publishing predictions",
+      "status": "doing",
+      "owner": "",
+      "due": "",
+      "resources": [
+        "Somewhere to run the job on a schedule (GitHub Actions minutes are enough)"
+      ],
+      "notes": [
+        "2026-08-01: Needs the cache to survive between runs so a failed download does not void the day."
+      ],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 9,
+      "title": "Benchmark gradient boosting against the logistic baseline",
+      "status": "doing",
+      "owner": "",
+      "due": "",
+      "resources": [
+        "A machine that can sit on a multi-hour hyperparameter search"
+      ],
+      "notes": [
+        "2026-08-01: Only worth keeping if it beats the linear model out of sample on Brier skill, not just AUC."
+      ],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 10,
+      "title": "Add Middle East and Indian indices (TASI, TA-35, NIFTY 50)",
+      "status": "todo",
+      "owner": "",
+      "due": "",
+      "resources": [],
+      "notes": [],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 11,
+      "title": "Confidence intervals on the reported probabilities",
+      "status": "todo",
+      "owner": "",
+      "due": "",
+      "resources": [],
+      "notes": [],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 12,
+      "title": "Track live forecasts against realised opens to measure real-world skill",
+      "status": "todo",
+      "owner": "",
+      "due": "",
+      "resources": [
+        "A small database or object store for the daily forecast log"
+      ],
+      "notes": [],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 13,
+      "title": "Alert when a market's out-of-sample skill decays below its base rate",
+      "status": "todo",
+      "owner": "",
+      "due": "",
+      "resources": [],
+      "notes": [],
+      "created_at": "2026-08-01T11:31:58+00:00",
+      "updated_at": "2026-08-01T11:31:58+00:00"
+    },
+    {
+      "id": 14,
+      "title": "Oil-versus-Asia dashboard (gapmodel dashboard)",
+      "status": "done",
+      "owner": "",
+      "due": "",
+      "resources": [],
+      "notes": [
+        "2026-08-01: Merged in #9; crude readings, session state and the oil log-odds behind each open call."
+      ],
+      "created_at": "2026-08-01T12:23:23+00:00",
+      "updated_at": "2026-08-01T12:23:23+00:00"
+    },
+    {
+      "id": 15,
+      "title": "Status deck generated from the board (pm deck)",
+      "status": "done",
+      "owner": "",
+      "due": "",
+      "resources": [],
+      "notes": [
+        "2026-08-01: docs/status-deck.html, regenerate with python -m pm deck."
+      ],
+      "created_at": "2026-08-01T12:23:23+00:00",
+      "updated_at": "2026-08-01T12:23:23+00:00"
+    }
+  ]
+}
