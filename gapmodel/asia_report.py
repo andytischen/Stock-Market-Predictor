@@ -93,6 +93,12 @@ def _text_table(frame: pd.DataFrame, columns: tuple[tuple[str, str], ...]) -> st
     return view.to_string(index=False, float_format=lambda v: f"{v:.2f}")
 
 
+CONTRIBUTION_NOTE = (
+    "Index bp is weight times the full-precision return, so multiplying the two "
+    "rounded columns by hand differs by a few hundredths of a basis point."
+)
+
+
 def _source_note(snapshot: IndexSnapshot) -> str:
     if snapshot.source == snapshot.profile.symbol:
         return ""
@@ -120,6 +126,7 @@ def render_asia_text(dashboard: AsiaDashboard) -> str:
         lines.append("")
         lines.append("  Dominant companies")
         lines.append(_text_table(snapshot.constituents, CONSTITUENT_COLUMNS))
+        lines.append(f"  {CONTRIBUTION_NOTE}")
         lines.append("")
         lines.append("  Outside drivers (known before this index opened)")
         lines.append(_text_table(snapshot.drivers, DRIVER_COLUMNS))
@@ -180,6 +187,7 @@ session {snapshot.session:%Y-%m-%d}</small></h2>
 <div class="cards">{cards}</div>
 <h3>Dominant companies</h3>
 {_html_table(snapshot.constituents, CONSTITUENT_COLUMNS)}
+<p class="note">{escape(CONTRIBUTION_NOTE)}</p>
 <h3>Outside drivers known before the open</h3>
 {_html_table(snapshot.drivers, DRIVER_COLUMNS)}
 <h3>Explained variance by theme</h3>

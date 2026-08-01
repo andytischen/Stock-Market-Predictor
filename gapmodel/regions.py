@@ -204,6 +204,8 @@ EURO_STOXX = IndexProfile(
         Constituent("SU.PA", "Schneider Electric", 3.0, "Industrials"),
         Constituent("AIR.PA", "Airbus", 2.8, "Aerospace"),
         Constituent("ALV.DE", "Allianz", 2.7, "Insurance"),
+        Constituent("SAN.PA", "Sanofi", 2.5, "Healthcare"),
+        Constituent("IBE.MC", "Iberdrola", 2.3, "Utilities"),
     ),
 )
 
@@ -223,6 +225,8 @@ DAX = IndexProfile(
         Constituent("RHM.DE", "Rheinmetall", 4.0, "Defence"),
         Constituent("IFX.DE", "Infineon", 3.5, "Semiconductors"),
         Constituent("BAS.DE", "BASF", 2.5, "Chemicals"),
+        Constituent("DB1.DE", "Deutsche Boerse", 2.5, "Exchanges"),
+        Constituent("ADS.DE", "Adidas", 2.0, "Consumer"),
     ),
 )
 
@@ -242,6 +246,8 @@ FTSE = IndexProfile(
         Constituent("RIO.L", "Rio Tinto", 3.0, "Materials"),
         Constituent("GSK.L", "GSK", 3.0, "Healthcare"),
         Constituent("REL.L", "RELX", 3.0, "Media"),
+        Constituent("BATS.L", "British American Tobacco", 3.0, "Consumer"),
+        Constituent("DGE.L", "Diageo", 2.0, "Consumer"),
     ),
 )
 
