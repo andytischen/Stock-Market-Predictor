@@ -40,12 +40,17 @@ def load_symbol(
 ) -> pd.DataFrame:
     """Return daily bars for ``symbol``, using an on-disk CSV cache."""
     path = _cache_path(cache_dir, symbol)
+    frame = None
     if path.exists() and not refresh:
-        return pd.read_csv(path, index_col=0, parse_dates=True)
-    frame = _download(symbol, start)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    frame.to_csv(path)
-    return frame
+        cached = pd.read_csv(path, index_col=0, parse_dates=True)
+        # Only reuse the cache when it reaches back at least as far as asked.
+        if not cached.empty and cached.index.min() <= pd.Timestamp(start):
+            frame = cached
+    if frame is None:
+        frame = _download(symbol, start)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(path)
+    return frame.loc[frame.index >= pd.Timestamp(start)]
 
 
 def load_panel(
@@ -55,6 +60,8 @@ def load_panel(
     refresh: bool = False,
 ) -> dict[str, pd.DataFrame]:
     """Load every requested symbol, skipping the ones Yahoo cannot serve."""
+    # Fail before downloading anything if the cache is not usable.
+    cache_dir.mkdir(parents=True, exist_ok=True)
     panel: dict[str, pd.DataFrame] = {}
     for symbol in symbols or all_symbols():
         try:

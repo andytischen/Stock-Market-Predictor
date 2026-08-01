@@ -10,9 +10,26 @@ import pandas as pd
 
 from .data import DEFAULT_CACHE, load_panel
 from .features import build_features
-from .markets import INDICATORS, MARKETS
+from .markets import INDICATORS, MARKETS, MARKETS_BY_SYMBOL
 from .model import walk_forward
 from .predict import forecast_all, to_frame
+
+
+def _market_symbol(value: str) -> str:
+    if value not in MARKETS_BY_SYMBOL:
+        known = ", ".join(MARKETS_BY_SYMBOL)
+        raise argparse.ArgumentTypeError(f"unknown market {value!r}; choose from {known}")
+    return value
+
+
+def _positive_float(value: str) -> float:
+    try:
+        number = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a number") from exc
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    return number
 
 
 def _panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
@@ -73,7 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start", default="2005-01-01", help="first date to download")
     parser.add_argument("--cache", default=str(DEFAULT_CACHE), help="cache directory")
     parser.add_argument("--refresh", action="store_true", help="re-download prices")
-    parser.add_argument("--regularisation", type=float, default=0.1, help="logistic C")
+    parser.add_argument("--regularisation", type=_positive_float, default=0.1, help="logistic C")
     parser.add_argument("--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -84,13 +101,17 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.set_defaults(func=_cmd_fetch)
 
     predict = sub.add_parser("predict", help="probability that the next open is up")
-    predict.add_argument("--market", action="append", help="restrict to a symbol")
+    predict.add_argument(
+        "--market", action="append", type=_market_symbol, help="restrict to a symbol"
+    )
     predict.add_argument("--explain", action="store_true", help="show top drivers")
     predict.add_argument("--csv", help="also write the table to this path")
     predict.set_defaults(func=_cmd_predict)
 
     backtest = sub.add_parser("backtest", help="walk-forward out-of-sample metrics")
-    backtest.add_argument("--market", action="append", help="restrict to a symbol")
+    backtest.add_argument(
+        "--market", action="append", type=_market_symbol, help="restrict to a symbol"
+    )
     backtest.add_argument("--reliability", action="store_true", help="calibration table")
     backtest.set_defaults(func=_cmd_backtest)
 
@@ -103,7 +124,12 @@ def main(argv: list[str] | None = None) -> None:
         level=logging.INFO if args.verbose else logging.WARNING,
         format="%(levelname)s %(message)s",
     )
-    args.func(args)
+    try:
+        args.func(args)
+    except (RuntimeError, ValueError, KeyError, OSError) as exc:
+        # A failed run is an expected outcome (no data, too little history, an
+        # unwritable cache): report it as an error, not as a crash.
+        raise SystemExit(f"error: {exc}") from exc
 
 
 if __name__ == "__main__":
