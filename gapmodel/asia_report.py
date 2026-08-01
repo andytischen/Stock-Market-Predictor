@@ -6,7 +6,7 @@ from html import escape
 
 import pandas as pd
 
-from .dashboard import DATA_GAPS, Dashboard, IndexSnapshot
+from .asia import DATA_GAPS, AsiaDashboard, IndexSnapshot
 
 CONSTITUENT_COLUMNS = (
     ("name", "Company"),
@@ -102,7 +102,7 @@ def _source_note(snapshot: IndexSnapshot) -> str:
     )
 
 
-def render_text(dashboard: Dashboard) -> str:
+def render_asia_text(dashboard: AsiaDashboard) -> str:
     lines = [
         f"Asia session dashboard — {dashboard.generated:%Y-%m-%d %H:%M UTC}",
         "=" * 72,
@@ -187,7 +187,7 @@ session {snapshot.session:%Y-%m-%d}</small></h2>
 """
 
 
-def render_html(dashboard: Dashboard) -> str:
+def render_asia_html(dashboard: AsiaDashboard) -> str:
     gaps = "".join(
         f"<tr><td>{escape(topic)}</td><td>{escape(feed)}</td></tr>" for topic, feed in DATA_GAPS
     )

@@ -97,6 +97,9 @@ OIL_SYMBOLS: frozenset[str] = frozenset({"CL=F", "BZ=F"})
 
 MARKETS_BY_SYMBOL = {m.symbol: m for m in MARKETS}
 
+# Regions in the order their sessions run through the day.
+REGIONS: tuple[str, ...] = tuple(dict.fromkeys(m.region for m in MARKETS))
+
 
 def lag_days(source_close_utc: float, target_open_utc: float) -> int:
     """0 if the source bar closes before the target opens, otherwise 1."""

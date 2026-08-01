@@ -1,12 +1,12 @@
 # What moves the Asian session
 
-Read of the dashboard produced by `python -m gapmodel dashboard`, run on
+Read of the dashboard produced by `python -m gapmodel asia`, run on
 2026-08-01 over the 500 sessions ending 2026-07-31. Numbers move with every
 run; regenerate before quoting them.
 
 ```bash
-python -m gapmodel dashboard --out asia-dashboard.html   # standalone HTML page
-python -m gapmodel dashboard                             # same content as text
+python -m gapmodel asia --out asia-dashboard.html   # standalone HTML page
+python -m gapmodel asia                             # same content as text
 ```
 
 ## The indices, and who is inside them

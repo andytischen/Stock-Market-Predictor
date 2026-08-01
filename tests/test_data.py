@@ -48,3 +48,18 @@ def test_refresh_forces_a_download(tmp_path, counting_download):
     data.load_symbol("^GSPC", "2005-01-01", tmp_path)
     data.load_symbol("^GSPC", "2005-01-01", tmp_path, refresh=True)
     assert len(counting_download) == 2
+
+
+def test_cache_written_before_a_field_was_collected_is_refreshed(tmp_path, counting_download):
+    data.load_symbol("^GSPC", "2005-01-01", tmp_path)
+    data._cache_path(tmp_path, "^GSPC").with_suffix(".fields").write_text("Open,High,Low,Close")
+    data.load_symbol("^GSPC", "2005-01-01", tmp_path, require=("Volume",))
+    assert len(counting_download) == 2
+
+
+def test_a_field_yahoo_never_serves_does_not_re_download(tmp_path, counting_download):
+    # The frame comes back without a Volume column; the cache still records
+    # that volume was asked for, so the next run must be served from disk.
+    data.load_symbol("^GSPC", "2005-01-01", tmp_path, require=("Volume",))
+    data.load_symbol("^GSPC", "2005-01-01", tmp_path, require=("Volume",))
+    assert len(counting_download) == 1

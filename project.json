@@ -137,7 +137,7 @@
         "2026-08-01: CSI 300 (000300.SS) and Tadawul (^TASI.SR) print only in patches on Yahoo; the dashboard falls back to the Shanghai Composite for China."
       ],
       "created_at": "2026-08-01T11:31:58+00:00",
-      "updated_at": "2026-08-01T13:06:05+00:00"
+      "updated_at": "2026-08-01T11:31:58+00:00"
     },
     {
       "id": 11,
@@ -176,6 +176,32 @@
     },
     {
       "id": 14,
+      "title": "Oil-versus-Asia dashboard (gapmodel dashboard)",
+      "status": "done",
+      "owner": "",
+      "due": "",
+      "resources": [],
+      "notes": [
+        "2026-08-01: Merged in #9; crude readings, session state and the oil log-odds behind each open call."
+      ],
+      "created_at": "2026-08-01T12:23:23+00:00",
+      "updated_at": "2026-08-01T12:23:23+00:00"
+    },
+    {
+      "id": 15,
+      "title": "Status deck generated from the board (pm deck)",
+      "status": "done",
+      "owner": "",
+      "due": "",
+      "resources": [],
+      "notes": [
+        "2026-08-01: docs/status-deck.html, regenerate with python -m pm deck."
+      ],
+      "created_at": "2026-08-01T12:23:23+00:00",
+      "updated_at": "2026-08-01T12:23:23+00:00"
+    },
+    {
+      "id": 16,
       "title": "Asia session dashboard: heavyweights, volumes and outside drivers",
       "status": "done",
       "owner": "devin",
@@ -188,7 +214,7 @@
       "updated_at": "2026-08-01T13:06:04+00:00"
     },
     {
-      "id": 15,
+      "id": 17,
       "title": "Participation and leverage data for the Asian dashboard",
       "status": "todo",
       "owner": "devin",
@@ -202,7 +228,7 @@
       "updated_at": "2026-08-01T13:06:04+00:00"
     },
     {
-      "id": 16,
+      "id": 18,
       "title": "Licensed index weights and free float for constituent attribution",
       "status": "todo",
       "owner": "devin",
@@ -215,7 +241,7 @@
       "updated_at": "2026-08-01T13:06:05+00:00"
     },
     {
-      "id": 17,
+      "id": 19,
       "title": "Timestamped news and sentiment feed as a dashboard variable",
       "status": "todo",
       "owner": "",

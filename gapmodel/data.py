@@ -37,6 +37,18 @@ def _cached_start(path: Path) -> pd.Timestamp | None:
         return None
 
 
+def _cached_fields(path: Path) -> frozenset[str] | None:
+    """Fields asked of Yahoo when the cache was written, or None if unknown.
+
+    What matters is what was *requested*, not what came back: a ticker Yahoo
+    serves no volume for would otherwise be re-downloaded on every run.
+    """
+    meta = path.with_suffix(".fields")
+    if not meta.exists():
+        return None
+    return frozenset(field for field in meta.read_text().split(",") if field)
+
+
 def _download(symbol: str, start: str) -> pd.DataFrame:
     raw = yf.download(symbol, start=start, interval="1d", auto_adjust=False, progress=False)
     if raw is None or raw.empty:
@@ -57,9 +69,10 @@ def load_symbol(
 ) -> pd.DataFrame:
     """Return daily bars for ``symbol``, using an on-disk CSV cache.
 
-    ``require`` names columns the caller cannot do without; a cached file
-    written before those columns were collected is re-downloaded rather than
-    served with them missing.
+    ``require`` names columns the caller cannot do without; a cache written
+    before those columns were collected at all is re-downloaded rather than
+    served with them missing. A column Yahoo simply does not publish for a
+    symbol stays absent, and the cache is still used.
     """
     path = _cache_path(cache_dir, symbol)
     requested = pd.Timestamp(start)
@@ -67,14 +80,17 @@ def load_symbol(
     if path.exists() and not refresh:
         covered = _cached_start(path)
         if covered is not None and covered <= requested:
-            frame = pd.read_csv(path, index_col=0, parse_dates=True)
-            if any(column not in frame.columns for column in require):
+            collected = _cached_fields(path)
+            if require and (collected is None or any(c not in collected for c in require)):
                 frame = None
+            else:
+                frame = pd.read_csv(path, index_col=0, parse_dates=True)
     if frame is None:
         frame = _download(symbol, start)
         cache_dir.mkdir(parents=True, exist_ok=True)
         frame.to_csv(path)
         path.with_suffix(".start").write_text(requested.date().isoformat())
+        path.with_suffix(".fields").write_text(",".join(FIELDS))
     return frame.loc[frame.index >= requested]
 
 
