@@ -1,6 +1,6 @@
 # Stock-Market-Predictor — status update 2026-08-01
 
-Progress: 5/13 tasks complete (38%).
+Progress: 6/17 tasks complete (35%).
 2 task(s) blocked.
 
 ## Completed
@@ -15,6 +15,8 @@ Progress: 5/13 tasks complete (38%).
   - 2026-08-01: Merged in #6.
 - **Project tracker (pm) for status updates and resource requests** (#5)
   - 2026-08-01: Merged in #7.
+- **Asia session dashboard: heavyweights, volumes and outside drivers** (#14) — devin
+  - 2026-08-01: Covers Nikkei 225, KOSPI, CSI 300, Hang Seng and STI plus the European indices behind the Asian afternoon; India, Middle East and Europe enter as lagged driver regressions.
 
 ## In progress
 
@@ -33,14 +35,22 @@ Progress: 5/13 tasks complete (38%).
 ## Up next
 
 - **Add Middle East and Indian indices (TASI, TA-35, NIFTY 50)** (#10)
+  - 2026-08-01: CSI 300 (000300.SS) and Tadawul (^TASI.SR) print only in patches on Yahoo; the dashboard falls back to the Shanghai Composite for China.
 - **Confidence intervals on the reported probabilities** (#11)
 - **Track live forecasts against realised opens to measure real-world skill** (#12)
 - **Alert when a market's out-of-sample skill decays below its base rate** (#13)
+- **Participation and leverage data for the Asian dashboard** (#15) — devin
+- **Licensed index weights and free float for constituent attribution** (#16) — devin
+- **Timestamped news and sentiment feed as a dashboard variable** (#17)
 
 ## Resources needed
 
 - **A machine that can sit on a multi-hour hyperparameter search** — needed for #9
 - **A small database or object store for the daily forecast log** — needed for #12
+- **Exchange margin balance and short-interest statistics (TSE, KRX, SSE, HKEX)** — needed for #15
+- **Index provider licence (Nikkei, KRX, CSI, HSI, SGX) for live weights** — needed for #16
 - **Intraday futures history vendor (Databento or similar)** — needed for #7
+- **Level 2 / TAQ order book feed for depth and spreads** — needed for #15
+- **Newswire feed with timestamps (Reuters or Bloomberg)** — needed for #17
 - **Paid exchange opening-auction data (FTSE, ASX, Bovespa)** — needed for #6
 - **Somewhere to run the job on a schedule (GitHub Actions minutes are enough)** — needed for #8

@@ -8,12 +8,15 @@ from pathlib import Path
 
 import pandas as pd
 
+from .dashboard import ACTIVITY_WINDOW, REGRESSION_WINDOW, build_dashboard
 from .data import DEFAULT_CACHE, load_panel
 from .features import build_features
 from .intraday import load_hourly_panel
 from .markets import INDICATORS, MARKETS, MARKETS_BY_SYMBOL
 from .model import MIN_TRAIN, walk_forward
 from .predict import forecast_all, to_frame
+from .regions import dashboard_symbols
+from .report import render_html, render_text
 
 # The hourly window is short, so the intraday variant needs a smaller warm-up.
 INTRADAY_MIN_TRAIN = 200
@@ -101,6 +104,24 @@ def _cmd_backtest(args: argparse.Namespace) -> None:
     print("\n" + pd.DataFrame(rows).round(4).to_string(index=False))
 
 
+def _cmd_dashboard(args: argparse.Namespace) -> None:
+    # Volume drives the turnover and participation columns, so a cache written
+    # before it was collected is re-downloaded rather than shown as blank.
+    panel = load_panel(
+        symbols=dashboard_symbols(),
+        start=args.start,
+        cache_dir=Path(args.cache),
+        refresh=args.refresh,
+        require=("Volume",),
+    )
+    dashboard = build_dashboard(panel, window=args.window, regression_window=args.regression_window)
+    if args.out:
+        Path(args.out).write_text(render_html(dashboard), encoding="utf-8")
+        print(f"wrote {args.out}")
+    if args.out is None or args.text:
+        print(render_text(dashboard))
+
+
 def _cmd_fetch(args: argparse.Namespace) -> None:
     panel = _panel(args)
     for symbol, frame in panel.items():
@@ -147,6 +168,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     backtest.set_defaults(func=_cmd_backtest)
+
+    dashboard = sub.add_parser(
+        "dashboard", help="evaluate the Asian session: heavyweights and outside drivers"
+    )
+    dashboard.add_argument("--out", help="write a standalone HTML page to this path")
+    dashboard.add_argument("--text", action="store_true", help="also print the text version")
+    dashboard.add_argument(
+        "--window", type=int, default=ACTIVITY_WINDOW, help="sessions for betas and volume averages"
+    )
+    dashboard.add_argument(
+        "--regression-window",
+        type=int,
+        default=REGRESSION_WINDOW,
+        help="sessions used for the driver regressions",
+    )
+    dashboard.set_defaults(func=_cmd_dashboard)
 
     return parser
 

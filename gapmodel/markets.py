@@ -98,6 +98,11 @@ OIL_SYMBOLS: frozenset[str] = frozenset({"CL=F", "BZ=F"})
 MARKETS_BY_SYMBOL = {m.symbol: m for m in MARKETS}
 
 
+def lag_days(source_close_utc: float, target_open_utc: float) -> int:
+    """0 if the source bar closes before the target opens, otherwise 1."""
+    return 0 if source_close_utc < target_open_utc else 1
+
+
 def market(symbol: str) -> Market:
     try:
         return MARKETS_BY_SYMBOL[symbol]

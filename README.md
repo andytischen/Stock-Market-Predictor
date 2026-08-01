@@ -132,6 +132,39 @@ as a down open. A series with more than half stale opens is refused outright.
 Bovespa is the worst of the included markets (a quarter of its opening prints
 repeat the previous close), which is part of why it scores lowest.
 
+## Asia session dashboard
+
+`dashboard` is the layer below the probability model: instead of scoring an
+index as a whole it asks who inside it moved, on what participation, and which
+outside market it was following.
+
+```bash
+python -m gapmodel dashboard --out asia-dashboard.html   # standalone HTML page
+python -m gapmodel dashboard                             # the same, as text
+```
+
+It covers the headline index of each major Asian market — Nikkei 225, KOSPI,
+CSI 300, Hang Seng and the Straits Times — plus Euro Stoxx 50, the DAX and the
+FTSE 100 behind them, and for each one reports:
+
+- **Index activity**: opening gap, 1/5/20-day return, 20-day realised
+  volatility, and session volume against its own 60-day average.
+- **Dominant companies**: the ten heavyweights, their weight, their
+  contribution to the index move in basis points (weight × move), their beta to
+  the index, their volume against average and their share of traded value.
+- **Outside drivers**: univariate regressions (beta, t, R², implied basis
+  points) of the index return on India, the Middle East, European futures and
+  Wall Street, plus the joint R² of each theme.
+
+Every driver is lagged by the same UTC session rule the gap model uses, so a
+market that closes after the index opens is only read from the previous day.
+
+[docs/asia-session-analysis.md](docs/asia-session-analysis.md) reads a run of
+it: what dominates each index, whether India matters (mostly as a co-mover),
+how Middle East risk enters, and what the free data cannot show — order book
+depth, margin and short interest, investor-type breakdowns and licensed index
+weights are all listed on the page as gaps rather than approximated.
+
 ## Project tracker
 
 `pm` is a small task board kept in a JSON file next to the code, used to track

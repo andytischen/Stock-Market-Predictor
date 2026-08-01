@@ -13,7 +13,7 @@ from .markets import all_symbols
 log = logging.getLogger(__name__)
 
 DEFAULT_CACHE = Path.home() / ".cache" / "gapmodel"
-FIELDS = ("Open", "High", "Low", "Close")
+FIELDS = ("Open", "High", "Low", "Close", "Volume")
 
 
 def _cache_path(cache_dir: Path, symbol: str) -> Path:
@@ -53,8 +53,14 @@ def load_symbol(
     start: str = "2005-01-01",
     cache_dir: Path = DEFAULT_CACHE,
     refresh: bool = False,
+    require: tuple[str, ...] = (),
 ) -> pd.DataFrame:
-    """Return daily bars for ``symbol``, using an on-disk CSV cache."""
+    """Return daily bars for ``symbol``, using an on-disk CSV cache.
+
+    ``require`` names columns the caller cannot do without; a cached file
+    written before those columns were collected is re-downloaded rather than
+    served with them missing.
+    """
     path = _cache_path(cache_dir, symbol)
     requested = pd.Timestamp(start)
     frame = None
@@ -62,6 +68,8 @@ def load_symbol(
         covered = _cached_start(path)
         if covered is not None and covered <= requested:
             frame = pd.read_csv(path, index_col=0, parse_dates=True)
+            if any(column not in frame.columns for column in require):
+                frame = None
     if frame is None:
         frame = _download(symbol, start)
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -75,6 +83,7 @@ def load_panel(
     start: str = "2005-01-01",
     cache_dir: Path = DEFAULT_CACHE,
     refresh: bool = False,
+    require: tuple[str, ...] = (),
 ) -> dict[str, pd.DataFrame]:
     """Load every requested symbol, skipping the ones Yahoo cannot serve."""
     # Fail before downloading anything if the cache is not usable.
@@ -82,7 +91,7 @@ def load_panel(
     panel: dict[str, pd.DataFrame] = {}
     for symbol in symbols or all_symbols():
         try:
-            panel[symbol] = load_symbol(symbol, start, cache_dir, refresh)
+            panel[symbol] = load_symbol(symbol, start, cache_dir, refresh, require)
         except Exception as exc:  # a single dead ticker must not kill a run
             log.warning("skipping %s: %s", symbol, exc)
     if not panel:

@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gapmodel.features import _as_of, _lag_days, build_features, opening_gap
+from gapmodel.features import _lag_days, as_of, build_features, opening_gap
 from gapmodel.markets import market
 from gapmodel.model import walk_forward
 
@@ -51,8 +51,8 @@ def test_lag_days_respects_session_order():
 def test_as_of_never_reads_the_future():
     dates = pd.bdate_range("2020-01-01", periods=5)
     source = pd.Series(range(5), index=dates, dtype=float)
-    same_day = _as_of(source, dates, lag_days=0)
-    previous = _as_of(source, dates, lag_days=1)
+    same_day = as_of(source, dates, lag_days=0)
+    previous = as_of(source, dates, lag_days=1)
     assert list(same_day) == [0, 1, 2, 3, 4]
     assert previous.iloc[-1] == 3  # yesterday's value, not today's
 
