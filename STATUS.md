@@ -1,6 +1,6 @@
 # Stock-Market-Predictor — status update 2026-08-01
 
-Progress: 5/13 tasks complete (38%).
+Progress: 7/15 tasks complete (47%).
 2 task(s) blocked.
 
 ## Completed
@@ -15,6 +15,10 @@ Progress: 5/13 tasks complete (38%).
   - 2026-08-01: Merged in #6.
 - **Project tracker (pm) for status updates and resource requests** (#5)
   - 2026-08-01: Merged in #7.
+- **Oil-versus-Asia dashboard (gapmodel dashboard)** (#14)
+  - 2026-08-01: Merged in #9; crude readings, session state and the oil log-odds behind each open call.
+- **Status deck generated from the board (pm deck)** (#15)
+  - 2026-08-01: docs/status-deck.html, regenerate with python -m pm deck.
 
 ## In progress
 
