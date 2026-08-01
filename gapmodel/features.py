@@ -35,6 +35,14 @@ def _as_of(source: pd.Series, dates: pd.DatetimeIndex, lag_days: int) -> pd.Seri
     return pd.Series(source.reindex(calendar).ffill().reindex(cut).to_numpy(), index=dates)
 
 
+def _column_name(symbol: str) -> str:
+    """Symbol turned into a feature-name fragment."""
+    cleaned = symbol.lstrip("^")
+    for character in "=-.":
+        cleaned = cleaned.replace(character, "_")
+    return cleaned.lower()
+
+
 def _lag_days(source_close_utc: float, target: Market) -> int:
     """0 if the source bar closes before the target opens, otherwise 1."""
     return 0 if source_close_utc < target.open_utc else 1
@@ -84,7 +92,7 @@ def build_features(
             continue
         close = panel[other.symbol]["Close"].dropna()
         lag = _lag_days(other.close_utc, target)
-        name = other.symbol.lstrip("^").lower()
+        name = _column_name(other.symbol)
         features[f"mkt_{name}_return"] = _as_of(log_return(close), dates, lag)
         features[f"mkt_{name}_return_5"] = _as_of(log_return(close, 5), dates, lag)
 
@@ -93,13 +101,7 @@ def build_features(
             continue
         close = panel[indicator.symbol]["Close"].dropna()
         lag = _lag_days(indicator.close_utc, target)
-        name = (
-            indicator.symbol.lstrip("^")
-            .replace("=", "_")
-            .replace("-", "_")
-            .replace(".", "_")
-            .lower()
-        )
+        name = _column_name(indicator.symbol)
         features[f"ind_{name}_return"] = _as_of(log_return(close), dates, lag)
         if indicator.symbol == "^VIX":
             features["ind_vix_level"] = _as_of(close, dates, lag)

@@ -85,3 +85,18 @@ def test_walk_forward_is_out_of_sample_and_calibratable(panel):
 def test_unknown_market_raises():
     with pytest.raises(KeyError):
         market("^NOPE")
+
+
+def test_calibration_pulls_overconfident_probabilities_back():
+    from gapmodel.model import Backtest, calibrator
+
+    index = pd.date_range("2020-01-01", periods=400, freq="B")
+    rng = np.random.default_rng(0)
+    # Out of sample the model never went past 0.8 and was right 70% of the time.
+    probabilities = pd.Series(rng.uniform(0.2, 0.8, len(index)), index=index)
+    outcomes = pd.Series(rng.binomial(1, probabilities), index=index)
+
+    calibrate = calibrator(Backtest(probabilities=probabilities, outcomes=outcomes))
+    assert calibrate(np.array([0.9999]))[0] < 0.9
+    # Probabilities inside the earned range are left broadly alone.
+    assert abs(calibrate(np.array([0.6]))[0] - 0.6) < 0.1
