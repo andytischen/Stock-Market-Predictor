@@ -94,6 +94,46 @@ def walk_forward(
     )
 
 
+@dataclass(frozen=True)
+class Calibration:
+    """Maps a raw probability onto the confidence the model has actually earned.
+
+    The final model is fitted on every row it will ever see, so on a wide,
+    collinear feature set it nearly separates its own training data and reports
+    things like 0.9999 — a certainty the walk-forward record flatly
+    contradicts. Two corrections, both derived from that record: the log-odds
+    are clipped to the range the model ever reached out of sample, then Platt
+    scaling maps them onto the frequencies actually realised there.
+    """
+
+    slope: float
+    intercept: float
+    lo: float
+    hi: float
+
+    def __call__(self, probabilities: np.ndarray) -> np.ndarray:
+        logit = np.clip(_logit(np.asarray(probabilities, dtype=float)), self.lo, self.hi)
+        return 1.0 / (1.0 + np.exp(-(self.slope * logit + self.intercept)))
+
+
+def calibrator(backtest: Backtest) -> Calibration:
+    logit = _logit(backtest.probabilities.to_numpy())
+    platt = LogisticRegression(C=1.0, solver="lbfgs").fit(
+        logit.reshape(-1, 1), backtest.outcomes.to_numpy()
+    )
+    return Calibration(
+        slope=float(platt.coef_[0, 0]),
+        intercept=float(platt.intercept_[0]),
+        lo=float(logit.min()),
+        hi=float(logit.max()),
+    )
+
+
+def _logit(p: np.ndarray) -> np.ndarray:
+    clipped = np.clip(p, 1e-12, 1 - 1e-12)
+    return np.log(clipped / (1 - clipped))
+
+
 def fit(features: pd.DataFrame, labels: pd.Series, c: float = 0.1) -> Pipeline:
     labelled = labels.notna()
     return make_pipeline(c).fit(
