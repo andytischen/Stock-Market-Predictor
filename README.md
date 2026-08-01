@@ -13,6 +13,10 @@ USD/JPY, EUR/USD, GBP/USD, WTI and Brent crude, gold, silver, copper, S&P 500
 and Nasdaq futures). Run `python -m gapmodel markets` for the full list with
 session times.
 
+Each market is then analysed by its own bespoke model: a separate probability
+model is fitted, back-tested and explained per index, so Tokyo is never scored
+with Wall Street's coefficients.
+
 Crude is the market's fastest read on Middle East supply risk — strikes on Iran
 push it up, negotiations and a deal unwind it — so both benchmarks additionally
 carry a 5-day return, 20-day realised volatility and a shock feature (the daily
