@@ -1,4 +1,4 @@
-# global-market-open-model
+# Stock-Market-Predictor
 
 A probability model for the **next opening auction** of the major global equity
 indices. For every market it answers one question:
