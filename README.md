@@ -36,6 +36,7 @@ python -m gapmodel fetch              # download and cache ~20 years of daily ba
 python -m gapmodel predict --explain  # probability that the next open is up
 python -m gapmodel predict --intraday # add pre-open futures moves (recent window)
 python -m gapmodel backtest --reliability
+python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
 ```
 
 `predict` prints one row per market with the probability and the out-of-sample
@@ -49,6 +50,32 @@ quality of that market's model:
 
 `--explain` adds the largest log-odds contributions behind each probability, so
 a forecast can always be traced back to the indicators that moved it.
+
+### Dashboard
+
+`dashboard` is the 05:00 GMT view: what crude did overnight, and what the Asian
+session is doing with it. `--at` pins the clock (session state is read at that
+UTC time, so `--at 05:00` shows Tokyo, Hong Kong, Seoul, Shanghai and Mumbai
+mid-session and Sydney already shut), `--region` switches to Europe or the
+Americas, and `--html` writes a standalone page.
+
+```
+Crude:
+  Brent crude     90.12  1d +1.22%  5d -7.13%  vol20 4.42%  shock +0.3
+  WTI crude       84.67  1d +1.28%  5d -5.34%  vol20 3.90%  shock +0.3
+
+market               session    to open  last close  last move  p(open up)  oil log-odds
+Hang Seng            open             -   25,884.43     +0.10%       31.1%        -0.047
+Nikkei 225           open             -   64,362.02     +3.95%        6.8%        +0.021
+ASX 200              closed       18.0h    8,976.80     +0.10%       21.2%        -0.075
+```
+
+The oil columns are the same variables the models are fitted on — the daily and
+5-day crude return, its 20-day realised volatility and the shock (today's move
+divided by the volatility known beforehand) — and `oil log-odds` is the net
+amount those features add to, or take off, each market's probability, with the
+single largest oil driver listed underneath. A crude move of two standard
+deviations or more is flagged as a shock.
 
 ## How it works
 

@@ -22,7 +22,13 @@ class Forecast:
     session: pd.Timestamp
     probability_up: float
     backtest: dict[str, float]
-    drivers: pd.Series
+    contributions: pd.Series
+    top_drivers: int = 5
+
+    @property
+    def drivers(self) -> pd.Series:
+        """The largest log-odds contributions behind this probability."""
+        return self.contributions.head(self.top_drivers)
 
     def as_row(self) -> dict[str, object]:
         return {
@@ -68,7 +74,8 @@ def forecast_market(
         session=session,
         probability_up=probability,
         backtest=backtest.metrics,
-        drivers=contributions.head(top_drivers),
+        contributions=contributions,
+        top_drivers=top_drivers,
     )
 
 
