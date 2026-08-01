@@ -23,6 +23,7 @@ pip install -r requirements.txt   # or: pip install -e .
 python -m gapmodel markets            # what is modelled, and when each session runs
 python -m gapmodel fetch              # download and cache ~20 years of daily bars
 python -m gapmodel predict --explain  # probability that the next open is up
+python -m gapmodel predict --intraday # add pre-open futures moves (recent window)
 python -m gapmodel backtest --reliability
 ```
 
@@ -74,10 +75,29 @@ observation rather than silently borrowing a future one.
 | S&P 500 | 0.68 | 0.63 | 0.09 |
 
 Asian and European opens are largely explained by the US session that closed
-while they slept. Wall Street's own open is much harder: the information that
-would move it — overnight futures right up to the bell — is not in a daily bar.
-That is the model's main limitation; intraday futures snapshots taken minutes
-before the open are the natural next step.
+while they slept. Wall Street's own open is much harder from daily bars alone:
+what moves it — overnight futures right up to the bell — is not in a daily bar.
+
+### `--intraday`: pre-open futures
+
+`--intraday` adds the overnight and last-hours moves of ES, NQ, crude and gold,
+measured from hourly bars as of the opening bell. Yahoo only serves ~730 days of
+hourly history, so this variant trains on a much shorter window (with a smaller
+warm-up), but it is exactly what the US open was missing. Compared on the *same*
+600 sessions:
+
+| Market | AUC daily | AUC intraday |
+| --- | --- | --- |
+| S&P 500 | 0.67 | 0.90 |
+| Nasdaq Composite | 0.65 | 0.91 |
+| S&P/TSX | 0.65 | 0.86 |
+| DAX | 0.71 | 0.81 |
+| Nikkei 225 | 0.78 | 0.84 |
+| FTSE 100 | 0.73 | 0.78 |
+
+An hourly bar is stamped with the *start* of the hour it covers, so a bar counts
+as known only one hour later — otherwise the bar straddling the bell would leak
+the answer into the features.
 
 ### Data caveats
 

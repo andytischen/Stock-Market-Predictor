@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .intraday import preopen_features
 from .markets import INDICATORS, MARKETS, Market, market
 
 MIN_HISTORY = 60
@@ -44,12 +45,16 @@ def build_features(
     target_symbol: str,
     panel: dict[str, pd.DataFrame],
     forecast_row: bool = False,
+    hourly: dict[str, pd.Series] | None = None,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """Build the design matrix and the up/down label for one market.
 
     With ``forecast_row`` the frame is extended by one row for the next
     session, whose label is unknown and whose features only use information
     available before that session's opening auction.
+
+    With ``hourly`` the pre-open futures moves are added, which restricts the
+    sample to the window those hourly bars cover.
     """
     target = market(target_symbol)
     if target_symbol not in panel:
@@ -104,7 +109,10 @@ def build_features(
         if indicator.symbol == "^VIX":
             features["ind_vix_level"] = _as_of(close, dates, lag)
 
-    frame = pd.DataFrame(features, index=dates).replace([np.inf, -np.inf], np.nan)
+    frame = pd.DataFrame(features, index=dates)
+    if hourly:
+        frame = frame.join(preopen_features(target, dates, hourly))
+    frame = frame.replace([np.inf, -np.inf], np.nan)
     real_open = gap.abs() > STALE_GAP_TOLERANCE
     stale_fraction = float((~real_open & gap.notna()).sum() / max(gap.notna().sum(), 1))
     if stale_fraction > MAX_STALE_FRACTION:
@@ -132,8 +140,10 @@ def next_session_date(last_session: pd.Timestamp) -> pd.Timestamp:
 
 
 def live_feature_row(
-    target_symbol: str, panel: dict[str, pd.DataFrame]
+    target_symbol: str,
+    panel: dict[str, pd.DataFrame],
+    hourly: dict[str, pd.Series] | None = None,
 ) -> tuple[pd.DataFrame, pd.Timestamp]:
     """Feature row for the next, not yet observed, opening auction."""
-    frame, _ = build_features(target_symbol, panel, forecast_row=True)
+    frame, _ = build_features(target_symbol, panel, forecast_row=True, hourly=hourly)
     return frame.iloc[[-1]], frame.index[-1]

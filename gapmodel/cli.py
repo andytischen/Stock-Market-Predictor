@@ -10,9 +10,13 @@ import pandas as pd
 
 from .data import DEFAULT_CACHE, load_panel
 from .features import build_features
+from .intraday import load_hourly_panel
 from .markets import INDICATORS, MARKETS, MARKETS_BY_SYMBOL
-from .model import walk_forward
+from .model import MIN_TRAIN, walk_forward
 from .predict import forecast_all, to_frame
+
+# The hourly window is short, so the intraday variant needs a smaller warm-up.
+INTRADAY_MIN_TRAIN = 200
 
 
 def _market_symbol(value: str) -> str:
@@ -36,6 +40,12 @@ def _panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     return load_panel(start=args.start, cache_dir=Path(args.cache), refresh=args.refresh)
 
 
+def _hourly(args: argparse.Namespace) -> dict[str, pd.Series] | None:
+    if not getattr(args, "intraday", False):
+        return None
+    return load_hourly_panel(cache_dir=Path(args.cache), refresh=args.refresh)
+
+
 def _cmd_markets(_: argparse.Namespace) -> None:
     print("Markets (open / close, UTC hours):")
     for m in MARKETS:
@@ -46,7 +56,14 @@ def _cmd_markets(_: argparse.Namespace) -> None:
 
 
 def _cmd_predict(args: argparse.Namespace) -> None:
-    forecasts = forecast_all(_panel(args), symbols=args.market, c=args.regularisation)
+    hourly = _hourly(args)
+    forecasts = forecast_all(
+        _panel(args),
+        symbols=args.market,
+        c=args.regularisation,
+        hourly=hourly,
+        min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
+    )
     frame = to_frame(forecasts).sort_values("p_open_up", ascending=False)
     print(frame.to_string(index=False))
     if args.explain:
@@ -61,11 +78,17 @@ def _cmd_predict(args: argparse.Namespace) -> None:
 
 def _cmd_backtest(args: argparse.Namespace) -> None:
     panel = _panel(args)
+    hourly = _hourly(args)
     rows = []
     for symbol in args.market or [m.symbol for m in MARKETS]:
         try:
-            features, labels = build_features(symbol, panel)
-            result = walk_forward(features, labels, c=args.regularisation)
+            features, labels = build_features(symbol, panel, hourly=hourly)
+            result = walk_forward(
+                features,
+                labels,
+                min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
+                c=args.regularisation,
+            )
         except Exception as exc:
             print(f"skipping {symbol}: {exc}")
             continue
@@ -106,6 +129,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     predict.add_argument("--explain", action="store_true", help="show top drivers")
     predict.add_argument("--csv", help="also write the table to this path")
+    predict.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
     predict.set_defaults(func=_cmd_predict)
 
     backtest = sub.add_parser("backtest", help="walk-forward out-of-sample metrics")
@@ -113,6 +141,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--market", action="append", type=_market_symbol, help="restrict to a symbol"
     )
     backtest.add_argument("--reliability", action="store_true", help="calibration table")
+    backtest.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
     backtest.set_defaults(func=_cmd_backtest)
 
     return parser
