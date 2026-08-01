@@ -145,6 +145,10 @@ python -m pm list --status doing
 python -m pm report --out STATUS.md
 ```
 
+The live board is `project.json` and the current update is checked in as
+[STATUS.md](STATUS.md); regenerate it with `python -m pm report --out STATUS.md`
+after changing the board.
+
 `report` prints a markdown status update: percentage complete, what is done, in
 progress, blocked or next, overdue tasks, and a "Resources needed" section
 collecting every resource requested by a task that is not finished yet. The
