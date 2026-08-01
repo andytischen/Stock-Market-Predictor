@@ -30,7 +30,8 @@ class Forecast:
             "symbol": self.symbol,
             "region": self.region,
             "session": self.session.date().isoformat(),
-            "p_open_up": round(self.probability_up, 4),
+            # Never print a flat 0 or 1: no forecast here is a certainty.
+            "p_open_up": round(min(max(self.probability_up, 1e-4), 1 - 1e-4), 4),
             "oos_auc": round(self.backtest.get("auc", float("nan")), 4),
             "oos_brier_skill": round(self.backtest.get("brier_skill", 0.0), 4),
             "oos_accuracy": round(self.backtest.get("accuracy", 0.0), 4),
@@ -46,7 +47,8 @@ def forecast_market(
 
     pipeline = model_mod.fit(features, labels, c=c)
     live, session = live_feature_row(symbol, panel)
-    probability = float(pipeline.predict_proba(live.to_numpy())[0, 1])
+    raw = pipeline.predict_proba(live.to_numpy())[:, 1]
+    probability = float(model_mod.calibrator(backtest)(raw)[0])
 
     weights = model_mod.coefficients(pipeline, list(features.columns))
     scaler = pipeline.named_steps["scale"]
