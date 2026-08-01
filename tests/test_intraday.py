@@ -1,7 +1,11 @@
+import os
+import time
+
 import numpy as np
 import pandas as pd
 
-from gapmodel.intraday import preopen_features
+from gapmodel import intraday
+from gapmodel.intraday import load_hourly, preopen_features
 from gapmodel.markets import market
 
 
@@ -62,3 +66,30 @@ def test_dates_before_the_hourly_history_are_nan():
     close = hourly_series(start="2024-01-01")
     frame = preopen_features(market("^GSPC"), pd.DatetimeIndex(["2023-06-01"]), {"ES=F": close})
     assert frame.isna().all().all()
+
+
+def test_hourly_cache_expires(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_download(symbol, **kwargs):
+        calls.append(symbol)
+        index = pd.date_range("2024-01-01", periods=48, freq="h", tz="UTC")
+        return pd.DataFrame({"Close": np.arange(48, dtype=float) + 1.0}, index=index)
+
+    monkeypatch.setattr(intraday.yf, "download", fake_download)
+
+    load_hourly("ES=F", cache_dir=tmp_path)
+    load_hourly("ES=F", cache_dir=tmp_path)
+    assert len(calls) == 1  # still fresh
+
+    stale = time.time() - intraday.CACHE_TTL.total_seconds() - 60
+    os.utime(intraday._cache_path(tmp_path, "ES=F"), (stale, stale))
+    load_hourly("ES=F", cache_dir=tmp_path)
+    assert len(calls) == 2
+
+
+def test_bars_without_a_price_are_dropped(tmp_path, monkeypatch):
+    index = pd.date_range("2024-01-01", periods=4, freq="h", tz="UTC")
+    frame = pd.DataFrame({"Close": [1.0, np.nan, 3.0, 4.0]}, index=index)
+    monkeypatch.setattr(intraday.yf, "download", lambda symbol, **kwargs: frame)
+    assert len(load_hourly("ES=F", cache_dir=tmp_path)) == 3

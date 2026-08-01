@@ -30,6 +30,10 @@ BAR_DURATION = pd.Timedelta(hours=1)
 # is allowed to stand in for it — but only for this long, after which the cache
 # is treated as too stale to describe the pre-open state.
 MAX_STALENESS = pd.Timedelta(hours=24)
+# How long a downloaded hourly file may be reused. Keyed on when it was
+# fetched, not on its last bar: when the market is shut the newest bar is old
+# however recently it was downloaded.
+CACHE_TTL = BAR_DURATION
 
 
 def _cache_path(cache_dir: Path, symbol: str) -> Path:
@@ -40,13 +44,15 @@ def _cache_path(cache_dir: Path, symbol: str) -> Path:
 def load_hourly(symbol: str, cache_dir: Path = DEFAULT_CACHE, refresh: bool = False) -> pd.Series:
     """Hourly closes indexed in UTC, cached on disk."""
     path = _cache_path(cache_dir, symbol)
-    if path.exists() and not refresh:
+    now = pd.Timestamp.now(tz="UTC")
+    # Unlike daily bars, an old hourly file is useless: it cannot describe the
+    # run-up to the next bell, so it is refreshed rather than reused.
+    fresh = (
+        path.exists() and now - pd.Timestamp(path.stat().st_mtime, unit="s", tz="UTC") <= CACHE_TTL
+    )
+    if fresh and not refresh:
         close = pd.read_csv(path, index_col=0, parse_dates=True)["Close"]
-        close = close.tz_localize("UTC") if close.index.tz is None else close.tz_convert("UTC")
-        # Unlike daily bars, a stale hourly cache is useless: it cannot describe
-        # the run-up to the next bell, so refresh it instead of reusing it.
-        if not close.empty and pd.Timestamp.now(tz="UTC") - close.index[-1] <= MAX_STALENESS:
-            return close
+        return close.tz_localize("UTC") if close.index.tz is None else close.tz_convert("UTC")
 
     raw = yf.download(
         symbol,
@@ -59,7 +65,7 @@ def load_hourly(symbol: str, cache_dir: Path = DEFAULT_CACHE, refresh: bool = Fa
         raise RuntimeError(f"no hourly data returned for {symbol}")
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = raw.columns.droplevel(-1)
-    close = raw["Close"].astype(float).sort_index()
+    close = raw["Close"].astype(float).dropna().sort_index()
     close.index = pd.to_datetime(close.index, utc=True)
     close = close[~close.index.duplicated(keep="last")]
     cache_dir.mkdir(parents=True, exist_ok=True)
