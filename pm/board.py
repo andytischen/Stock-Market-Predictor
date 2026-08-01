@@ -50,10 +50,11 @@ class Board:
         if not path.exists():
             return cls(name=path.stem)
         payload = json.loads(path.read_text())
-        return cls(
-            name=payload.get("name", path.stem),
-            tasks=[Task(**t) for t in payload.get("tasks", [])],
-        )
+        try:
+            tasks = [Task(**t) for t in payload.get("tasks", [])]
+        except TypeError as exc:
+            raise ValueError(f"{path} is not a valid board: {exc}") from exc
+        return cls(name=payload.get("name", path.stem), tasks=tasks)
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -76,7 +77,7 @@ class Board:
             title=title.strip(),
             owner=owner,
             due=due,
-            resources=list(resources or []),
+            resources=list(dict.fromkeys(resources or [])),
         )
         self.tasks.append(task)
         return task

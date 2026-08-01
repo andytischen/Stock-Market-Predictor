@@ -26,6 +26,26 @@ def test_tasks_round_trip_through_the_json_file(board_file):
     assert reloaded.get(1).resources == ["tech writer"]
 
 
+@pytest.mark.parametrize(
+    "payload",
+    ['{"tasks": [{"id": 1, "title": "t", "bogus": 9}]}', '{"tasks": "notalist"}'],
+)
+def test_a_malformed_board_file_is_an_error_not_a_crash(board_file, payload):
+    board_file.write_text(payload)
+    with pytest.raises(ValueError, match="not a valid board"):
+        Board.load(board_file)
+    with pytest.raises(SystemExit) as exit_info:
+        run(board_file, "list")
+    assert "error:" in str(exit_info.value)
+
+
+def test_duplicate_resources_are_recorded_once():
+    board = Board()
+    task = board.add("train", resources=["gpu", "gpu"])
+    board.add_resource(task.id, "gpu")
+    assert task.resources == ["gpu"]
+
+
 def test_ids_increment_and_titles_are_required():
     board = Board()
     assert board.add("one").id == 1
