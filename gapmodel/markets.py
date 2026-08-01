@@ -81,12 +81,19 @@ INDICATORS: tuple[Instrument, ...] = (
     # row needs every feature, adding it would cost every market nine years of
     # training data for no measurable accuracy.
     Instrument("CL=F", "WTI crude", close_utc=21.0),
+    Instrument("BZ=F", "Brent crude", close_utc=21.0),
     Instrument("GC=F", "Gold", close_utc=21.0),
     Instrument("SI=F", "Silver", close_utc=21.0),
     Instrument("HG=F", "Copper", close_utc=21.0),
     Instrument("ES=F", "S&P 500 futures", close_utc=21.0),
     Instrument("NQ=F", "Nasdaq 100 futures", close_utc=21.0),
 )
+
+# Crude is the fastest-moving read on Middle East supply risk: escalation
+# (strikes on Iran, tanker traffic) spikes it, de-escalation (negotiations, a
+# deal) unwinds it. Both directions are informative for equity opens, so oil
+# carries extra features describing the size and volatility of the move.
+OIL_SYMBOLS: frozenset[str] = frozenset({"CL=F", "BZ=F"})
 
 MARKETS_BY_SYMBOL = {m.symbol: m for m in MARKETS}
 

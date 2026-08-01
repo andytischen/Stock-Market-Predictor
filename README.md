@@ -9,8 +9,14 @@ indices. For every market it answers one question:
 Sixteen indices are covered across Asia, Europe and the Americas, driven by the
 sessions that have already closed plus a set of cross-asset indicators (VIX, the
 US 5y/10y/30y yields, Russell 2000, the semiconductor index, dollar index,
-USD/JPY, EUR/USD, GBP/USD, crude, gold, silver, copper, S&P 500 and Nasdaq
-futures). Run `python -m gapmodel markets` for the full list with session times.
+USD/JPY, EUR/USD, GBP/USD, WTI and Brent crude, gold, silver, copper, S&P 500
+and Nasdaq futures). Run `python -m gapmodel markets` for the full list with
+session times.
+
+Crude is the market's fastest read on Middle East supply risk — strikes on Iran
+push it up, negotiations and a deal unwind it — so both benchmarks additionally
+carry a 5-day return, 20-day realised volatility and a shock feature (the daily
+move divided by the volatility already known the day before).
 
 ## Install
 

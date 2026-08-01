@@ -6,9 +6,10 @@ import numpy as np
 import pandas as pd
 
 from .intraday import preopen_features
-from .markets import INDICATORS, MARKETS, Market, market
+from .markets import INDICATORS, MARKETS, OIL_SYMBOLS, Market, market
 
 MIN_HISTORY = 60
+OIL_VOL_WINDOW = 20
 # A gap of exactly zero means the source repeated the previous close instead of
 # publishing a real opening print; such sessions cannot be labelled.
 STALE_GAP_TOLERANCE = 1e-9
@@ -107,9 +108,17 @@ def build_features(
         close = panel[indicator.symbol]["Close"].dropna()
         lag = _lag_days(indicator.close_utc, target)
         name = _column_name(indicator.symbol)
-        features[f"ind_{name}_return"] = _as_of(log_return(close), dates, lag)
+        returns = log_return(close)
+        features[f"ind_{name}_return"] = _as_of(returns, dates, lag)
         if indicator.symbol == "^VIX":
             features["ind_vix_level"] = _as_of(close, dates, lag)
+        if indicator.symbol in OIL_SYMBOLS:
+            # Volatility is taken as of the previous bar so the shock is scaled
+            # by a regime the market already knew about.
+            vol = returns.rolling(OIL_VOL_WINDOW).std().shift(1)
+            features[f"ind_{name}_return_5"] = _as_of(log_return(close, 5), dates, lag)
+            features[f"ind_{name}_vol_{OIL_VOL_WINDOW}"] = _as_of(vol, dates, lag)
+            features[f"ind_{name}_shock"] = _as_of(returns / vol.where(vol > 0), dates, lag)
 
     frame = pd.DataFrame(features, index=dates)
     if hourly:
