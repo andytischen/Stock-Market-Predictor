@@ -122,6 +122,24 @@ as a down open. A series with more than half stale opens is refused outright.
 Bovespa is the worst of the included markets (a quarter of its opening prints
 repeat the previous close), which is part of why it scores lowest.
 
+## Project tracker
+
+`pm` is a small task board kept in a JSON file next to the code, used to track
+the work on this model and to say what is still needed to finish it.
+
+```bash
+python -m pm add "Add European sector indices" --owner ana --due 2026-09-01
+python -m pm need 1 "paid intraday data feed"
+python -m pm status 1 doing
+python -m pm list --status doing
+python -m pm report --out STATUS.md
+```
+
+`report` prints a markdown status update: percentage complete, what is done, in
+progress, blocked or next, overdue tasks, and a "Resources needed" section
+collecting every resource requested by a task that is not finished yet. The
+board lives in `project.json` by default; pass `--file` to keep several.
+
 ## Tests
 
 ```bash
