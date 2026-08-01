@@ -8,10 +8,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from .dashboard import build_dashboard, render_html, render_text
 from .data import DEFAULT_CACHE, load_panel
 from .features import build_features
 from .intraday import load_hourly_panel
-from .markets import INDICATORS, MARKETS, MARKETS_BY_SYMBOL
+from .markets import INDICATORS, MARKETS, MARKETS_BY_SYMBOL, REGIONS
 from .model import MIN_TRAIN, walk_forward
 from .predict import forecast_all, to_frame
 
@@ -34,6 +35,15 @@ def _positive_float(value: str) -> float:
     if number <= 0:
         raise argparse.ArgumentTypeError("must be greater than 0")
     return number
+
+
+def _utc_time(value: str) -> float:
+    """``HH:MM`` (UTC) as hours from midnight."""
+    try:
+        moment = pd.Timestamp(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a time of day (use HH:MM)") from exc
+    return moment.hour + moment.minute / 60
 
 
 def _panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
@@ -101,6 +111,32 @@ def _cmd_backtest(args: argparse.Namespace) -> None:
     print("\n" + pd.DataFrame(rows).round(4).to_string(index=False))
 
 
+def _cmd_dashboard(args: argparse.Namespace) -> None:
+    panel = _panel(args)
+    hourly = _hourly(args)
+    symbols = [m.symbol for m in MARKETS if m.region == args.region]
+    forecasts = forecast_all(
+        panel,
+        symbols=symbols,
+        c=args.regularisation,
+        hourly=hourly,
+        min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
+    )
+    board = build_dashboard(panel, forecasts, as_of=_as_of(args.at), region=args.region)
+    print(render_text(board), end="")
+    if args.html:
+        Path(args.html).write_text(render_html(board))
+        print(f"\nwrote {args.html}")
+
+
+def _as_of(hours: float | None) -> pd.Timestamp | None:
+    """Today's date at the given UTC hour, or now when no hour is given."""
+    if hours is None:
+        return None
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    return now.normalize() + pd.Timedelta(hours=hours)
+
+
 def _cmd_fetch(args: argparse.Namespace) -> None:
     panel = _panel(args)
     for symbol, frame in panel.items():
@@ -147,6 +183,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     backtest.set_defaults(func=_cmd_backtest)
+
+    dashboard = sub.add_parser(
+        "dashboard", help="crude readings next to one region's session state and open calls"
+    )
+    dashboard.add_argument("--region", choices=REGIONS, default="Asia")
+    dashboard.add_argument(
+        "--at", type=_utc_time, help="UTC time of day to render for, e.g. 05:00 (default: now)"
+    )
+    dashboard.add_argument("--html", help="also write an HTML dashboard here")
+    dashboard.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
+    dashboard.set_defaults(func=_cmd_dashboard)
 
     return parser
 
