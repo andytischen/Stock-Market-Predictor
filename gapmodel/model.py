@@ -47,6 +47,28 @@ class Backtest:
         ).groupby("bucket", observed=True)
         return grouped.agg(predicted=("p", "mean"), realised=("y", "mean"), count=("y", "size"))
 
+    def window_metrics(
+        self,
+        since: pd.Timestamp | None = None,
+        until: pd.Timestamp | None = None,
+    ) -> dict[str, float]:
+        """Metrics computed over a date sub-window of the OOS predictions.
+
+        Dates are compared against the session index of the backtest
+        probabilities, so ``since`` and ``until`` should be plain dates or
+        timestamps without timezone info (matching how the panel is indexed).
+        """
+        mask = pd.Series(True, index=self.probabilities.index)
+        if since is not None:
+            mask &= self.probabilities.index >= since
+        if until is not None:
+            mask &= self.probabilities.index <= until
+        prob = self.probabilities.loc[mask]
+        out = self.outcomes.loc[mask]
+        if len(prob) == 0:
+            raise ValueError("no out-of-sample predictions in the requested window")
+        return _metrics(prob.to_numpy(), out.to_numpy())
+
 
 def _metrics(prob: np.ndarray, y: np.ndarray) -> dict[str, float]:
     base_rate = float(y.mean())
