@@ -15,6 +15,7 @@ from .intraday import load_hourly_panel
 from .markets import INDICATORS, MARKETS, MARKETS_BY_SYMBOL, REGIONS
 from .model import MIN_TRAIN, walk_forward
 from .predict import forecast_all, to_frame
+from .web import serve_dashboard
 
 # The hourly window is short, so the intraday variant needs a smaller warm-up.
 INTRADAY_MIN_TRAIN = 200
@@ -129,6 +130,19 @@ def _cmd_dashboard(args: argparse.Namespace) -> None:
         print(f"\nwrote {args.html}")
 
 
+def _cmd_web(args: argparse.Namespace) -> None:
+    serve_dashboard(
+        _panel(args),
+        _hourly(args),
+        host=args.host,
+        port=args.port,
+        region=args.region,
+        at=args.at,
+        regularisation=args.regularisation,
+        launch_browser=not args.no_browser,
+    )
+
+
 def _as_of(hours: float | None) -> pd.Timestamp | None:
     """Today's date at the given UTC hour, or now when no hour is given."""
     if hours is None:
@@ -198,6 +212,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     dashboard.set_defaults(func=_cmd_dashboard)
+
+    web = sub.add_parser("web", help="serve the dashboard in a local browser interface")
+    web.add_argument("--region", choices=REGIONS, default="Asia")
+    web.add_argument(
+        "--at", type=_utc_time, help="UTC time of day to render for, e.g. 05:00 (default: now)"
+    )
+    web.add_argument("--host", default="127.0.0.1", help="address to bind")
+    web.add_argument("--port", type=int, default=8000, help="port to bind")
+    web.add_argument("--no-browser", action="store_true", help="do not auto-open a browser tab")
+    web.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
+    web.set_defaults(func=_cmd_web)
 
     return parser
 

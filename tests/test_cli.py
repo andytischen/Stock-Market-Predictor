@@ -30,3 +30,25 @@ def test_markets_command_lists_every_market(capsys):
     main(["markets"])
     out = capsys.readouterr().out
     assert "^GSPC" in out and "Nikkei 225" in out
+
+
+def test_web_command_starts_server_with_expected_arguments(monkeypatch):
+    called = {}
+
+    monkeypatch.setattr("gapmodel.cli._panel", lambda _args: {"dummy": None})
+    monkeypatch.setattr("gapmodel.cli._hourly", lambda _args: None)
+
+    def fake_serve_dashboard(panel, hourly, **kwargs):
+        called["panel"] = panel
+        called["hourly"] = hourly
+        called["kwargs"] = kwargs
+
+    monkeypatch.setattr("gapmodel.cli.serve_dashboard", fake_serve_dashboard)
+    main(["web", "--region", "Europe", "--at", "05:00", "--no-browser", "--port", "8123"])
+
+    assert called["panel"] == {"dummy": None}
+    assert called["hourly"] is None
+    assert called["kwargs"]["region"] == "Europe"
+    assert called["kwargs"]["at"] == 5.0
+    assert called["kwargs"]["port"] == 8123
+    assert called["kwargs"]["launch_browser"] is False
