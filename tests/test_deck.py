@@ -61,3 +61,29 @@ def test_cli_deck_creates_missing_directories(tmp_path, capsys):
     assert "plan the quarter" in out.read_text()
     assert "reveal.js" in out.read_text()
     assert f"wrote {out}" in capsys.readouterr().out
+
+
+def test_cli_deck_open_calls_webbrowser(tmp_path, monkeypatch):
+    opened_urls = []
+    monkeypatch.setattr("webbrowser.open", lambda url: opened_urls.append(url))
+
+    board_file = tmp_path / "project.json"
+    out = tmp_path / "deck.html"
+    main(["--file", str(board_file), "add", "plan the quarter"])
+    main(["--file", str(board_file), "deck", "--out", str(out), "--open"])
+
+    assert len(opened_urls) == 1
+    assert opened_urls[0].startswith("file://")
+    assert "deck.html" in opened_urls[0]
+
+
+def test_cli_deck_no_open_by_default(tmp_path, monkeypatch):
+    opened_urls = []
+    monkeypatch.setattr("webbrowser.open", lambda url: opened_urls.append(url))
+
+    board_file = tmp_path / "project.json"
+    out = tmp_path / "deck.html"
+    main(["--file", str(board_file), "add", "plan the quarter"])
+    main(["--file", str(board_file), "deck", "--out", str(out)])
+
+    assert opened_urls == []

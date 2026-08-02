@@ -171,13 +171,19 @@ python -m pm status 1 doing
 python -m pm list --status doing
 python -m pm report --out STATUS.md
 python -m pm deck                      # the same board as a reveal.js slide deck
+python -m pm deck --open               # write the deck and open it in the default browser
 ```
 
 The live board is `project.json` and the current update is checked in as
 [STATUS.md](STATUS.md); regenerate it with `python -m pm report --out STATUS.md`
 after changing the board. `pm deck` writes the same content as slides to
-[docs/status-deck.html](docs/status-deck.html) — open it in a browser to
-present the update rather than read it.
+[docs/status-deck.html](docs/status-deck.html). Pass `--open` to `deck` (or to
+`report --out FILE`) to open the result in the default browser immediately:
+
+```bash
+python -m pm deck --open               # write the deck and open it in Chrome
+python -m pm report --out STATUS.md --open
+```
 
 `report` prints a markdown status update: percentage complete, what is done, in
 progress, blocked or next, overdue tasks, and a "Resources needed" section

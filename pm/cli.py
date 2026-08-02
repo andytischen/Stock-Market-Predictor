@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import webbrowser
 from pathlib import Path
 
 from .board import DEFAULT_BOARD, STATUSES, Board
@@ -59,8 +60,11 @@ def _cmd_report(args: argparse.Namespace) -> None:
     report = render_report(_board(args))
     print(report, end="")
     if args.out:
-        Path(args.out).write_text(report)
+        path = Path(args.out)
+        path.write_text(report)
         print(f"wrote {args.out}")
+        if args.open:
+            webbrowser.open(path.resolve().as_uri())
 
 
 def _cmd_deck(args: argparse.Namespace) -> None:
@@ -69,6 +73,8 @@ def _cmd_deck(args: argparse.Namespace) -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_deck(_board(args)))
     print(f"wrote {args.out}")
+    if args.open:
+        webbrowser.open(out.resolve().as_uri())
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -104,10 +110,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     report = sub.add_parser("report", help="markdown status update")
     report.add_argument("--out", help="also write the report here")
+    report.add_argument("--open", action="store_true", help="open the output file in the browser (requires --out)")
     report.set_defaults(func=_cmd_report)
 
     deck = sub.add_parser("deck", help="render the board as a reveal.js slide deck")
     deck.add_argument("--out", default="docs/status-deck.html", help="where to write the deck")
+    deck.add_argument("--open", action="store_true", help="open the deck in the default browser after writing")
     deck.set_defaults(func=_cmd_deck)
 
     return parser
