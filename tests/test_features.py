@@ -27,7 +27,7 @@ def synthetic_bars(n: int = 900, seed: int = 0) -> pd.DataFrame:
 def panel() -> dict[str, pd.DataFrame]:
     return {
         symbol: synthetic_bars(seed=seed)
-        for seed, symbol in enumerate(["^GSPC", "^N225", "^FTSE", "^VIX", "ES=F", "CL=F", "JPY=X"])
+        for seed, symbol in enumerate(["^GSPC", "^N225", "^FTSE", "^VIX", "ES=F", "CL=F", "JPY=X", "KRW=X"])
     }
 
 
@@ -121,6 +121,19 @@ def test_fx_shock_is_the_move_scaled_by_known_volatility(panel):
     calendar = pd.date_range(shock.index.min(), shock.index.max())
     expected = shock.reindex(calendar).ffill().reindex(features.index - pd.Timedelta(days=1))
     assert features["ind_jpy_x_shock"].to_numpy() == pytest.approx(expected.to_numpy())
+
+
+def test_krw_carries_shock_features(panel):
+    features, _ = build_features("^GSPC", panel)
+    # USD/KRW closes at 06:30 UTC (Seoul close), before the US open at 13:30 UTC,
+    # so it is a same-day indicator for European and US markets.
+    assert {
+        "ind_krw_x_return",
+        "ind_krw_x_return_5",
+        "ind_krw_x_vol_20",
+        "ind_krw_x_shock",
+    } <= set(features.columns)
+    assert (features["ind_krw_x_vol_20"] > 0).all()
 
 
 def test_forecast_row_is_unlabelled_and_last(panel):
