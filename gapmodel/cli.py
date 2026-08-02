@@ -18,6 +18,8 @@ from .markets import INDICATORS, MARKETS, MARKETS_BY_SYMBOL, REGIONS
 from .model import MIN_TRAIN, walk_forward
 from .predict import forecast_all, to_frame
 from .regions import dashboard_symbols
+from .social_arb import CORRELATION_WINDOW, build_social_arb
+from .social_arb import to_frame as social_arb_to_frame
 
 # The hourly window is short, so the intraday variant needs a smaller warm-up.
 INTRADAY_MIN_TRAIN = 200
@@ -170,6 +172,17 @@ def _cmd_asia(args: argparse.Namespace) -> None:
         print(render_asia_text(board))
 
 
+def _cmd_social_arb(args: argparse.Namespace) -> None:
+    panel = _panel(args)
+    forecasts = forecast_all(panel, c=args.regularisation, min_train=MIN_TRAIN)
+    signals = build_social_arb(panel, forecasts, window=args.window)
+    frame = social_arb_to_frame(signals)
+    print(frame.to_string(index=False))
+    if args.csv:
+        frame.to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
+
+
 def _cmd_dashboard(args: argparse.Namespace) -> None:
     panel = _panel(args)
     hourly = _hourly(args)
@@ -283,6 +296,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     dashboard.set_defaults(func=_cmd_dashboard)
+
+    social_arb = sub.add_parser(
+        "social-arb",
+        help="markets where the model probability diverges from what correlated peers imply",
+    )
+    social_arb.add_argument(
+        "--window",
+        type=int,
+        default=CORRELATION_WINDOW,
+        help="sessions used for the peer correlation matrix (default: %(default)s)",
+    )
+    social_arb.add_argument("--csv", help="also write the table to this path")
+    social_arb.set_defaults(func=_cmd_social_arb)
 
     return parser
 
