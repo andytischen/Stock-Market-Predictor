@@ -81,6 +81,11 @@ INDICATORS: tuple[Instrument, ...] = (
     Instrument("JPY=X", "USD/JPY", close_utc=21.0),
     Instrument("EURUSD=X", "EUR/USD", close_utc=21.0),
     Instrument("GBPUSD=X", "GBP/USD", close_utc=21.0),
+    # South Korean won: the Bank of Korea intervenes to defend the exchange rate
+    # against rapid depreciation, particularly during risk-off episodes that hit
+    # the KOSPI hard.  Like every other Yahoo spot FX bar it is stamped at the
+    # New York cut, so it is read one session late, as the other pairs are.
+    Instrument("KRW=X", "USD/KRW", close_utc=21.0),
     # Bitcoin is deliberately absent: its history starts in 2014 and, because a
     # row needs every feature, adding it would cost every market nine years of
     # training data for no measurable accuracy.
@@ -98,6 +103,15 @@ INDICATORS: tuple[Instrument, ...] = (
 # deal) unwinds it. Both directions are informative for equity opens, so oil
 # carries extra features describing the size and volatility of the move.
 OIL_SYMBOLS: frozenset[str] = frozenset({"CL=F", "BZ=F"})
+
+# Central-bank governors intervene in these pairs to defend exchange-rate
+# levels or smooth volatility. Intervention episodes produce moves that are
+# large relative to recent realised volatility — exactly the signal the shock
+# feature is designed to capture. USD/JPY is the most actively managed of the
+# three G10 pairs; EUR/USD and GBP/USD follow the ECB and Bank of England
+# respectively. USD/KRW captures Bank of Korea defences during risk-off
+# episodes that coincide with KOSPI sell-offs.
+FX_SYMBOLS: frozenset[str] = frozenset({"JPY=X", "EURUSD=X", "GBPUSD=X", "KRW=X"})
 
 MARKETS_BY_SYMBOL = {m.symbol: m for m in MARKETS}
 

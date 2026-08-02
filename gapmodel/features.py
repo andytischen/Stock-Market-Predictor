@@ -6,10 +6,14 @@ import numpy as np
 import pandas as pd
 
 from .intraday import preopen_features
-from .markets import INDICATORS, MARKETS, OIL_SYMBOLS, Market, lag_days, market
+from .markets import FX_SYMBOLS, INDICATORS, MARKETS, OIL_SYMBOLS, Market, lag_days, market
 
 MIN_HISTORY = 60
 OIL_VOL_WINDOW = 20
+# Volatility window for the FX-intervention shock feature.  Kept identical to
+# the oil window so both shock series share a comparable normalisation scale,
+# but defined separately so it can be tuned independently.
+FX_VOL_WINDOW = 20
 # A gap of exactly zero means the source repeated the previous close instead of
 # publishing a real opening print; such sessions cannot be labelled.
 STALE_GAP_TOLERANCE = 1e-9
@@ -118,6 +122,15 @@ def build_features(
             vol = returns.rolling(OIL_VOL_WINDOW).std().shift(1)
             features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
             features[f"ind_{name}_vol_{OIL_VOL_WINDOW}"] = as_of(vol, dates, lag)
+            features[f"ind_{name}_shock"] = as_of(returns / vol.where(vol > 0), dates, lag)
+        elif indicator.symbol in FX_SYMBOLS:
+            # Central-bank intervention produces a move that is large relative
+            # to recent realised volatility.  The shock feature normalises the
+            # daily return by the preceding-bar volatility so the model can
+            # distinguish a routine 0.5% drift from a 3-sigma BoJ defence.
+            vol = returns.rolling(FX_VOL_WINDOW).std().shift(1)
+            features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
+            features[f"ind_{name}_vol_{FX_VOL_WINDOW}"] = as_of(vol, dates, lag)
             features[f"ind_{name}_shock"] = as_of(returns / vol.where(vol > 0), dates, lag)
 
     frame = pd.DataFrame(features, index=dates)

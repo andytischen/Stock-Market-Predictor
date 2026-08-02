@@ -27,7 +27,9 @@ def synthetic_bars(n: int = 900, seed: int = 0) -> pd.DataFrame:
 def panel() -> dict[str, pd.DataFrame]:
     return {
         symbol: synthetic_bars(seed=seed)
-        for seed, symbol in enumerate(["^GSPC", "^N225", "^FTSE", "^VIX", "ES=F", "CL=F"])
+        for seed, symbol in enumerate(
+            ["^GSPC", "^N225", "^FTSE", "^VIX", "ES=F", "CL=F", "JPY=X", "KRW=X"]
+        )
     }
 
 
@@ -97,6 +99,43 @@ def test_oil_shock_is_the_move_scaled_by_known_volatility(panel):
     calendar = pd.date_range(shock.index.min(), shock.index.max())
     expected = shock.reindex(calendar).ffill().reindex(features.index - pd.Timedelta(days=1))
     assert features["ind_cl_f_shock"].to_numpy() == pytest.approx(expected.to_numpy())
+
+
+def test_fx_carries_shock_features(panel):
+    features, _ = build_features("^GSPC", panel)
+    # USD/JPY is in the panel; expect the same shock set as oil.
+    assert {
+        "ind_jpy_x_return",
+        "ind_jpy_x_return_5",
+        "ind_jpy_x_vol_20",
+        "ind_jpy_x_shock",
+    } <= set(features.columns)
+    assert (features["ind_jpy_x_vol_20"] > 0).all()
+
+
+def test_fx_shock_is_the_move_scaled_by_known_volatility(panel):
+    close = panel["JPY=X"]["Close"]
+    returns = np.log(close / close.shift(1))
+    vol = returns.rolling(20).std().shift(1)
+    features, _ = build_features("^GSPC", panel)
+    # Wall Street opens at 13:30 UTC, before JPY=X's 21:00 close -> yesterday's bar.
+    shock = returns / vol
+    calendar = pd.date_range(shock.index.min(), shock.index.max())
+    expected = shock.reindex(calendar).ffill().reindex(features.index - pd.Timedelta(days=1))
+    assert features["ind_jpy_x_shock"].to_numpy() == pytest.approx(expected.to_numpy())
+
+
+def test_krw_carries_shock_features(panel):
+    features, _ = build_features("^GSPC", panel)
+    # USD/KRW closes at 06:30 UTC (Seoul close), before the US open at 13:30 UTC,
+    # so it is a same-day indicator for European and US markets.
+    assert {
+        "ind_krw_x_return",
+        "ind_krw_x_return_5",
+        "ind_krw_x_vol_20",
+        "ind_krw_x_shock",
+    } <= set(features.columns)
+    assert (features["ind_krw_x_vol_20"] > 0).all()
 
 
 def test_forecast_row_is_unlabelled_and_last(panel):
