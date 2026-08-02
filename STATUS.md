@@ -1,6 +1,6 @@
 # Stock-Market-Predictor — status update 2026-08-01
 
-Progress: 7/15 tasks complete (47%).
+Progress: 8/19 tasks complete (42%).
 2 task(s) blocked.
 
 ## Completed
@@ -19,6 +19,8 @@ Progress: 7/15 tasks complete (47%).
   - 2026-08-01: Merged in #9; crude readings, session state and the oil log-odds behind each open call.
 - **Status deck generated from the board (pm deck)** (#15)
   - 2026-08-01: docs/status-deck.html, regenerate with python -m pm deck.
+- **Asia session dashboard: heavyweights, volumes and outside drivers** (#16) — devin
+  - 2026-08-01: Covers Nikkei 225, KOSPI, CSI 300, Hang Seng and STI plus the European indices behind the Asian afternoon; India, Middle East and Europe enter as lagged driver regressions.
 
 ## In progress
 
@@ -37,14 +39,22 @@ Progress: 7/15 tasks complete (47%).
 ## Up next
 
 - **Add Middle East and Indian indices (TASI, TA-35, NIFTY 50)** (#10)
+  - 2026-08-01: CSI 300 (000300.SS) and Tadawul (^TASI.SR) print only in patches on Yahoo; the dashboard falls back to the Shanghai Composite for China.
 - **Confidence intervals on the reported probabilities** (#11)
 - **Track live forecasts against realised opens to measure real-world skill** (#12)
 - **Alert when a market's out-of-sample skill decays below its base rate** (#13)
+- **Participation and leverage data for the Asian dashboard** (#17) — devin
+- **Licensed index weights and free float for constituent attribution** (#18) — devin
+- **Timestamped news and sentiment feed as a dashboard variable** (#19)
 
 ## Resources needed
 
 - **A machine that can sit on a multi-hour hyperparameter search** — needed for #9
 - **A small database or object store for the daily forecast log** — needed for #12
+- **Exchange margin balance and short-interest statistics (TSE, KRX, SSE, HKEX)** — needed for #17
+- **Index provider licence (Nikkei, KRX, CSI, HSI, SGX) for live weights** — needed for #18
 - **Intraday futures history vendor (Databento or similar)** — needed for #7
+- **Level 2 / TAQ order book feed for depth and spreads** — needed for #17
+- **Newswire feed with timestamps (Reuters or Bloomberg)** — needed for #19
 - **Paid exchange opening-auction data (FTSE, ASX, Bovespa)** — needed for #6
 - **Somewhere to run the job on a schedule (GitHub Actions minutes are enough)** — needed for #8

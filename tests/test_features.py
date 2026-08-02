@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gapmodel.features import _as_of, _lag_days, build_features, opening_gap
-from gapmodel.markets import market
+from gapmodel.features import _lag_days, as_of, build_features, opening_gap
+from gapmodel.markets import INDICATORS, MARKETS, all_symbols, market
 from gapmodel.model import walk_forward
 
 
@@ -48,11 +48,20 @@ def test_lag_days_respects_session_order():
     assert _lag_days(20.0, market("^N225")) == 1
 
 
+def test_asml_is_a_lagged_indicator():
+    asml = next(i for i in INDICATORS if i.symbol == "ASML.AS")
+    assert asml.close_utc == 15.5
+    assert "ASML.AS" in all_symbols()
+    # Amsterdam closes after every tracked market opens, so its close is always
+    # read a session late -- never same-day.
+    assert all(_lag_days(asml.close_utc, market(m.symbol)) == 1 for m in MARKETS)
+
+
 def test_as_of_never_reads_the_future():
     dates = pd.bdate_range("2020-01-01", periods=5)
     source = pd.Series(range(5), index=dates, dtype=float)
-    same_day = _as_of(source, dates, lag_days=0)
-    previous = _as_of(source, dates, lag_days=1)
+    same_day = as_of(source, dates, lag_days=0)
+    previous = as_of(source, dates, lag_days=1)
     assert list(same_day) == [0, 1, 2, 3, 4]
     assert previous.iloc[-1] == 3  # yesterday's value, not today's
 

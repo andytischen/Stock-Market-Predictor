@@ -73,6 +73,10 @@ INDICATORS: tuple[Instrument, ...] = (
     Instrument("^TYX", "US 30y Treasury yield", close_utc=20.0),
     Instrument("^RUT", "Russell 2000", close_utc=20.0),
     Instrument("^SOX", "Philadelphia semiconductor index", close_utc=20.0),
+    # Europe's semiconductor bellwether, and the largest weight in the Euro
+    # Stoxx 50: it closes before the US indicators, so Asia reads it a session
+    # earlier than ^SOX.
+    Instrument("ASML.AS", "ASML", close_utc=15.5),
     Instrument("DX-Y.NYB", "US dollar index", close_utc=21.0),
     Instrument("JPY=X", "USD/JPY", close_utc=21.0),
     Instrument("EURUSD=X", "EUR/USD", close_utc=21.0),
@@ -99,6 +103,11 @@ MARKETS_BY_SYMBOL = {m.symbol: m for m in MARKETS}
 
 # Regions in the order their sessions run through the day.
 REGIONS: tuple[str, ...] = tuple(dict.fromkeys(m.region for m in MARKETS))
+
+
+def lag_days(source_close_utc: float, target_open_utc: float) -> int:
+    """0 if the source bar closes before the target opens, otherwise 1."""
+    return 0 if source_close_utc < target_open_utc else 1
 
 
 def market(symbol: str) -> Market:

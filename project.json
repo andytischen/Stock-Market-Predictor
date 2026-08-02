@@ -133,7 +133,9 @@
       "owner": "",
       "due": "",
       "resources": [],
-      "notes": [],
+      "notes": [
+        "2026-08-01: CSI 300 (000300.SS) and Tadawul (^TASI.SR) print only in patches on Yahoo; the dashboard falls back to the Shanghai Composite for China."
+      ],
       "created_at": "2026-08-01T11:31:58+00:00",
       "updated_at": "2026-08-01T11:31:58+00:00"
     },
@@ -197,6 +199,59 @@
       ],
       "created_at": "2026-08-01T12:23:23+00:00",
       "updated_at": "2026-08-01T12:23:23+00:00"
+    },
+    {
+      "id": 16,
+      "title": "Asia session dashboard: heavyweights, volumes and outside drivers",
+      "status": "done",
+      "owner": "devin",
+      "due": "",
+      "resources": [],
+      "notes": [
+        "2026-08-01: Covers Nikkei 225, KOSPI, CSI 300, Hang Seng and STI plus the European indices behind the Asian afternoon; India, Middle East and Europe enter as lagged driver regressions."
+      ],
+      "created_at": "2026-08-01T13:06:04+00:00",
+      "updated_at": "2026-08-01T13:06:04+00:00"
+    },
+    {
+      "id": 17,
+      "title": "Participation and leverage data for the Asian dashboard",
+      "status": "todo",
+      "owner": "devin",
+      "due": "",
+      "resources": [
+        "Exchange margin balance and short-interest statistics (TSE, KRX, SSE, HKEX)",
+        "Level 2 / TAQ order book feed for depth and spreads"
+      ],
+      "notes": [],
+      "created_at": "2026-08-01T13:06:04+00:00",
+      "updated_at": "2026-08-01T13:06:04+00:00"
+    },
+    {
+      "id": 18,
+      "title": "Licensed index weights and free float for constituent attribution",
+      "status": "todo",
+      "owner": "devin",
+      "due": "",
+      "resources": [
+        "Index provider licence (Nikkei, KRX, CSI, HSI, SGX) for live weights"
+      ],
+      "notes": [],
+      "created_at": "2026-08-01T13:06:05+00:00",
+      "updated_at": "2026-08-01T13:06:05+00:00"
+    },
+    {
+      "id": 19,
+      "title": "Timestamped news and sentiment feed as a dashboard variable",
+      "status": "todo",
+      "owner": "",
+      "due": "",
+      "resources": [
+        "Newswire feed with timestamps (Reuters or Bloomberg)"
+      ],
+      "notes": [],
+      "created_at": "2026-08-01T13:06:05+00:00",
+      "updated_at": "2026-08-01T13:06:05+00:00"
     }
   ]
 }
