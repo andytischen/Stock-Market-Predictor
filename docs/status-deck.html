@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Stock-Market-Predictor — status deck 2026-08-01</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stock-Market-Predictor — status deck 2026-08-02</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/reveal.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/theme/white.css">
 <style>
@@ -18,14 +18,55 @@
  .reveal .meta { color: #777; font-size: .85em; font-weight: 400; }
  .reveal .note { color: #555; font-size: .8em; }
  .reveal li.overdue strong { color: #a00; }
+
+ /* ── Mobile: convert the slide deck to a readable scrollable document. ──
+    On a narrow viewport (iPhone) the reveal.js layout engine scales
+    content to a tiny size and hides non-active slides.  The CSS below
+    overrides every inline style reveal.js applies so the sections are
+    stacked vertically as a normal scrollable page instead. */
+ @media screen and (max-width: 600px) {
+   html, body { height: auto !important; overflow-y: auto !important; }
+   .reveal {
+     position: static !important;
+     height: auto !important;
+     overflow: visible !important;
+   }
+   .reveal .slides {
+     position: static !important;
+     width: 100% !important;
+     height: auto !important;
+     transform: none !important;
+     overflow: visible !important;
+   }
+   .reveal .slides > section {
+     position: static !important;
+     display: block !important;
+     visibility: visible !important;
+     width: 100% !important;
+     height: auto !important;
+     min-height: 0 !important;
+     transform: none !important;
+     padding: 1.2rem 1rem 1.4rem !important;
+     top: auto !important;
+     left: auto !important;
+     border-bottom: 1px solid #e0e0e0;
+     box-sizing: border-box;
+   }
+   .reveal .controls,
+   .reveal .progress,
+   .reveal .slide-number { display: none !important; }
+   .reveal h1 { font-size: 1.6rem; }
+   .reveal h2 { font-size: 1.3rem; }
+   .reveal ul { font-size: 0.9rem; }
+ }
 </style>
 </head>
 <body>
 <div class="reveal"><div class="slides">
 <section>
 <h1>Stock-Market-Predictor</h1>
-<p class="lead">Status update — 2026-08-01</p>
-<p class="headline">7 of 15 tasks complete · 47%</p>
+<p class="lead">Status update — 2026-08-02</p>
+<p class="headline">8 of 19 tasks complete · 42%</p>
 <p class="meta">2 blocked · 2 in progress</p>
 </section>
 <section><h2>Shipped</h2>
@@ -37,6 +78,7 @@
 <li><strong>Project tracker (pm) for status updates and resource requests</strong><br><span class="note">2026-08-01: Merged in #7.</span></li>
 <li><strong>Oil-versus-Asia dashboard (gapmodel dashboard)</strong><br><span class="note">2026-08-01: Merged in #9; crude readings, session state and the oil log-odds behind each open call.</span></li>
 <li><strong>Status deck generated from the board (pm deck)</strong><br><span class="note">2026-08-01: docs/status-deck.html, regenerate with python -m pm deck.</span></li>
+<li><strong>Asia session dashboard: heavyweights, volumes and outside drivers</strong> <span class="meta">devin</span><br><span class="note">2026-08-01: Covers Nikkei 225, KOSPI, CSI 300, Hang Seng and STI plus the European indices behind the Asian afternoon; India, Middle East and Europe enter as lagged driver regressions.</span></li>
 </ul></section>
 <section><h2>In progress</h2>
 <ul>
@@ -54,12 +96,19 @@
 <li><strong>Confidence intervals on the reported probabilities</strong></li>
 <li><strong>Track live forecasts against realised opens to measure real-world skill</strong></li>
 <li><strong>Alert when a market&#x27;s out-of-sample skill decays below its base rate</strong></li>
+<li><strong>Participation and leverage data for the Asian dashboard</strong> <span class="meta">devin</span></li>
+<li><strong>Licensed index weights and free float for constituent attribution</strong> <span class="meta">devin</span></li>
+<li><strong>Timestamped news and sentiment feed as a dashboard variable</strong></li>
 </ul></section>
 <section><h2>Resources needed</h2>
 <ul>
 <li><strong>A machine that can sit on a multi-hour hyperparameter search</strong> <span class="meta">Benchmark gradient boosting against the logistic baseline</span></li>
 <li><strong>A small database or object store for the daily forecast log</strong> <span class="meta">Track live forecasts against realised opens to measure real-world skill</span></li>
+<li><strong>Exchange margin balance and short-interest statistics (TSE, KRX, SSE, HKEX)</strong> <span class="meta">Participation and leverage data for the Asian dashboard</span></li>
+<li><strong>Index provider licence (Nikkei, KRX, CSI, HSI, SGX) for live weights</strong> <span class="meta">Licensed index weights and free float for constituent attribution</span></li>
 <li><strong>Intraday futures history vendor (Databento or similar)</strong> <span class="meta">Extend the intraday window beyond ~2 years</span></li>
+<li><strong>Level 2 / TAQ order book feed for depth and spreads</strong> <span class="meta">Participation and leverage data for the Asian dashboard</span></li>
+<li><strong>Newswire feed with timestamps (Reuters or Bloomberg)</strong> <span class="meta">Timestamped news and sentiment feed as a dashboard variable</span></li>
 <li><strong>Paid exchange opening-auction data (FTSE, ASX, Bovespa)</strong> <span class="meta">Replace stale Yahoo opening prints with real auction data</span></li>
 <li><strong>Somewhere to run the job on a schedule (GitHub Actions minutes are enough)</strong> <span class="meta">Nightly scheduled run publishing predictions</span></li>
 </ul></section>

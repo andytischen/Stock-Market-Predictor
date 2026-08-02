@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from .intraday import preopen_features
-from .markets import INDICATORS, MARKETS, OIL_SYMBOLS, Market, market
+from .markets import INDICATORS, MARKETS, OIL_SYMBOLS, Market, lag_days, market
 
 MIN_HISTORY = 60
 OIL_VOL_WINDOW = 20
@@ -26,7 +26,7 @@ def opening_gap(bars: pd.DataFrame) -> pd.Series:
     return np.log(bars["Open"] / bars["Close"].shift(1))
 
 
-def _as_of(source: pd.Series, dates: pd.DatetimeIndex, lag_days: int) -> pd.Series:
+def as_of(source: pd.Series, dates: pd.DatetimeIndex, lag_days: int) -> pd.Series:
     """Value of ``source`` known ``lag_days`` calendar days before each date.
 
     Missing calendar days (weekends, holidays) fall back to the most recent
@@ -47,7 +47,7 @@ def _column_name(symbol: str) -> str:
 
 def _lag_days(source_close_utc: float, target: Market) -> int:
     """0 if the source bar closes before the target opens, otherwise 1."""
-    return 0 if source_close_utc < target.open_utc else 1
+    return lag_days(source_close_utc, target.open_utc)
 
 
 def build_features(
@@ -99,8 +99,8 @@ def build_features(
         close = panel[other.symbol]["Close"].dropna()
         lag = _lag_days(other.close_utc, target)
         name = _column_name(other.symbol)
-        features[f"mkt_{name}_return"] = _as_of(log_return(close), dates, lag)
-        features[f"mkt_{name}_return_5"] = _as_of(log_return(close, 5), dates, lag)
+        features[f"mkt_{name}_return"] = as_of(log_return(close), dates, lag)
+        features[f"mkt_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
 
     for indicator in INDICATORS:
         if indicator.symbol not in panel:
@@ -109,16 +109,16 @@ def build_features(
         lag = _lag_days(indicator.close_utc, target)
         name = _column_name(indicator.symbol)
         returns = log_return(close)
-        features[f"ind_{name}_return"] = _as_of(returns, dates, lag)
+        features[f"ind_{name}_return"] = as_of(returns, dates, lag)
         if indicator.symbol == "^VIX":
-            features["ind_vix_level"] = _as_of(close, dates, lag)
+            features["ind_vix_level"] = as_of(close, dates, lag)
         if indicator.symbol in OIL_SYMBOLS:
             # Volatility is taken as of the previous bar so the shock is scaled
             # by a regime the market already knew about.
             vol = returns.rolling(OIL_VOL_WINDOW).std().shift(1)
-            features[f"ind_{name}_return_5"] = _as_of(log_return(close, 5), dates, lag)
-            features[f"ind_{name}_vol_{OIL_VOL_WINDOW}"] = _as_of(vol, dates, lag)
-            features[f"ind_{name}_shock"] = _as_of(returns / vol.where(vol > 0), dates, lag)
+            features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
+            features[f"ind_{name}_vol_{OIL_VOL_WINDOW}"] = as_of(vol, dates, lag)
+            features[f"ind_{name}_shock"] = as_of(returns / vol.where(vol > 0), dates, lag)
 
     frame = pd.DataFrame(features, index=dates)
     if hourly:

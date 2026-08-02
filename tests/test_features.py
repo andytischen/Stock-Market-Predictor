@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gapmodel.features import _as_of, _lag_days, build_features, opening_gap
-from gapmodel.markets import market
+from gapmodel.features import _lag_days, as_of, build_features, opening_gap
+from gapmodel.markets import INDICATORS, MARKETS, all_symbols, market
 from gapmodel.model import walk_forward
 
 
@@ -48,11 +48,20 @@ def test_lag_days_respects_session_order():
     assert _lag_days(20.0, market("^N225")) == 1
 
 
+def test_asml_is_a_lagged_indicator():
+    asml = next(i for i in INDICATORS if i.symbol == "ASML.AS")
+    assert asml.close_utc == 15.5
+    assert "ASML.AS" in all_symbols()
+    # Amsterdam closes after every tracked market opens, so its close is always
+    # read a session late -- never same-day.
+    assert all(_lag_days(asml.close_utc, market(m.symbol)) == 1 for m in MARKETS)
+
+
 def test_as_of_never_reads_the_future():
     dates = pd.bdate_range("2020-01-01", periods=5)
     source = pd.Series(range(5), index=dates, dtype=float)
-    same_day = _as_of(source, dates, lag_days=0)
-    previous = _as_of(source, dates, lag_days=1)
+    same_day = as_of(source, dates, lag_days=0)
+    previous = as_of(source, dates, lag_days=1)
     assert list(same_day) == [0, 1, 2, 3, 4]
     assert previous.iloc[-1] == 3  # yesterday's value, not today's
 
@@ -104,6 +113,36 @@ def test_walk_forward_is_out_of_sample_and_calibratable(panel):
     assert result.probabilities.index[0] == features.index[400]
     assert set(result.metrics) >= {"auc", "brier", "brier_skill", "accuracy"}
     assert not result.reliability().empty
+
+
+def test_window_metrics_restricts_to_date_range(panel):
+    from gapmodel.model import Backtest
+
+    index = pd.bdate_range("2020-01-01", periods=300)
+    rng = np.random.default_rng(42)
+    probabilities = pd.Series(rng.uniform(0.3, 0.7, len(index)), index=index)
+    outcomes = pd.Series(rng.integers(0, 2, len(index)).astype(float), index=index)
+    bt = Backtest(probabilities=probabilities, outcomes=outcomes)
+
+    since = pd.Timestamp("2021-01-01")
+    wm = bt.window_metrics(since=since)
+    # The windowed count must be less than the full series length.
+    assert int(wm["n"]) < len(probabilities)
+    # All sessions in the window are on or after the cutoff.
+    assert probabilities.loc[probabilities.index >= since].shape[0] == int(wm["n"])
+
+
+def test_window_metrics_raises_when_window_is_empty(panel):
+    from gapmodel.model import Backtest
+
+    index = pd.bdate_range("2020-01-01", periods=100)
+    rng = np.random.default_rng(0)
+    probabilities = pd.Series(rng.uniform(0.3, 0.7, len(index)), index=index)
+    outcomes = pd.Series(rng.integers(0, 2, len(index)).astype(float), index=index)
+    bt = Backtest(probabilities=probabilities, outcomes=outcomes)
+
+    with pytest.raises(ValueError, match="no out-of-sample predictions"):
+        bt.window_metrics(since=pd.Timestamp("2099-01-01"))
 
 
 def test_unknown_market_raises():

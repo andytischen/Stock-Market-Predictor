@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from .asia import ACTIVITY_WINDOW, REGRESSION_WINDOW, build_asia_dashboard
+from .asia_report import render_asia_html, render_asia_text
 from .dashboard import build_dashboard, render_html, render_text
 from .data import DEFAULT_CACHE, load_panel
 from .features import build_features
@@ -16,6 +18,7 @@ from .markets import INDICATORS, MARKETS, MARKETS_BY_SYMBOL, REGIONS
 from .model import MIN_TRAIN, walk_forward
 from .predict import forecast_all, to_frame
 from .web import serve_dashboard
+from .regions import dashboard_symbols
 
 # The hourly window is short, so the intraday variant needs a smaller warm-up.
 INTRADAY_MIN_TRAIN = 200
@@ -87,10 +90,35 @@ def _cmd_predict(args: argparse.Namespace) -> None:
         print(f"\nwrote {args.csv}")
 
 
+def _last_monday_5am() -> pd.Timestamp:
+    """Most recent Monday at 05:00 UTC — the start of last week's trading window."""
+    now = pd.Timestamp.now("UTC").tz_localize(None)
+    # weekday(): Mon=0 … Sun=6.  Roll back to the most recent Monday.
+    days_back = now.weekday()  # 0 on Monday, 6 on Sunday
+    if days_back == 0:
+        days_back = 7  # today IS Monday — use the previous Monday
+    return now.normalize() - pd.Timedelta(days=days_back) + pd.Timedelta(hours=5)
+
+
+def _since_timestamp(args: argparse.Namespace) -> pd.Timestamp | None:
+    """Return the ``since`` cutoff implied by ``--last-week`` or ``--since``."""
+    if getattr(args, "last_week", False):
+        return _last_monday_5am()
+    value = getattr(args, "since", None)
+    if value is not None:
+        try:
+            return pd.Timestamp(value)
+        except ValueError as exc:
+            raise SystemExit(f"error: --since {value!r} is not a valid date: {exc}") from exc
+    return None
+
+
 def _cmd_backtest(args: argparse.Namespace) -> None:
     panel = _panel(args)
     hourly = _hourly(args)
-    rows = []
+    since = _since_timestamp(args)
+    rows: list[dict] = []
+    window_rows: list[dict] = []
     for symbol in args.market or [m.symbol for m in MARKETS]:
         try:
             features, labels = build_features(symbol, panel, hourly=hourly)
@@ -104,12 +132,43 @@ def _cmd_backtest(args: argparse.Namespace) -> None:
             print(f"skipping {symbol}: {exc}")
             continue
         rows.append({"symbol": symbol, **result.metrics})
+        if since is not None:
+            try:
+                window_rows.append({"symbol": symbol, **result.window_metrics(since=since)})
+            except ValueError:
+                window_rows.append({"symbol": symbol, "n": 0})
         if args.reliability:
             print(f"\n{symbol} reliability:")
             print(result.reliability().to_string())
     if not rows:
         raise SystemExit("nothing to back-test")
     print("\n" + pd.DataFrame(rows).round(4).to_string(index=False))
+    if since is not None:
+        label = f"Window: {since.date()} 05:00 UTC → present"
+        print(f"\n{label}")
+        print(pd.DataFrame(window_rows).round(4).to_string(index=False))
+
+
+def _cmd_asia(args: argparse.Namespace) -> None:
+    # Volume drives the turnover and participation columns, so a cache written
+    # before it was collected is re-downloaded rather than shown as blank.
+    panel = load_panel(
+        symbols=dashboard_symbols(),
+        start=args.start,
+        cache_dir=Path(args.cache),
+        refresh=args.refresh,
+        require=("Volume",),
+    )
+    board = build_asia_dashboard(
+        panel,
+        window=args.window,
+        regression_window=args.regression_window,
+    )
+    if args.out:
+        Path(args.out).write_text(render_asia_html(board), encoding="utf-8")
+        print(f"wrote {args.out}")
+    if args.out is None or args.text:
+        print(render_asia_text(board))
 
 
 def _cmd_dashboard(args: argparse.Namespace) -> None:
@@ -147,7 +206,7 @@ def _as_of(hours: float | None) -> pd.Timestamp | None:
     """Today's date at the given UTC hour, or now when no hour is given."""
     if hours is None:
         return None
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     return now.normalize() + pd.Timedelta(hours=hours)
 
 
@@ -196,7 +255,33 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="add pre-open futures moves (recent ~2 years only)",
     )
+    backtest.add_argument(
+        "--since",
+        metavar="DATE",
+        help="show a second metrics table restricted to sessions on or after DATE (ISO format)",
+    )
+    backtest.add_argument(
+        "--last-week",
+        action="store_true",
+        help="shorthand for --since last-Monday-05:00-UTC (the opening of last week)",
+    )
     backtest.set_defaults(func=_cmd_backtest)
+
+    asia = sub.add_parser(
+        "asia", help="evaluate the Asian session: heavyweights and outside drivers"
+    )
+    asia.add_argument("--out", help="write a standalone HTML page to this path")
+    asia.add_argument("--text", action="store_true", help="also print the text version")
+    asia.add_argument(
+        "--window", type=int, default=ACTIVITY_WINDOW, help="sessions for betas and volume averages"
+    )
+    asia.add_argument(
+        "--regression-window",
+        type=int,
+        default=REGRESSION_WINDOW,
+        help="sessions used for the driver regressions",
+    )
+    asia.set_defaults(func=_cmd_asia)
 
     dashboard = sub.add_parser(
         "dashboard", help="crude readings next to one region's session state and open calls"
