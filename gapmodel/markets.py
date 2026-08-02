@@ -73,6 +73,10 @@ INDICATORS: tuple[Instrument, ...] = (
     Instrument("^TYX", "US 30y Treasury yield", close_utc=20.0),
     Instrument("^RUT", "Russell 2000", close_utc=20.0),
     Instrument("^SOX", "Philadelphia semiconductor index", close_utc=20.0),
+    # Europe's semiconductor bellwether, and the largest weight in the Euro
+    # Stoxx 50: it closes before the US indicators, so Asia reads it a session
+    # earlier than ^SOX.
+    Instrument("ASML.AS", "ASML", close_utc=15.5),
     Instrument("DX-Y.NYB", "US dollar index", close_utc=21.0),
     Instrument("JPY=X", "USD/JPY", close_utc=21.0),
     Instrument("EURUSD=X", "EUR/USD", close_utc=21.0),

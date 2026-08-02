@@ -93,6 +93,10 @@ def test_registry_is_consistent():
     assert len(symbols) == len(set(symbols))
     assert {p.symbol for p in ASIA_INDICES + EUROPE_INDICES} <= set(symbols)
     assert {i.symbol for i in INFLUENCES} <= set(symbols)
+    # ASML is both a Euro Stoxx heavyweight and a European driver of Asia; the
+    # panel must still download it exactly once.
+    assert [i.theme for i in INFLUENCES if i.symbol == "ASML.AS"] == ["Europe"]
+    assert symbols.count("ASML.AS") == 1
 
 
 def test_weights_above_the_index_are_rejected():

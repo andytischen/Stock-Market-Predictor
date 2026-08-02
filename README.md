@@ -8,7 +8,7 @@ indices. For every market it answers one question:
 
 Sixteen indices are covered across Asia, Europe and the Americas, driven by the
 sessions that have already closed plus a set of cross-asset indicators (VIX, the
-US 5y/10y/30y yields, Russell 2000, the semiconductor index, dollar index,
+US 5y/10y/30y yields, Russell 2000, the semiconductor index, ASML, dollar index,
 USD/JPY, EUR/USD, GBP/USD, WTI and Brent crude, gold, silver, copper, S&P 500
 and Nasdaq futures). Run `python -m gapmodel markets` for the full list with
 session times.

@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from gapmodel.features import _lag_days, as_of, build_features, opening_gap
-from gapmodel.markets import market
+from gapmodel.markets import INDICATORS, MARKETS, all_symbols, market
 from gapmodel.model import walk_forward
 
 
@@ -46,6 +46,15 @@ def test_lag_days_respects_session_order():
     assert _lag_days(6.0, market("^GDAXI")) == 0
     # Wall Street closes at 20:00 UTC, after Tokyo's 00:00 open -> previous day.
     assert _lag_days(20.0, market("^N225")) == 1
+
+
+def test_asml_is_a_lagged_indicator():
+    asml = next(i for i in INDICATORS if i.symbol == "ASML.AS")
+    assert asml.close_utc == 15.5
+    assert "ASML.AS" in all_symbols()
+    # Amsterdam closes after every tracked market opens, so its close is always
+    # read a session late -- never same-day.
+    assert all(_lag_days(asml.close_utc, market(m.symbol)) == 1 for m in MARKETS)
 
 
 def test_as_of_never_reads_the_future():

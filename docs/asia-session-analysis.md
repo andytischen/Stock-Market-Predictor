@@ -108,6 +108,16 @@ is why the semiconductor cycle shows up on both continents. FTSE 100 is the
 exception — AstraZeneca, Shell and HSBC give it an energy/defensive tilt, and
 its correlation to the Asian indices is the weakest of the three.
 
+ASML is carried twice on purpose: as the largest Euro Stoxx weight and, since
+it is the one European name Asian semiconductor supply chains trade off, as a
+Europe-theme driver and a cross-asset indicator in the gap model itself. It
+regresses on Tokyo (β 0.20, t 6.9, R² 0.09) and Seoul (β 0.25, t 6.2, R² 0.07)
+behind only the US series — but that information is nearly all already in
+`^SOX`: a walk-forward run with and without ASML moves AUC by less than
+±0.001 on every index (European indices marginally up, Asian marginally down).
+It is in the feature set because it is the cleanest pre-US read on the
+semiconductor cycle, not because it lifts the backtest.
+
 ## What this dashboard cannot see
 
 The proxies above are the honest limit of free daily data. Not covered, and

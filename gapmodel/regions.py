@@ -272,6 +272,9 @@ INFLUENCES: tuple[Influence, ...] = (
     Influence("^STOXX50E", "Euro Stoxx 50 cash", "Europe", close_utc=15.5),
     Influence("^GDAXI", "DAX cash", "Europe", close_utc=15.5),
     Influence("^FTSE", "FTSE 100 cash", "Europe", close_utc=15.5),
+    # Europe's semiconductor bellwether: the largest Euro Stoxx weight and the
+    # one European name Asian semiconductor supply chains trade off.
+    Influence("ASML.AS", "ASML", "Europe", close_utc=15.5),
     Influence("^GSPC", "S&P 500", "Global", close_utc=20.0),
     Influence("^SOX", "Philadelphia semiconductor index", "Global", close_utc=20.0),
     Influence("^VIX", "VIX volatility index", "Global", close_utc=21.25),
