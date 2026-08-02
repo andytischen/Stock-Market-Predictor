@@ -63,30 +63,49 @@ def _display(probability: float) -> float:
 def shocked_row(live: pd.DataFrame, shocks: dict[str, float]) -> pd.DataFrame:
     """Copy of ``live`` with hypothetical log returns added to some instruments.
 
-    A shock is applied to every return feature derived from that symbol, both
-    the one-day and the five-day window, since a move today is also part of the
-    week. Symbols the target does not use (its own symbol, above all) are
-    silently absent from its feature set and simply have no effect on it.
+    A shock is applied to every feature derived from that symbol's latest bar:
+    the one-day and five-day returns (a move today is also part of the week),
+    the VIX level, and the volatility-normalised shock feature. Symbols the
+    target does not use (its own symbol, above all) are silently absent from
+    its feature set and simply have no effect on it.
     """
     bumped = live.copy()
     for symbol, move in shocks.items():
         name = _column_name(symbol)
-        for column in (f"mkt_{name}_return", f"mkt_{name}_return_5", f"ind_{name}_return"):
+        for column in (
+            f"mkt_{name}_return",
+            f"mkt_{name}_return_5",
+            f"ind_{name}_return",
+            f"ind_{name}_return_5",
+        ):
             if column in bumped:
                 bumped[column] += move
+        if symbol == "^VIX" and "ind_vix_level" in bumped:
+            bumped["ind_vix_level"] *= np.exp(move)
+        # A volatility-normalised shock feature has to move with its return.
+        # The volatility itself is measured up to the previous bar, so a move
+        # today leaves the denominator alone.
+        vol = [c for c in bumped.columns if c.startswith(f"ind_{name}_vol_")]
+        if f"ind_{name}_shock" in bumped and vol:
+            sigma = bumped[vol[0]]
+            bumped[f"ind_{name}_shock"] += move / sigma.where(sigma > 0)
     return bumped
 
 
 def parse_shock(text: str) -> tuple[str, float]:
-    """``"^KS11=+2%"`` or ``"^KS11=0.02"`` into a symbol and a log return."""
-    symbol, _, size = text.partition("=")
+    """``"^KS11=+2%"`` or ``"^KS11=0.02"`` into a symbol and a log return.
+
+    Split on the last ``=`` so symbols that contain one — every FX pair and
+    future, ``CL=F``, ``JPY=X`` — remain shockable.
+    """
+    symbol, _, size = text.rpartition("=")
     if not symbol or not size:
         raise ValueError(f"expected SYMBOL=MOVE, got {text!r}")
     percent = size.strip().endswith("%")
     try:
         number = float(size.strip().rstrip("%"))
     except ValueError as exc:
-        raise ValueError(f"{size!r} is not a number") from exc
+        raise ValueError(f"{size!r} is not a move; expected e.g. {symbol}=+2%") from exc
     simple = number / 100.0 if percent else number
     if simple <= -1.0:
         raise ValueError("a move of -100% or worse is not a price")
@@ -111,13 +130,16 @@ def forecast_market(
     probability = float(calibrate(pipeline.predict_proba(live.to_numpy())[:, 1])[0])
 
     shocked = None
+    explained = live
     if shocks:
-        hypothetical = shocked_row(live, shocks)
-        shocked = float(calibrate(pipeline.predict_proba(hypothetical.to_numpy())[:, 1])[0])
+        explained = shocked_row(live, shocks)
+        shocked = float(calibrate(pipeline.predict_proba(explained.to_numpy())[:, 1])[0])
 
     weights = model_mod.coefficients(pipeline, list(features.columns))
     scaler = pipeline.named_steps["scale"]
-    standardised = pd.Series(scaler.transform(live.to_numpy())[0], index=features.columns)
+    # Drivers describe the row that produced the rightmost probability, so
+    # under a shock they explain the hypothetical rather than today.
+    standardised = pd.Series(scaler.transform(explained.to_numpy())[0], index=features.columns)
     contributions = (weights * standardised).sort_values(key=abs, ascending=False)
 
     meta = market(symbol)

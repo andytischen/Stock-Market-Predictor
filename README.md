@@ -36,6 +36,7 @@ python -m gapmodel fetch              # download and cache ~20 years of daily ba
 python -m gapmodel predict --explain  # probability that the next open is up
 python -m gapmodel predict --intraday # add pre-open futures moves (recent window)
 python -m gapmodel predict --shock '^KS11=+2%'  # what-if: re-run under a hypothetical move
+python -m gapmodel predict --shock 'CL=F=-5%' --shock 'JPY=X=+2%'  # shocks compose
 python -m gapmodel backtest --reliability
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
 ```
@@ -149,6 +150,17 @@ the answer into the features.
 since the target's previous close, which is the point of the feature: run it in
 the hours before the bell. Over a weekend it refuses rather than reporting a
 fabricated zero overnight move.
+
+### What-if shocks
+
+`--shock SYMBOL=MOVE` re-runs every market with a hypothetical move added to one
+instrument and prints `p_shocked` and `p_change` alongside the live probability.
+The move applies to every feature derived from that instrument's latest bar, and
+inherits the same timing rules as the model: for markets opening after that
+instrument's close it is *today's* move, for markets opening before it, it is the
+one they will only see tomorrow — which is why a Korean rally reads as a
+different sign in Tokyo than in Frankfurt. The model is linear in log-odds, so a
+move far outside the training range is an extrapolation, not a forecast.
 
 ### Data caveats
 
