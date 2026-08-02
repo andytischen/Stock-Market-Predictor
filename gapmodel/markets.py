@@ -83,9 +83,9 @@ INDICATORS: tuple[Instrument, ...] = (
     Instrument("GBPUSD=X", "GBP/USD", close_utc=21.0),
     # South Korean won: the Bank of Korea intervenes to defend the exchange rate
     # against rapid depreciation, particularly during risk-off episodes that hit
-    # the KOSPI hard; KRW=X closes in the Asian afternoon (Seoul 15:30 KST =
-    # 06:30 UTC), so it is available same-day for every European and US open.
-    Instrument("KRW=X", "USD/KRW", close_utc=6.5),
+    # the KOSPI hard.  Like every other Yahoo spot FX bar it is stamped at the
+    # New York cut, so it is read one session late, as the other pairs are.
+    Instrument("KRW=X", "USD/KRW", close_utc=21.0),
     # Bitcoin is deliberately absent: its history starts in 2014 and, because a
     # row needs every feature, adding it would cost every market nine years of
     # training data for no measurable accuracy.

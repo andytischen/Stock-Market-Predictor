@@ -123,7 +123,7 @@ def build_features(
             features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
             features[f"ind_{name}_vol_{OIL_VOL_WINDOW}"] = as_of(vol, dates, lag)
             features[f"ind_{name}_shock"] = as_of(returns / vol.where(vol > 0), dates, lag)
-        if indicator.symbol in FX_SYMBOLS:
+        elif indicator.symbol in FX_SYMBOLS:
             # Central-bank intervention produces a move that is large relative
             # to recent realised volatility.  The shock feature normalises the
             # daily return by the preceding-bar volatility so the model can

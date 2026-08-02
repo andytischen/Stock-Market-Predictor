@@ -27,7 +27,9 @@ def synthetic_bars(n: int = 900, seed: int = 0) -> pd.DataFrame:
 def panel() -> dict[str, pd.DataFrame]:
     return {
         symbol: synthetic_bars(seed=seed)
-        for seed, symbol in enumerate(["^GSPC", "^N225", "^FTSE", "^VIX", "ES=F", "CL=F", "JPY=X", "KRW=X"])
+        for seed, symbol in enumerate(
+            ["^GSPC", "^N225", "^FTSE", "^VIX", "ES=F", "CL=F", "JPY=X", "KRW=X"]
+        )
     }
 
 
