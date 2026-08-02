@@ -99,6 +99,13 @@ INDICATORS: tuple[Instrument, ...] = (
 # carries extra features describing the size and volatility of the move.
 OIL_SYMBOLS: frozenset[str] = frozenset({"CL=F", "BZ=F"})
 
+# Central-bank governors intervene in these pairs to defend exchange-rate
+# levels or smooth volatility. Intervention episodes produce moves that are
+# large relative to recent realised volatility — exactly the signal the shock
+# feature is designed to capture. USD/JPY is the most actively managed of the
+# three; EUR/USD and GBP/USD follow the ECB and Bank of England respectively.
+FX_SYMBOLS: frozenset[str] = frozenset({"JPY=X", "EURUSD=X", "GBPUSD=X"})
+
 MARKETS_BY_SYMBOL = {m.symbol: m for m in MARKETS}
 
 # Regions in the order their sessions run through the day.
