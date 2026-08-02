@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Stock-Market-Predictor — status deck 2026-08-01</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stock-Market-Predictor — status deck 2026-08-02</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/reveal.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/theme/white.css">
 <style>
@@ -18,13 +18,54 @@
  .reveal .meta { color: #777; font-size: .85em; font-weight: 400; }
  .reveal .note { color: #555; font-size: .8em; }
  .reveal li.overdue strong { color: #a00; }
+
+ /* ── Mobile: convert the slide deck to a readable scrollable document. ──
+    On a narrow viewport (iPhone) the reveal.js layout engine scales
+    content to a tiny size and hides non-active slides.  The CSS below
+    overrides every inline style reveal.js applies so the sections are
+    stacked vertically as a normal scrollable page instead. */
+ @media screen and (max-width: 600px) {
+   html, body { height: auto !important; overflow-y: auto !important; }
+   .reveal {
+     position: static !important;
+     height: auto !important;
+     overflow: visible !important;
+   }
+   .reveal .slides {
+     position: static !important;
+     width: 100% !important;
+     height: auto !important;
+     transform: none !important;
+     overflow: visible !important;
+   }
+   .reveal .slides > section {
+     position: static !important;
+     display: block !important;
+     visibility: visible !important;
+     width: 100% !important;
+     height: auto !important;
+     min-height: 0 !important;
+     transform: none !important;
+     padding: 1.2rem 1rem 1.4rem !important;
+     top: auto !important;
+     left: auto !important;
+     border-bottom: 1px solid #e0e0e0;
+     box-sizing: border-box;
+   }
+   .reveal .controls,
+   .reveal .progress,
+   .reveal .slide-number { display: none !important; }
+   .reveal h1 { font-size: 1.6rem; }
+   .reveal h2 { font-size: 1.3rem; }
+   .reveal ul { font-size: 0.9rem; }
+ }
 </style>
 </head>
 <body>
 <div class="reveal"><div class="slides">
 <section>
 <h1>Stock-Market-Predictor</h1>
-<p class="lead">Status update — 2026-08-01</p>
+<p class="lead">Status update — 2026-08-02</p>
 <p class="headline">8 of 19 tasks complete · 42%</p>
 <p class="meta">2 blocked · 2 in progress</p>
 </section>
