@@ -110,3 +110,36 @@ def test_shock_moves_only_the_features_of_that_symbol():
     assert bumped["mkt_ks11_return"].iloc[0] == pytest.approx(0.11)
     assert bumped["mkt_ks11_return_5"].iloc[0] == pytest.approx(0.12)
     assert bumped["mkt_n225_return"].iloc[0] == pytest.approx(0.03)
+
+
+def test_shock_accepts_symbols_containing_equals():
+    from gapmodel.predict import parse_shock
+
+    assert parse_shock("CL=F=-5%") == ("CL=F", pytest.approx(math.log(0.95)))
+    assert parse_shock("JPY=X=+2%") == ("JPY=X", pytest.approx(math.log(1.02)))
+    assert build_parser().parse_args(["predict", "--shock", "CL=F=-5%"]).shock == [
+        ("CL=F", pytest.approx(math.log(0.95)))
+    ]
+
+
+def test_shock_moves_every_feature_derived_from_the_instrument():
+    from gapmodel.predict import shocked_row
+
+    live = pd.DataFrame(
+        {
+            "ind_vix_return": [0.0],
+            "ind_vix_level": [20.0],
+            "ind_cl_f_return": [0.0],
+            "ind_cl_f_return_5": [0.01],
+            "ind_cl_f_vol_20": [0.02],
+            "ind_cl_f_shock": [0.5],
+        }
+    )
+    bumped = shocked_row(live, {"^VIX": math.log(1.1), "CL=F": 0.04})
+    assert bumped["ind_vix_return"].iloc[0] == pytest.approx(math.log(1.1))
+    assert bumped["ind_vix_level"].iloc[0] == pytest.approx(22.0)
+    assert bumped["ind_cl_f_return"].iloc[0] == pytest.approx(0.04)
+    assert bumped["ind_cl_f_return_5"].iloc[0] == pytest.approx(0.05)
+    # The volatility denominator is measured to the previous bar, so it stays.
+    assert bumped["ind_cl_f_vol_20"].iloc[0] == pytest.approx(0.02)
+    assert bumped["ind_cl_f_shock"].iloc[0] == pytest.approx(0.5 + 0.04 / 0.02)
