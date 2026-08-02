@@ -6,6 +6,7 @@ import argparse
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .asia import ACTIVITY_WINDOW, REGRESSION_WINDOW, build_asia_dashboard
@@ -16,7 +17,7 @@ from .features import build_features
 from .intraday import load_hourly_panel
 from .markets import INDICATORS, MARKETS, MARKETS_BY_SYMBOL, REGIONS
 from .model import MIN_TRAIN, walk_forward
-from .predict import forecast_all, to_frame
+from .predict import forecast_all, parse_shock, to_frame
 from .regions import dashboard_symbols
 
 # The hourly window is short, so the intraday variant needs a smaller warm-up.
@@ -28,6 +29,17 @@ def _market_symbol(value: str) -> str:
         known = ", ".join(MARKETS_BY_SYMBOL)
         raise argparse.ArgumentTypeError(f"unknown market {value!r}; choose from {known}")
     return value
+
+
+def _shock(value: str) -> tuple[str, float]:
+    known = set(MARKETS_BY_SYMBOL) | {i.symbol for i in INDICATORS}
+    try:
+        symbol, move = parse_shock(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    if symbol not in known:
+        raise argparse.ArgumentTypeError(f"unknown instrument {symbol!r}")
+    return symbol, move
 
 
 def _positive_float(value: str) -> float:
@@ -70,13 +82,18 @@ def _cmd_markets(_: argparse.Namespace) -> None:
 
 def _cmd_predict(args: argparse.Namespace) -> None:
     hourly = _hourly(args)
+    shocks = dict(args.shock or [])
     forecasts = forecast_all(
         _panel(args),
         symbols=args.market,
         c=args.regularisation,
         hourly=hourly,
         min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
+        shocks=shocks,
     )
+    if shocks:
+        described = ", ".join(f"{s} {np.expm1(m):+.2%}" for s, m in shocks.items())
+        print(f"hypothetical: {described}\n")
     frame = to_frame(forecasts).sort_values("p_open_up", ascending=False)
     print(frame.to_string(index=False))
     if args.explain:
@@ -224,6 +241,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     predict.add_argument("--explain", action="store_true", help="show top drivers")
     predict.add_argument("--csv", help="also write the table to this path")
+    predict.add_argument(
+        "--shock",
+        action="append",
+        type=_shock,
+        metavar="SYMBOL=MOVE",
+        help="re-run under a hypothetical move, e.g. --shock '^KS11=+2%%'",
+    )
     predict.add_argument(
         "--intraday",
         action="store_true",

@@ -35,6 +35,7 @@ python -m gapmodel markets            # what is modelled, and when each session 
 python -m gapmodel fetch              # download and cache ~20 years of daily bars
 python -m gapmodel predict --explain  # probability that the next open is up
 python -m gapmodel predict --intraday # add pre-open futures moves (recent window)
+python -m gapmodel predict --shock '^KS11=+2%'  # what-if: re-run under a hypothetical move
 python -m gapmodel backtest --reliability
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
 ```
