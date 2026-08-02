@@ -89,10 +89,35 @@ def _cmd_predict(args: argparse.Namespace) -> None:
         print(f"\nwrote {args.csv}")
 
 
+def _last_monday_5am() -> pd.Timestamp:
+    """Most recent Monday at 05:00 UTC — the start of last week's trading window."""
+    now = pd.Timestamp.now("UTC").tz_localize(None)
+    # weekday(): Mon=0 … Sun=6.  Roll back to the most recent Monday.
+    days_back = now.weekday()  # 0 on Monday, 6 on Sunday
+    if days_back == 0:
+        days_back = 7  # today IS Monday — use the previous Monday
+    return now.normalize() - pd.Timedelta(days=days_back) + pd.Timedelta(hours=5)
+
+
+def _since_timestamp(args: argparse.Namespace) -> pd.Timestamp | None:
+    """Return the ``since`` cutoff implied by ``--last-week`` or ``--since``."""
+    if getattr(args, "last_week", False):
+        return _last_monday_5am()
+    value = getattr(args, "since", None)
+    if value is not None:
+        try:
+            return pd.Timestamp(value)
+        except ValueError as exc:
+            raise SystemExit(f"error: --since {value!r} is not a valid date: {exc}") from exc
+    return None
+
+
 def _cmd_backtest(args: argparse.Namespace) -> None:
     panel = _panel(args)
     hourly = _hourly(args)
-    rows = []
+    since = _since_timestamp(args)
+    rows: list[dict] = []
+    window_rows: list[dict] = []
     for symbol in args.market or [m.symbol for m in MARKETS]:
         try:
             features, labels = build_features(symbol, panel, hourly=hourly)
@@ -106,12 +131,21 @@ def _cmd_backtest(args: argparse.Namespace) -> None:
             print(f"skipping {symbol}: {exc}")
             continue
         rows.append({"symbol": symbol, **result.metrics})
+        if since is not None:
+            try:
+                window_rows.append({"symbol": symbol, **result.window_metrics(since=since)})
+            except ValueError:
+                window_rows.append({"symbol": symbol, "n": 0})
         if args.reliability:
             print(f"\n{symbol} reliability:")
             print(result.reliability().to_string())
     if not rows:
         raise SystemExit("nothing to back-test")
     print("\n" + pd.DataFrame(rows).round(4).to_string(index=False))
+    if since is not None:
+        label = f"Window: {since.date()} 05:00 UTC → present"
+        print(f"\n{label}")
+        print(pd.DataFrame(window_rows).round(4).to_string(index=False))
 
 
 def _cmd_asia(args: argparse.Namespace) -> None:
@@ -158,7 +192,7 @@ def _as_of(hours: float | None) -> pd.Timestamp | None:
     """Today's date at the given UTC hour, or now when no hour is given."""
     if hours is None:
         return None
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     return now.normalize() + pd.Timedelta(hours=hours)
 
 
@@ -206,6 +240,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--intraday",
         action="store_true",
         help="add pre-open futures moves (recent ~2 years only)",
+    )
+    backtest.add_argument(
+        "--since",
+        metavar="DATE",
+        help="show a second metrics table restricted to sessions on or after DATE (ISO format)",
+    )
+    backtest.add_argument(
+        "--last-week",
+        action="store_true",
+        help="shorthand for --since last-Monday-05:00-UTC (the opening of last week)",
     )
     backtest.set_defaults(func=_cmd_backtest)
 

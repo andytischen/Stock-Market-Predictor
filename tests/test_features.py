@@ -115,6 +115,36 @@ def test_walk_forward_is_out_of_sample_and_calibratable(panel):
     assert not result.reliability().empty
 
 
+def test_window_metrics_restricts_to_date_range(panel):
+    from gapmodel.model import Backtest
+
+    index = pd.bdate_range("2020-01-01", periods=300)
+    rng = np.random.default_rng(42)
+    probabilities = pd.Series(rng.uniform(0.3, 0.7, len(index)), index=index)
+    outcomes = pd.Series(rng.integers(0, 2, len(index)).astype(float), index=index)
+    bt = Backtest(probabilities=probabilities, outcomes=outcomes)
+
+    since = pd.Timestamp("2021-01-01")
+    wm = bt.window_metrics(since=since)
+    # The windowed count must be less than the full series length.
+    assert int(wm["n"]) < len(probabilities)
+    # All sessions in the window are on or after the cutoff.
+    assert probabilities.loc[probabilities.index >= since].shape[0] == int(wm["n"])
+
+
+def test_window_metrics_raises_when_window_is_empty(panel):
+    from gapmodel.model import Backtest
+
+    index = pd.bdate_range("2020-01-01", periods=100)
+    rng = np.random.default_rng(0)
+    probabilities = pd.Series(rng.uniform(0.3, 0.7, len(index)), index=index)
+    outcomes = pd.Series(rng.integers(0, 2, len(index)).astype(float), index=index)
+    bt = Backtest(probabilities=probabilities, outcomes=outcomes)
+
+    with pytest.raises(ValueError, match="no out-of-sample predictions"):
+        bt.window_metrics(since=pd.Timestamp("2099-01-01"))
+
+
 def test_unknown_market_raises():
     with pytest.raises(KeyError):
         market("^NOPE")

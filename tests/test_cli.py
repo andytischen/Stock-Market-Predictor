@@ -1,6 +1,6 @@
 import pytest
 
-from gapmodel.cli import main
+from gapmodel.cli import _last_monday_5am, _since_timestamp, build_parser, main
 
 
 def test_unknown_market_is_rejected_at_parse_time(capsys):
@@ -30,3 +30,53 @@ def test_markets_command_lists_every_market(capsys):
     main(["markets"])
     out = capsys.readouterr().out
     assert "^GSPC" in out and "Nikkei 225" in out
+
+
+def test_last_monday_5am_is_a_monday_at_5am():
+    import pandas as pd
+
+    ts = _last_monday_5am()
+    assert ts.weekday() == 0, "should be a Monday"
+    assert ts.hour == 5 and ts.minute == 0
+
+
+def test_since_timestamp_last_week():
+    import argparse
+
+    import pandas as pd
+
+    args = argparse.Namespace(last_week=True, since=None)
+    ts = _since_timestamp(args)
+    assert ts is not None
+    assert ts.weekday() == 0
+
+
+def test_since_timestamp_explicit_date():
+    import argparse
+
+    import pandas as pd
+
+    args = argparse.Namespace(last_week=False, since="2026-07-28")
+    ts = _since_timestamp(args)
+    assert ts == pd.Timestamp("2026-07-28")
+
+
+def test_since_timestamp_none_when_neither_flag():
+    import argparse
+
+    args = argparse.Namespace(last_week=False, since=None)
+    assert _since_timestamp(args) is None
+
+
+def test_backtest_last_week_in_parser():
+    parser = build_parser()
+    args = parser.parse_args(["backtest", "--last-week"])
+    assert args.last_week is True
+    assert args.since is None
+
+
+def test_backtest_since_in_parser():
+    parser = build_parser()
+    args = parser.parse_args(["backtest", "--since", "2026-07-28"])
+    assert args.since == "2026-07-28"
+    assert not args.last_week
