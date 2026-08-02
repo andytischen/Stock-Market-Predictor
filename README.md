@@ -37,6 +37,7 @@ python -m gapmodel predict --explain  # probability that the next open is up
 python -m gapmodel predict --intraday # add pre-open futures moves (recent window)
 python -m gapmodel backtest --reliability
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
+python -m gapmodel web --region Asia --at 05:00             # local browser interface
 ```
 
 `predict` prints one row per market with the probability and the out-of-sample
@@ -58,6 +59,15 @@ session is doing with it. `--at` pins the clock (session state is read at that
 UTC time, so `--at 05:00` shows Tokyo, Hong Kong, Seoul, Shanghai and Mumbai
 mid-session and Sydney already shut), `--region` switches to Europe or the
 Americas, and `--html` writes a standalone page.
+
+`web` serves the same dashboard behind a lightweight local browser interface.
+It starts an HTTP server (default `http://127.0.0.1:8000/`) with a small form
+to switch region/time and re-render live:
+
+```bash
+python -m gapmodel web --region Asia --at 05:00
+python -m gapmodel web --host 0.0.0.0 --port 8080 --no-browser
+```
 
 ```
 Crude:
