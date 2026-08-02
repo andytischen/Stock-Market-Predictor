@@ -78,7 +78,7 @@ def render_deck(board: Board) -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{escape(board.name)} — status deck {today}</title>
 <link rel="stylesheet" href="{REVEAL_CDN}/dist/reveal.css">
 <link rel="stylesheet" href="{REVEAL_CDN}/dist/theme/white.css">
@@ -94,6 +94,47 @@ def render_deck(board: Board) -> str:
  .reveal .meta {{ color: #777; font-size: .85em; font-weight: 400; }}
  .reveal .note {{ color: #555; font-size: .8em; }}
  .reveal li.overdue strong {{ color: #a00; }}
+
+ /* ── Mobile: convert the slide deck to a readable scrollable document. ──
+    On a narrow viewport (iPhone) the reveal.js layout engine scales
+    content to a tiny size and hides non-active slides.  The CSS below
+    overrides every inline style reveal.js applies so the sections are
+    stacked vertically as a normal scrollable page instead. */
+ @media screen and (max-width: 600px) {{
+   html, body {{ height: auto !important; overflow-y: auto !important; }}
+   .reveal {{
+     position: static !important;
+     height: auto !important;
+     overflow: visible !important;
+   }}
+   .reveal .slides {{
+     position: static !important;
+     width: 100% !important;
+     height: auto !important;
+     transform: none !important;
+     overflow: visible !important;
+   }}
+   .reveal .slides > section {{
+     position: static !important;
+     display: block !important;
+     visibility: visible !important;
+     width: 100% !important;
+     height: auto !important;
+     min-height: 0 !important;
+     transform: none !important;
+     padding: 1.2rem 1rem 1.4rem !important;
+     top: auto !important;
+     left: auto !important;
+     border-bottom: 1px solid #e0e0e0;
+     box-sizing: border-box;
+   }}
+   .reveal .controls,
+   .reveal .progress,
+   .reveal .slide-number {{ display: none !important; }}
+   .reveal h1 {{ font-size: 1.6rem; }}
+   .reveal h2 {{ font-size: 1.3rem; }}
+   .reveal ul {{ font-size: 0.9rem; }}
+ }}
 </style>
 </head>
 <body>
