@@ -19,6 +19,7 @@ from .markets import INDICATORS, MARKETS, MARKETS_BY_SYMBOL, REGIONS
 from .model import MIN_TRAIN, walk_forward
 from .predict import forecast_all, parse_shock, to_frame
 from .regions import dashboard_symbols
+from .scenarios import SCENARIOS, scenario
 
 # The hourly window is short, so the intraday variant needs a smaller warm-up.
 INTRADAY_MIN_TRAIN = 200
@@ -78,11 +79,17 @@ def _cmd_markets(_: argparse.Namespace) -> None:
     print("\nIndicators:")
     for i in INDICATORS:
         print(f"  {i.symbol:<12} {i.name}")
+    print("\nScenarios (predict --scenario):")
+    for s in SCENARIOS.values():
+        legs = ", ".join(f"{sym} {move:+.1%}" for sym, move in s.moves.items())
+        print(f"  {s.name:<22} {s.description}\n  {'':<22} {legs}")
 
 
 def _cmd_predict(args: argparse.Namespace) -> None:
     hourly = _hourly(args)
-    shocks = dict(args.shock or [])
+    shocks = dict(scenario(args.scenario).shocks()) if args.scenario else {}
+    # An explicit --shock on the same instrument replaces the scenario's leg.
+    shocks.update(args.shock or [])
     forecasts = forecast_all(
         _panel(args),
         symbols=args.market,
@@ -91,6 +98,8 @@ def _cmd_predict(args: argparse.Namespace) -> None:
         min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
         shocks=shocks,
     )
+    if args.scenario:
+        print(f"scenario: {args.scenario} — {scenario(args.scenario).description}")
     if shocks:
         described = ", ".join(f"{s} {np.expm1(m):+.2%}" for s, m in shocks.items())
         print(f"hypothetical: {described}\n")
@@ -247,6 +256,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=_shock,
         metavar="SYMBOL=MOVE",
         help="re-run under a hypothetical move, e.g. --shock '^KS11=+2%%'",
+    )
+    predict.add_argument(
+        "--scenario",
+        choices=sorted(SCENARIOS),
+        help="re-run under a named bundle of moves; --shock overrides a leg of it",
     )
     predict.add_argument(
         "--intraday",
