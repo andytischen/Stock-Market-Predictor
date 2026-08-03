@@ -162,6 +162,21 @@ one they will only see tomorrow — which is why a Korean rally reads as a
 different sign in Tokyo than in Frankfurt. The model is linear in log-odds, so a
 move far outside the training range is an extrapolation, not a forecast.
 
+### Named scenarios
+
+`--scenario NAME` applies a bundle of moves that belong to one macro event, so
+the recurring ones need not be spelled out leg by leg:
+
+```bash
+python -m gapmodel predict --scenario opec-supply-increase
+python -m gapmodel predict --scenario opec-supply-increase --shock 'CL=F=-6%'
+```
+
+`markets` prints every scenario with its legs. A `--shock` on an instrument the
+scenario also moves replaces that leg, so a scenario can be re-sized without
+editing it. Sizes describe the one-session reaction to the announcement, not the
+drift that follows it.
+
 ### Data caveats
 
 Yahoo publishes a stale opening price for some indices (it repeats the previous
