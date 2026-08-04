@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gapmodel.features import _lag_days, as_of, build_features, opening_gap
-from gapmodel.markets import INDICATORS, MARKETS, all_symbols, market
+from gapmodel.features import _column_name, _lag_days, as_of, build_features, opening_gap
+from gapmodel.markets import INDICATORS, MARKETS, SECTOR_SYMBOLS, all_symbols, market
 from gapmodel.model import walk_forward
 
 
@@ -28,7 +28,19 @@ def panel() -> dict[str, pd.DataFrame]:
     return {
         symbol: synthetic_bars(seed=seed)
         for seed, symbol in enumerate(
-            ["^GSPC", "^N225", "^FTSE", "^VIX", "ES=F", "CL=F", "JPY=X", "KRW=X", "EXH8.DE"]
+            [
+                "^GSPC",
+                "^N225",
+                "^FTSE",
+                "^GDAXI",
+                "^VIX",
+                "ES=F",
+                "CL=F",
+                "JPY=X",
+                "KRW=X",
+                "EXH8.DE",
+                "EXV3.DE",
+            ]
         )
     }
 
@@ -88,14 +100,22 @@ def test_oil_carries_shock_features(panel):
     assert (features["ind_cl_f_vol_20"] > 0).all()
 
 
-def test_european_retail_carries_a_weekly_return_but_no_shock(panel):
-    features, _ = build_features("^GSPC", panel)
+def test_sectors_carry_a_weekly_return_but_no_shock(panel):
+    features, _ = build_features("^GDAXI", panel)
     assert {"ind_exh8_de_return", "ind_exh8_de_return_5"} <= set(features.columns)
     assert not any(col.startswith("ind_exh8_de_vol") for col in features.columns)
     assert "ind_exh8_de_shock" not in features.columns
     # Xetra closes after every tracked market opens, so it is always read late.
     retail = next(i for i in INDICATORS if i.symbol == "EXH8.DE")
     assert all(_lag_days(retail.close_utc, market(m.symbol)) == 1 for m in MARKETS)
+
+
+def test_sector_features_reach_european_markets_only(panel):
+    european, _ = build_features("^GDAXI", panel)
+    overseas, _ = build_features("^GSPC", panel)
+    sectors = {f"ind_{_column_name(s)}_return" for s in SECTOR_SYMBOLS}
+    assert sectors & set(european.columns)
+    assert not sectors & set(overseas.columns)
 
 
 def test_oil_shock_is_the_move_scaled_by_known_volatility(panel):

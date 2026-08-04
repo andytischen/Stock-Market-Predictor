@@ -28,6 +28,8 @@ from .model import MIN_TRAIN, walk_forward
 from .predict import forecast_all, parse_shock, to_frame
 from .regions import dashboard_symbols
 from .scenarios import SCENARIOS, scenario
+from .sectors import build_sector_board
+from .sectors import render_text as render_sector_text
 
 # The hourly window is short, so the intraday variant needs a smaller warm-up.
 INTRADAY_MIN_TRAIN = 200
@@ -251,6 +253,12 @@ def _as_of(hours: float | None) -> pd.Timestamp | None:
     return now.normalize() + pd.Timedelta(hours=hours)
 
 
+def _cmd_sectors(args: argparse.Namespace) -> None:
+    panel = _panel(args)
+    forecasts = forecast_all(panel, symbols=[args.market], c=args.regularisation)
+    print(render_sector_text(build_sector_board(panel, forecasts[0])), end="")
+
+
 def _cmd_fetch(args: argparse.Namespace) -> None:
     panel = _panel(args)
     for symbol, frame in panel.items():
@@ -364,6 +372,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     export.set_defaults(func=_cmd_export)
+
+    sectors = sub.add_parser(
+        "sectors", help="split one European index's open call by STOXX 600 sector"
+    )
+    sectors.add_argument("--market", type=_market_symbol, default="^STOXX50E")
+    sectors.set_defaults(func=_cmd_sectors)
 
     return parser
 
