@@ -28,7 +28,7 @@ def panel() -> dict[str, pd.DataFrame]:
     return {
         symbol: synthetic_bars(seed=seed)
         for seed, symbol in enumerate(
-            ["^GSPC", "^N225", "^FTSE", "^VIX", "ES=F", "CL=F", "JPY=X", "KRW=X"]
+            ["^GSPC", "^N225", "^FTSE", "^VIX", "ES=F", "CL=F", "JPY=X", "KRW=X", "EXH8.DE"]
         )
     }
 
@@ -86,6 +86,16 @@ def test_oil_carries_shock_features(panel):
         "ind_cl_f_shock",
     } <= set(features.columns)
     assert (features["ind_cl_f_vol_20"] > 0).all()
+
+
+def test_european_retail_carries_a_weekly_return_but_no_shock(panel):
+    features, _ = build_features("^GSPC", panel)
+    assert {"ind_exh8_de_return", "ind_exh8_de_return_5"} <= set(features.columns)
+    assert not any(col.startswith("ind_exh8_de_vol") for col in features.columns)
+    assert "ind_exh8_de_shock" not in features.columns
+    # Xetra closes after every tracked market opens, so it is always read late.
+    retail = next(i for i in INDICATORS if i.symbol == "EXH8.DE")
+    assert all(_lag_days(retail.close_utc, market(m.symbol)) == 1 for m in MARKETS)
 
 
 def test_oil_shock_is_the_move_scaled_by_known_volatility(panel):
