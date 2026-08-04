@@ -8,10 +8,10 @@ indices. For every market it answers one question:
 
 Sixteen indices are covered across Asia, Europe and the Americas, driven by the
 sessions that have already closed plus a set of cross-asset indicators (VIX, the
-US 5y/10y/30y yields, Russell 2000, the semiconductor index, ASML, dollar index,
-USD/JPY, EUR/USD, GBP/USD, WTI and Brent crude, gold, silver, copper, S&P 500
-and Nasdaq futures). Run `python -m gapmodel markets` for the full list with
-session times.
+US 5y/10y/30y yields, Russell 2000, the semiconductor index, ASML, European
+retail, dollar index, USD/JPY, EUR/USD, GBP/USD, WTI and Brent crude, gold,
+silver, copper, S&P 500 and Nasdaq futures). Run `python -m gapmodel markets`
+for the full list with session times.
 
 Each market is then analysed by its own bespoke model: a separate probability
 model is fitted, back-tested and explained per index, so Tokyo is never scored
@@ -21,6 +21,12 @@ Crude is the market's fastest read on Middle East supply risk — strikes on Ira
 push it up, negotiations and a deal unwind it — so both benchmarks additionally
 carry a 5-day return, 20-day realised volatility and a shock feature (the daily
 move divided by the volatility already known the day before).
+
+European retail (`EXH8.DE`, the STOXX Europe 600 Retail ETF) is the listed read
+on euro-area consumer demand. Its Xetra bar closes after every tracked market
+opens, so it is always read a session late, and it carries a 5-day return as
+well as the daily one because one session of a sector index says little on its
+own.
 
 ## Install
 

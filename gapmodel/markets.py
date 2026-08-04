@@ -77,6 +77,11 @@ INDICATORS: tuple[Instrument, ...] = (
     # Stoxx 50: it closes before the US indicators, so Asia reads it a session
     # earlier than ^SOX.
     Instrument("ASML.AS", "ASML", close_utc=15.5),
+    # European retail: the purest listed read on euro-area consumer demand, and
+    # a sector whose moves lead the wider index because they arrive on the same
+    # trading-statement calendar every quarter. Xetra-listed, so its bar closes
+    # with the European cash session.
+    Instrument("EXH8.DE", "STOXX Europe 600 Retail", close_utc=15.5),
     Instrument("DX-Y.NYB", "US dollar index", close_utc=21.0),
     Instrument("JPY=X", "USD/JPY", close_utc=21.0),
     Instrument("EURUSD=X", "EUR/USD", close_utc=21.0),
@@ -112,6 +117,10 @@ OIL_SYMBOLS: frozenset[str] = frozenset({"CL=F", "BZ=F"})
 # respectively. USD/KRW captures Bank of Korea defences during risk-off
 # episodes that coincide with KOSPI sell-offs.
 FX_SYMBOLS: frozenset[str] = frozenset({"JPY=X", "EURUSD=X", "GBPUSD=X", "KRW=X"})
+
+# Sector series read as a demand signal rather than a price level: a single
+# session says little, so they carry the weekly return as well as the daily one.
+SECTOR_SYMBOLS: frozenset[str] = frozenset({"EXH8.DE"})
 
 MARKETS_BY_SYMBOL = {m.symbol: m for m in MARKETS}
 

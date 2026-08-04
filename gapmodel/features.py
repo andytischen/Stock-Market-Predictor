@@ -6,7 +6,16 @@ import numpy as np
 import pandas as pd
 
 from .intraday import preopen_features
-from .markets import FX_SYMBOLS, INDICATORS, MARKETS, OIL_SYMBOLS, Market, lag_days, market
+from .markets import (
+    FX_SYMBOLS,
+    INDICATORS,
+    MARKETS,
+    OIL_SYMBOLS,
+    SECTOR_SYMBOLS,
+    Market,
+    lag_days,
+    market,
+)
 
 MIN_HISTORY = 60
 OIL_VOL_WINDOW = 20
@@ -132,6 +141,8 @@ def build_features(
             features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
             features[f"ind_{name}_vol_{FX_VOL_WINDOW}"] = as_of(vol, dates, lag)
             features[f"ind_{name}_shock"] = as_of(returns / vol.where(vol > 0), dates, lag)
+        elif indicator.symbol in SECTOR_SYMBOLS:
+            features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
 
     frame = pd.DataFrame(features, index=dates)
     if hourly:
