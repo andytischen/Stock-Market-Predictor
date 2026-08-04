@@ -105,21 +105,21 @@ observation rather than silently borrowing a future one.
 | Market | AUC | Accuracy | Brier skill |
 | --- | --- | --- | --- |
 | KOSPI | 0.85 | 0.78 | 0.37 |
-| ASX 200 | 0.85 | 0.78 | 0.37 |
-| Nikkei 225 | 0.85 | 0.77 | 0.37 |
+| ASX 200 | 0.85 | 0.77 | 0.36 |
+| Nikkei 225 | 0.85 | 0.77 | 0.36 |
 | DAX | 0.81 | 0.74 | 0.29 |
 | Euro Stoxx 50 | 0.81 | 0.73 | 0.28 |
-| CAC 40 | 0.81 | 0.74 | 0.28 |
-| IBEX 35 | 0.81 | 0.74 | 0.28 |
-| FTSE 100 | 0.81 | 0.73 | 0.28 |
-| Hang Seng | 0.79 | 0.72 | 0.25 |
-| Swiss Market Index | 0.78 | 0.71 | 0.24 |
+| CAC 40 | 0.81 | 0.73 | 0.28 |
+| FTSE 100 | 0.80 | 0.73 | 0.27 |
+| IBEX 35 | 0.80 | 0.74 | 0.27 |
+| Hang Seng | 0.78 | 0.72 | 0.24 |
+| Swiss Market Index | 0.78 | 0.71 | 0.23 |
 | Shanghai Composite | 0.77 | 0.72 | 0.21 |
 | Nifty 50 | 0.75 | 0.73 | 0.18 |
-| Nasdaq Composite | 0.71 | 0.66 | 0.13 |
-| S&P 500 | 0.70 | 0.66 | 0.12 |
-| S&P/TSX | 0.69 | 0.64 | 0.11 |
-| Bovespa | 0.65 | 0.62 | 0.07 |
+| Nasdaq Composite | 0.70 | 0.66 | 0.12 |
+| S&P 500 | 0.70 | 0.65 | 0.11 |
+| S&P/TSX | 0.69 | 0.64 | 0.10 |
+| Bovespa | 0.65 | 0.62 | 0.06 |
 
 Asian and European opens are largely explained by the US session that closed
 while they slept. Wall Street's own open is much harder from daily bars alone:
