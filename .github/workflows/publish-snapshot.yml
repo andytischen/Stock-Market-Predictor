@@ -1,0 +1,55 @@
+name: Publish forecast snapshot
+
+# Runs the gap model and publishes a JSON snapshot to GitHub Pages for the
+# mobile app to download. Prices come from Yahoo Finance at run time.
+
+on:
+  schedule:
+    # 06:30 UTC daily (a few minutes before Europe's cash open).
+    - cron: "30 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two publishes at once; let the newest win.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e .
+
+      - name: Build snapshot
+        run: |
+          mkdir -p site
+          python -m gapmodel export --out site/snapshot.json
+          # A tiny index so the Pages root is not a 404.
+          cp site/snapshot.json site/latest.json
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -11,8 +11,9 @@ import pandas as pd
 
 from .asia import ACTIVITY_WINDOW, REGRESSION_WINDOW, build_asia_dashboard
 from .asia_report import render_asia_html, render_asia_text
-from .dashboard import build_dashboard, render_html, render_text
+from .dashboard import build_dashboard, oil_readings, render_html, render_text
 from .data import DEFAULT_CACHE, load_panel
+from .export import build_snapshot, dumps
 from .features import build_features
 from .intraday import load_hourly_panel
 from .markets import (
@@ -122,6 +123,25 @@ def _cmd_predict(args: argparse.Namespace) -> None:
     if args.csv:
         frame.to_csv(args.csv, index=False)
         print(f"\nwrote {args.csv}")
+
+
+def _cmd_export(args: argparse.Namespace) -> None:
+    panel = _panel(args)
+    hourly = _hourly(args)
+    forecasts = forecast_all(
+        panel,
+        symbols=args.market,
+        c=args.regularisation,
+        hourly=hourly,
+        min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
+    )
+    snapshot = build_snapshot(forecasts, oil_readings(panel))
+    text = dumps(snapshot)
+    if args.out:
+        Path(args.out).write_text(text, encoding="utf-8")
+        print(f"wrote {args.out}")
+    else:
+        print(text)
 
 
 def _last_monday_5am() -> pd.Timestamp:
@@ -330,6 +350,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     dashboard.set_defaults(func=_cmd_dashboard)
+
+    export = sub.add_parser(
+        "export", help="write the forecast run as a JSON snapshot for the mobile app"
+    )
+    export.add_argument(
+        "--market", action="append", type=_market_symbol, help="restrict to a symbol"
+    )
+    export.add_argument("--out", help="write the JSON here instead of stdout")
+    export.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
+    export.set_defaults(func=_cmd_export)
 
     return parser
 
