@@ -239,6 +239,22 @@ how Middle East risk enters, and what the free data cannot show — order book
 depth, margin and short interest, investor-type breakdowns and licensed index
 weights are all listed on the page as gaps rather than approximated.
 
+## JSON snapshot
+
+`export` writes a single JSON file with one entry per market — its next-open
+probability, out-of-sample quality and the largest log-odds drivers — plus the
+crude readings and a terse one-line summary. It is the mobile app's data source.
+
+```bash
+python -m gapmodel export                       # to stdout
+python -m gapmodel export --out snapshot.json   # to a file
+```
+
+The workflow in `.github/workflows/publish-snapshot.yml` runs it daily at 06:30
+UTC and publishes the file to GitHub Pages (enable Pages with the "GitHub
+Actions" source in repository settings). The published `snapshot.json` is what
+the app downloads and renders.
+
 ## Project tracker
 
 `pm` is a small task board kept in a JSON file next to the code, used to track
