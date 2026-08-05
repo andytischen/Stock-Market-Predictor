@@ -10,7 +10,7 @@ import pandas as pd
 
 from . import model as model_mod
 from .features import _column_name, build_features, live_feature_row
-from .markets import MARKETS, market
+from .markets import CURVE_FRONT, CURVE_STRIP, CURVE_WINDOW, MARKETS, market
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +89,13 @@ def shocked_row(live: pd.DataFrame, shocks: dict[str, float]) -> pd.DataFrame:
         if f"ind_{name}_shock" in bumped and vol:
             sigma = bumped[vol[0]]
             bumped[f"ind_{name}_shock"] += move / sigma.where(sigma > 0)
+        # The curve features are differences between the two oil funds, so a
+        # move in either leg tilts them, in opposite directions.
+        sign = 1.0 if symbol == CURVE_FRONT else -1.0 if symbol == CURVE_STRIP else 0.0
+        if sign:
+            for column in ("ind_oil_curve_return", f"ind_oil_curve_slope_{CURVE_WINDOW}"):
+                if column in bumped:
+                    bumped[column] += sign * move
     return bumped
 
 

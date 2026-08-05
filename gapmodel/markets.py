@@ -122,6 +122,22 @@ FX_SYMBOLS: frozenset[str] = frozenset({"JPY=X", "EURUSD=X", "GBPUSD=X", "KRW=X"
 # session says little, so they carry the weekly return as well as the daily one.
 SECTOR_SYMBOLS: frozenset[str] = frozenset({"EXH8.DE"})
 
+# The shape of the crude futures curve, as the pair of oil funds that track its
+# two ends: USO rolls the front month, USL holds a twelve-month strip. Yahoo
+# serves only the generic front contract (CL=F), and a single deferred contract
+# (CLZ26.NYM) both starts in 2017 and expires, so the funds are the only source
+# of a curve reading with usable history. Neither price is a feature on its own
+# — CL=F already carries the level — only the difference between them is: the
+# front leg lagging the strip is contango (supply comfortable), leading it is
+# backwardation (supply tight).
+CURVE_FRONT = "USO"
+CURVE_STRIP = "USL"
+# Both are US-listed funds, so their bars close with Wall Street.
+CURVE_CLOSE_UTC = 20.0
+# Sessions used for the slow reading: long enough that a single roll or a day of
+# noise cannot dominate it, short enough to still describe the current regime.
+CURVE_WINDOW = 60
+
 MARKETS_BY_SYMBOL = {m.symbol: m for m in MARKETS}
 
 # Regions in the order their sessions run through the day.
@@ -144,4 +160,5 @@ def market(symbol: str) -> Market:
 def all_symbols() -> list[str]:
     symbols = [m.symbol for m in MARKETS] + [i.symbol for i in INDICATORS]
     symbols += [m.open_source for m in MARKETS if m.open_source]
+    symbols += [CURVE_FRONT, CURVE_STRIP]
     return symbols
