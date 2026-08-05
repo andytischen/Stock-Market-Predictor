@@ -28,6 +28,18 @@ opens, so it is always read a session late, and it carries a 5-day return as
 well as the daily one because one session of a sector index says little on its
 own.
 
+The shape of the crude curve is carried alongside its level. Yahoo serves only
+the generic front contract, so the two ends are read from the oil funds that
+track them — `USO` rolls the front month, `USL` holds a twelve-month strip — and
+only their *difference* becomes a feature, daily and over 60 sessions, so the
+funds' own price levels and tracking drift cancel. Negative is contango (the
+front lagging, supply comfortable), positive is backwardation. Either leg can be
+shocked, which tilts the curve without moving the level:
+
+```bash
+python -m gapmodel predict --shock 'USO=-2%'   # front month sells off: deeper contango
+```
+
 ## Install
 
 ```bash

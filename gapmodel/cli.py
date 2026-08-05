@@ -15,7 +15,14 @@ from .dashboard import build_dashboard, render_html, render_text
 from .data import DEFAULT_CACHE, load_panel
 from .features import build_features
 from .intraday import load_hourly_panel
-from .markets import INDICATORS, MARKETS, MARKETS_BY_SYMBOL, REGIONS
+from .markets import (
+    CURVE_FRONT,
+    CURVE_STRIP,
+    INDICATORS,
+    MARKETS,
+    MARKETS_BY_SYMBOL,
+    REGIONS,
+)
 from .model import MIN_TRAIN, walk_forward
 from .predict import forecast_all, parse_shock, to_frame
 from .regions import dashboard_symbols
@@ -33,7 +40,7 @@ def _market_symbol(value: str) -> str:
 
 
 def _shock(value: str) -> tuple[str, float]:
-    known = set(MARKETS_BY_SYMBOL) | {i.symbol for i in INDICATORS}
+    known = set(MARKETS_BY_SYMBOL) | {i.symbol for i in INDICATORS} | {CURVE_FRONT, CURVE_STRIP}
     try:
         symbol, move = parse_shock(value)
     except ValueError as exc:
@@ -79,6 +86,8 @@ def _cmd_markets(_: argparse.Namespace) -> None:
     print("\nIndicators:")
     for i in INDICATORS:
         print(f"  {i.symbol:<12} {i.name}")
+    curve = f"{CURVE_FRONT}/{CURVE_STRIP}"
+    print(f"  {curve:<12} crude curve: front month against the 12-month strip")
     print("\nScenarios (predict --scenario):")
     for s in SCENARIOS.values():
         legs = ", ".join(f"{sym} {move:+.1%}" for sym, move in s.moves.items())

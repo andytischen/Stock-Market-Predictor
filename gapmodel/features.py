@@ -7,6 +7,10 @@ import pandas as pd
 
 from .intraday import preopen_features
 from .markets import (
+    CURVE_CLOSE_UTC,
+    CURVE_FRONT,
+    CURVE_STRIP,
+    CURVE_WINDOW,
     FX_SYMBOLS,
     INDICATORS,
     MARKETS,
@@ -61,6 +65,30 @@ def _column_name(symbol: str) -> str:
 def _lag_days(source_close_utc: float, target: Market) -> int:
     """0 if the source bar closes before the target opens, otherwise 1."""
     return lag_days(source_close_utc, target.open_utc)
+
+
+def curve_features(
+    panel: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, target: Market
+) -> dict[str, pd.Series]:
+    """Shape of the crude curve: the front month against the twelve-month strip.
+
+    Two readings, both differences of log returns so the funds' own price levels
+    and their tracking drift cancel: today's move of the front leg relative to
+    the strip, and the same over ``CURVE_WINDOW`` sessions. Negative is contango
+    — the front lagging, supply comfortable — and positive is backwardation.
+    Absent from the panel, the features are simply not built.
+    """
+    if CURVE_FRONT not in panel or CURVE_STRIP not in panel:
+        return {}
+    front = panel[CURVE_FRONT]["Close"].dropna()
+    strip = panel[CURVE_STRIP]["Close"].dropna()
+    lag = _lag_days(CURVE_CLOSE_UTC, target)
+    daily = log_return(front) - log_return(strip)
+    slow = log_return(front, CURVE_WINDOW) - log_return(strip, CURVE_WINDOW)
+    return {
+        "ind_oil_curve_return": as_of(daily.dropna(), dates, lag),
+        f"ind_oil_curve_slope_{CURVE_WINDOW}": as_of(slow.dropna(), dates, lag),
+    }
 
 
 def build_features(
@@ -143,6 +171,8 @@ def build_features(
             features[f"ind_{name}_shock"] = as_of(returns / vol.where(vol > 0), dates, lag)
         elif indicator.symbol in SECTOR_SYMBOLS:
             features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
+
+    features.update(curve_features(panel, dates, target))
 
     frame = pd.DataFrame(features, index=dates)
     if hourly:
