@@ -268,6 +268,38 @@ UTC and publishes the file to GitHub Pages (enable Pages with the "GitHub
 Actions" source in repository settings). The published `snapshot.json` is what
 the app downloads and renders.
 
+## Trend score
+
+`score` ranks an arbitrary list of tickers by a single price-derived number: the
+standardised position of the latest close within its own trailing window,
+
+```
+score = (close - mean(close, window)) / stdev(close, window)
+```
+
+so a stock riding the top of a long uptrend reads strongly positive and one at
+the bottom of its range reads negative. It uses the same cached Yahoo bars as
+the rest of the model.
+
+```bash
+python -m gapmodel score IVZ JPM DDOG CLX BWIN   # strongest first
+python -m gapmodel score IVZ JPM --window 100 --asof 2026-08-04 --csv out.csv
+```
+
+This was built to approximate the sorted, heat-mapped "Score" column of a
+ThinkorSwim watchlist, whose study formula is not published. Reverse-engineering
+against a 27-name sample of that column, only long-horizon trend measures
+correlate with it at all, and all weakly: the 200-day price z-score (the default
+`--window`) tracks it at r ≈ 0.47, on par with the 200-day Bollinger %b, while
+short-window RSI/ROC/MACD/%B, the TTM-squeeze momentum and a fitted blend of many
+indicators have essentially no out-of-sample skill. A long-lookback RSI shows a
+higher *raw* correlation, but Wilder's RSI is path-dependent on where the price
+history starts, so its value drifts with the download window and it is not
+reproducible; the z-score depends only on the trailing window, so it was chosen
+instead. Either way this is an *approximation of the ranking*, not a reproduction
+of the column: the real one is driven by inputs a daily price bar does not
+contain.
+
 ## Project tracker
 
 `pm` is a small task board kept in a JSON file next to the code, used to track
