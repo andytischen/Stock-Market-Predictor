@@ -146,6 +146,11 @@ def build_features(
     for indicator in INDICATORS:
         if indicator.symbol not in panel:
             continue
+        # European sector read-across is a European story: outside the region it
+        # measurably dilutes the fit, so those markets keep the whole-index and
+        # cross-asset indicators only.
+        if indicator.symbol in SECTOR_SYMBOLS and target.region != "Europe":
+            continue
         close = panel[indicator.symbol]["Close"].dropna()
         lag = _lag_days(indicator.close_utc, target)
         name = _column_name(indicator.symbol)

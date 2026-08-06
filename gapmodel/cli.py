@@ -30,6 +30,8 @@ from .regions import dashboard_symbols
 from .scenarios import SCENARIOS, scenario
 from .score import DEFAULT_WINDOW, score_symbols
 from .score import to_frame as score_to_frame
+from .sectors import build_sector_board
+from .sectors import render_text as render_sector_text
 
 # The hourly window is short, so the intraday variant needs a smaller warm-up.
 INTRADAY_MIN_TRAIN = 200
@@ -255,7 +257,12 @@ def _as_of(hours: float | None) -> pd.Timestamp | None:
 
 def _cmd_score(args: argparse.Namespace) -> None:
     symbols = [s.upper() for s in args.symbols]
-    asof = pd.Timestamp(args.asof) if args.asof else None
+    asof: pd.Timestamp | None = None
+    if args.asof:
+        try:
+            asof = pd.Timestamp(args.asof).tz_localize(None)
+        except (ValueError, TypeError) as exc:
+            raise SystemExit(f"error: --asof {args.asof!r} is not a valid date: {exc}") from exc
     scores = score_symbols(
         symbols,
         window=args.window,
@@ -269,6 +276,12 @@ def _cmd_score(args: argparse.Namespace) -> None:
     if args.csv:
         frame.to_csv(args.csv, index=False)
         print(f"\nwrote {args.csv}")
+
+
+def _cmd_sectors(args: argparse.Namespace) -> None:
+    panel = _panel(args)
+    forecasts = forecast_all(panel, symbols=[args.market], c=args.regularisation)
+    print(render_sector_text(build_sector_board(panel, forecasts[0])), end="")
 
 
 def _cmd_fetch(args: argparse.Namespace) -> None:
@@ -401,6 +414,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     export.set_defaults(func=_cmd_export)
+
+    sectors = sub.add_parser(
+        "sectors", help="split one European index's open call by STOXX 600 sector"
+    )
+    sectors.add_argument("--market", type=_market_symbol, default="^STOXX50E")
+    sectors.set_defaults(func=_cmd_sectors)
 
     return parser
 

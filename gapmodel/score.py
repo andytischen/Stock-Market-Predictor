@@ -58,6 +58,8 @@ def trend_score(frame: pd.DataFrame, window: int = DEFAULT_WINDOW) -> float:
     a partial mean.
     """
     close = frame["Close"].dropna()
+    if window < 2:
+        raise ValueError(f"window must be at least 2, got {window}")
     if len(close) < window:
         raise ValueError(f"need {window} closes, have {len(close)}")
     tail = close.iloc[-window:]
@@ -81,6 +83,8 @@ def score_symbols(
     ``asof``, is skipped with a warning rather than failing the whole run.
     """
     scored: list[TrendScore] = []
+    if window < 2:
+        raise ValueError(f"window must be at least 2, got {window}")
     for symbol in symbols:
         try:
             frame = load_symbol(symbol, start, cache_dir, refresh)
