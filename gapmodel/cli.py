@@ -79,9 +79,18 @@ def _panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
 
 
 def _hourly(args: argparse.Namespace) -> dict[str, pd.Series] | None:
+    """The hourly futures panel, or None when it was not asked for or is missing.
+
+    A refused or rate-limited hourly endpoint is treated the same way as bars
+    too stale to use: the daily model still has something to say.
+    """
     if not getattr(args, "intraday", False):
         return None
-    return load_hourly_panel(cache_dir=Path(args.cache), refresh=args.refresh)
+    try:
+        return load_hourly_panel(cache_dir=Path(args.cache), refresh=args.refresh)
+    except RuntimeError as exc:
+        log.warning("no hourly futures data (%s): falling back to the daily model", exc)
+        return None
 
 
 def _cmd_markets(_: argparse.Namespace) -> None:

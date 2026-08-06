@@ -179,3 +179,18 @@ def test_the_daily_model_failing_is_still_an_error(monkeypatch):
 
     with pytest.raises(RuntimeError):
         cli._forecast({}, args, None)
+
+
+def test_a_total_hourly_outage_still_yields_a_daily_forecast(monkeypatch, tmp_path):
+    """Yahoo refusing every hourly request must not cost the forecast either."""
+    import argparse
+
+    from gapmodel import cli
+
+    def refuse(**kwargs):
+        raise RuntimeError("no hourly data could be loaded")
+
+    monkeypatch.setattr(cli, "load_hourly_panel", refuse)
+    args = argparse.Namespace(intraday=True, cache=str(tmp_path), refresh=False)
+
+    assert cli._hourly(args) is None
