@@ -182,6 +182,14 @@ since the target's previous close, which is the point of the feature: run it in
 the hours before the bell. Over a weekend it refuses rather than reporting a
 fabricated zero overnight move.
 
+Two things keep that from costing a forecast when the data, rather than the
+clock, is at fault. Yahoo's hourly endpoint sometimes stops updating hours
+before its finer ones do, so a stale hourly tail is topped up from 30-, 15- or
+5-minute bars resampled onto the same hourly grid — but only when the gap is
+small enough for those feeds to bridge, since they carry a few days of history
+each. And if the pre-open features still cannot be built, the run falls back to
+the daily model with a warning instead of returning nothing.
+
 ### What-if shocks
 
 `--shock SYMBOL=MOVE` re-runs every market with a hypothetical move added to one
