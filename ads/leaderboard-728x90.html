@@ -38,7 +38,7 @@
 </style>
 </head>
 <body>
-  <a class="ad" href="https://github.com/andytischen/Stock-Market-Predictor" target="_blank" rel="noopener">
+  <a id="ad" class="ad" href="https://github.com/andytischen/Stock-Market-Predictor" target="_blank" rel="noopener">
     <div class="logo">&uarr;%</div>
     <div class="text">
       <h2>Know the market before it opens</h2>
@@ -46,5 +46,13 @@
     </div>
     <div class="cta">Predict the open &rarr;</div>
   </a>
+  <script>
+    // Support ad-server clickTag while defaulting to the repo for static previews.
+    (function () {
+      var fallback = "https://github.com/andytischen/Stock-Market-Predictor";
+      var url = (typeof clickTag !== "undefined" && clickTag) || fallback;
+      document.getElementById("ad").setAttribute("href", url);
+    })();
+  </script>
 </body>
 </html>
