@@ -94,12 +94,15 @@ def score_symbols(
         except Exception as exc:  # one dead or too-young ticker must not stop the run
             log.warning("skipping %s: %s", symbol, exc)
             continue
+        # Read last/asof from the same non-null closes the score was built on, so
+        # a NaN newest bar cannot show a blank price against an unscored date.
+        close = frame["Close"].dropna()
         scored.append(
             TrendScore(
                 symbol=symbol,
                 score=value,
-                last=float(frame["Close"].iloc[-1]),
-                asof=frame.index[-1],
+                last=float(close.iloc[-1]),
+                asof=close.index[-1],
                 window=window,
             )
         )
