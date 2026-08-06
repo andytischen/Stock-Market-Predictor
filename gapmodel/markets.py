@@ -62,6 +62,7 @@ MARKETS: tuple[Market, ...] = (
     Market("^FTSE", "FTSE 100", "Europe", open_utc=7.0, close_utc=15.5, open_source="ISF.L"),
     Market("^GSPC", "S&P 500", "Americas", open_utc=13.5, close_utc=20.0),
     Market("^IXIC", "Nasdaq Composite", "Americas", open_utc=13.5, close_utc=20.0),
+    Market("^DJI", "Dow Jones Industrial Average", "Americas", open_utc=13.5, close_utc=20.0),
     Market("^GSPTSE", "S&P/TSX Composite", "Americas", open_utc=13.5, close_utc=20.0),
     Market("^BVSP", "Bovespa", "Americas", open_utc=13.0, close_utc=20.0),
 )
@@ -125,6 +126,10 @@ INDICATORS: tuple[Instrument, ...] = (
     Instrument("HG=F", "Copper", close_utc=21.0),
     Instrument("ES=F", "S&P 500 futures", close_utc=21.0),
     Instrument("NQ=F", "Nasdaq 100 futures", close_utc=21.0),
+    # The third leg of the US futures complex: ES is breadth, NQ is growth, YM
+    # is the thirty old-economy names, so a mixed tape is only legible with all
+    # three.
+    Instrument("YM=F", "Dow futures", close_utc=21.0),
 )
 
 # Crude is the fastest-moving read on Middle East supply risk: escalation
