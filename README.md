@@ -8,10 +8,10 @@ indices. For every market it answers one question:
 
 Sixteen indices are covered across Asia, Europe and the Americas, driven by the
 sessions that have already closed plus a set of cross-asset indicators (VIX, the
-US 5y/10y/30y yields, Russell 2000, the semiconductor index, ASML, European
-retail, dollar index, USD/JPY, EUR/USD, GBP/USD, WTI and Brent crude, gold,
-silver, copper, S&P 500 and Nasdaq futures). Run `python -m gapmodel markets`
-for the full list with session times.
+US 5y/10y/30y yields, Russell 2000, the semiconductor index, ASML, the eighteen
+STOXX Europe 600 sectors, dollar index, USD/JPY, EUR/USD, GBP/USD, WTI and
+Brent crude, gold, silver, copper, S&P 500 and Nasdaq futures). Run
+`python -m gapmodel markets` for the full list with session times.
 
 Each market is then analysed by its own bespoke model: a separate probability
 model is fitted, back-tested and explained per index, so Tokyo is never scored
@@ -22,11 +22,24 @@ push it up, negotiations and a deal unwind it — so both benchmarks additionall
 carry a 5-day return, 20-day realised volatility and a shock feature (the daily
 move divided by the volatility already known the day before).
 
-European retail (`EXH8.DE`, the STOXX Europe 600 Retail ETF) is the listed read
-on euro-area consumer demand. Its Xetra bar closes after every tracked market
-opens, so it is always read a session late, and it carries a 5-day return as
+All eighteen STOXX Europe 600 sectors are carried as well (banks, technology,
+construction & materials, oil & gas, autos, basic resources, retail, travel and
+the rest), as their Xetra-listed iShares trackers — the underlying `.SXxP`
+indices have no usable Yahoo symbol. Each closes after every tracked market
+opens, so it is always read a session late, and each carries a 5-day return as
 well as the daily one because one session of a sector index says little on its
-own.
+own. Sector features go to **European targets only**: outside the region they
+measurably dilute the fit.
+
+```bash
+python -m gapmodel sectors --market ^GDAXI   # split one open call by sector
+python -m gapmodel predict --shock 'EXV3.DE=-3%'   # sectors are shockable too
+```
+
+`sectors` ranks the sectors by how much log-odds each one contributes to that
+index's next-open probability, alongside its 1-day and 5-day move, and prints
+the net. It only works for European indices, since they are the only ones
+carrying the features.
 
 The shape of the crude curve is carried alongside its level. Yahoo serves only
 the generic front contract, so the two ends are read from the oil funds that

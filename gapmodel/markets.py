@@ -66,6 +66,34 @@ MARKETS: tuple[Market, ...] = (
     Market("^BVSP", "Bovespa", "Americas", open_utc=13.0, close_utc=20.0),
 )
 
+# The STOXX Europe 600 sector line-up, as the Xetra-listed iShares trackers (the
+# underlying .SXxP indices have no usable Yahoo symbol). Each one is a read on a
+# different part of the cycle: banks and construction on rates and domestic
+# activity, retail and travel on the consumer, basic resources and chemicals on
+# China, technology on the same cycle as ^SOX. All close with the European cash
+# session, so every tracked market reads them a session late. History starts in
+# 2008, which costs nothing: the panel already begins in 2009 on ISF.L.
+SECTORS: tuple[Instrument, ...] = (
+    Instrument("EXV1.DE", "Europe 600 Banks", close_utc=15.5),
+    Instrument("EXH2.DE", "Europe 600 Financial Services", close_utc=15.5),
+    Instrument("EXH5.DE", "Europe 600 Insurance", close_utc=15.5),
+    Instrument("EXV3.DE", "Europe 600 Technology", close_utc=15.5),
+    Instrument("EXV8.DE", "Europe 600 Construction & Materials", close_utc=15.5),
+    Instrument("EXH4.DE", "Europe 600 Industrial Goods & Services", close_utc=15.5),
+    Instrument("EXH1.DE", "Europe 600 Oil & Gas", close_utc=15.5),
+    Instrument("EXH9.DE", "Europe 600 Utilities", close_utc=15.5),
+    Instrument("EXV6.DE", "Europe 600 Basic Resources", close_utc=15.5),
+    Instrument("EXV7.DE", "Europe 600 Chemicals", close_utc=15.5),
+    Instrument("EXV5.DE", "Europe 600 Automobiles & Parts", close_utc=15.5),
+    Instrument("EXV4.DE", "Europe 600 Health Care", close_utc=15.5),
+    Instrument("EXH3.DE", "Europe 600 Food & Beverage", close_utc=15.5),
+    Instrument("EXH7.DE", "Europe 600 Personal & Household Goods", close_utc=15.5),
+    Instrument("EXH8.DE", "Europe 600 Retail", close_utc=15.5),
+    Instrument("EXV9.DE", "Europe 600 Travel & Leisure", close_utc=15.5),
+    Instrument("EXH6.DE", "Europe 600 Media", close_utc=15.5),
+    Instrument("EXV2.DE", "Europe 600 Telecommunications", close_utc=15.5),
+)
+
 INDICATORS: tuple[Instrument, ...] = (
     Instrument("^VIX", "VIX volatility index", close_utc=21.25),
     Instrument("^TNX", "US 10y Treasury yield", close_utc=20.0),
@@ -77,11 +105,7 @@ INDICATORS: tuple[Instrument, ...] = (
     # Stoxx 50: it closes before the US indicators, so Asia reads it a session
     # earlier than ^SOX.
     Instrument("ASML.AS", "ASML", close_utc=15.5),
-    # European retail: the purest listed read on euro-area consumer demand, and
-    # a sector whose moves lead the wider index because they arrive on the same
-    # trading-statement calendar every quarter. Xetra-listed, so its bar closes
-    # with the European cash session.
-    Instrument("EXH8.DE", "STOXX Europe 600 Retail", close_utc=15.5),
+    *SECTORS,
     Instrument("DX-Y.NYB", "US dollar index", close_utc=21.0),
     Instrument("JPY=X", "USD/JPY", close_utc=21.0),
     Instrument("EURUSD=X", "EUR/USD", close_utc=21.0),
@@ -120,7 +144,7 @@ FX_SYMBOLS: frozenset[str] = frozenset({"JPY=X", "EURUSD=X", "GBPUSD=X", "KRW=X"
 
 # Sector series read as a demand signal rather than a price level: a single
 # session says little, so they carry the weekly return as well as the daily one.
-SECTOR_SYMBOLS: frozenset[str] = frozenset({"EXH8.DE"})
+SECTOR_SYMBOLS: frozenset[str] = frozenset(i.symbol for i in SECTORS)
 
 # The shape of the crude futures curve, as the pair of oil funds that track its
 # two ends: USO rolls the front month, USL holds a twelve-month strip. Yahoo
