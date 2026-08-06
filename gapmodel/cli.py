@@ -28,6 +28,8 @@ from .model import MIN_TRAIN, walk_forward
 from .predict import forecast_all, parse_shock, to_frame
 from .regions import dashboard_symbols
 from .scenarios import SCENARIOS, scenario
+from .score import DEFAULT_WINDOW, score_symbols
+from .score import to_frame as score_to_frame
 
 # The hourly window is short, so the intraday variant needs a smaller warm-up.
 INTRADAY_MIN_TRAIN = 200
@@ -251,6 +253,24 @@ def _as_of(hours: float | None) -> pd.Timestamp | None:
     return now.normalize() + pd.Timedelta(hours=hours)
 
 
+def _cmd_score(args: argparse.Namespace) -> None:
+    symbols = [s.upper() for s in args.symbols]
+    asof = pd.Timestamp(args.asof) if args.asof else None
+    scores = score_symbols(
+        symbols,
+        window=args.window,
+        asof=asof,
+        start=args.start,
+        cache_dir=Path(args.cache),
+        refresh=args.refresh,
+    )
+    frame = score_to_frame(scores)
+    print(frame.to_string(index=False))
+    if args.csv:
+        frame.to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
+
+
 def _cmd_fetch(args: argparse.Namespace) -> None:
     panel = _panel(args)
     for symbol, frame in panel.items():
@@ -272,6 +292,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     fetch = sub.add_parser("fetch", help="download and cache the price panel")
     fetch.set_defaults(func=_cmd_fetch)
+
+    score = sub.add_parser(
+        "score",
+        help="trend score (price z-score) for arbitrary tickers, strongest first",
+    )
+    score.add_argument("symbols", nargs="+", help="tickers to score, e.g. IVZ JPM DDOG")
+    score.add_argument(
+        "--window",
+        type=int,
+        default=DEFAULT_WINDOW,
+        help=f"trailing sessions for the z-score (default {DEFAULT_WINDOW})",
+    )
+    score.add_argument(
+        "--asof", metavar="DATE", help="score as of this date (ISO) instead of latest"
+    )
+    score.add_argument("--csv", help="also write the table to this path")
+    score.set_defaults(func=_cmd_score)
 
     predict = sub.add_parser("predict", help="probability that the next open is up")
     predict.add_argument(

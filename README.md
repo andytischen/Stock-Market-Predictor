@@ -255,6 +255,33 @@ UTC and publishes the file to GitHub Pages (enable Pages with the "GitHub
 Actions" source in repository settings). The published `snapshot.json` is what
 the app downloads and renders.
 
+## Trend score
+
+`score` ranks an arbitrary list of tickers by a single price-derived number: the
+standardised position of the latest close within its own trailing window,
+
+```
+score = (close - mean(close, window)) / stdev(close, window)
+```
+
+so a stock riding the top of a long uptrend reads strongly positive and one at
+the bottom of its range reads negative. It uses the same cached Yahoo bars as
+the rest of the model.
+
+```bash
+python -m gapmodel score IVZ JPM DDOG CLX BWIN   # strongest first
+python -m gapmodel score IVZ JPM --window 100 --asof 2026-08-04 --csv out.csv
+```
+
+This was built to approximate the sorted, heat-mapped "Score" column of a
+ThinkorSwim watchlist, whose study formula is not published. Reverse-engineering
+against a 27-name sample of that column, the 200-day price z-score (the default
+`--window`) was the best single price proxy — it tracked the column at r ≈ 0.47,
+ahead of RSI, ROC, MACD, %B and the TTM-squeeze momentum, while a fitted blend of
+many indicators had no out-of-sample skill. So this is an *approximation of the
+ranking*, not a reproduction of the column: the real one is driven by inputs a
+daily price bar does not contain.
+
 ## Project tracker
 
 `pm` is a small task board kept in a JSON file next to the code, used to track
