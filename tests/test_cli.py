@@ -143,3 +143,39 @@ def test_shock_moves_every_feature_derived_from_the_instrument():
     # The volatility denominator is measured to the previous bar, so it stays.
     assert bumped["ind_cl_f_vol_20"].iloc[0] == pytest.approx(0.02)
     assert bumped["ind_cl_f_shock"].iloc[0] == pytest.approx(0.5 + 0.04 / 0.02)
+
+
+def test_intraday_falls_back_to_the_daily_model_when_futures_bars_are_missing(monkeypatch):
+    """A stale futures feed should cost sharpness, not the whole forecast."""
+    import argparse
+
+    from gapmodel import cli
+
+    attempts = []
+
+    def fake_forecast_all(panel, **kwargs):
+        attempts.append(kwargs.get("hourly"))
+        if kwargs.get("hourly") is not None:
+            raise RuntimeError("no market could be modelled")
+        return ["forecast"]
+
+    monkeypatch.setattr(cli, "forecast_all", fake_forecast_all)
+    args = argparse.Namespace(market=["^IXIC"], regularisation=0.1)
+
+    assert cli._forecast({}, args, {"ES=F": None}) == ["forecast"]
+    assert attempts == [{"ES=F": None}, None]
+
+
+def test_the_daily_model_failing_is_still_an_error(monkeypatch):
+    import argparse
+
+    from gapmodel import cli
+
+    def fake_forecast_all(panel, **kwargs):
+        raise RuntimeError("no market could be modelled")
+
+    monkeypatch.setattr(cli, "forecast_all", fake_forecast_all)
+    args = argparse.Namespace(market=["^IXIC"], regularisation=0.1)
+
+    with pytest.raises(RuntimeError):
+        cli._forecast({}, args, None)

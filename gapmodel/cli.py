@@ -25,11 +25,13 @@ from .markets import (
     REGIONS,
 )
 from .model import MIN_TRAIN, walk_forward
-from .predict import forecast_all, parse_shock, to_frame
+from .predict import Forecast, forecast_all, parse_shock, to_frame
 from .regions import dashboard_symbols
 from .scenarios import SCENARIOS, scenario
 from .sectors import build_sector_board
 from .sectors import render_text as render_sector_text
+
+log = logging.getLogger(__name__)
 
 # The hourly window is short, so the intraday variant needs a smaller warm-up.
 INTRADAY_MIN_TRAIN = 200
@@ -97,19 +99,47 @@ def _cmd_markets(_: argparse.Namespace) -> None:
         print(f"  {s.name:<22} {s.description}\n  {'':<22} {legs}")
 
 
+def _forecast(
+    panel: dict[str, pd.DataFrame],
+    args: argparse.Namespace,
+    hourly: dict[str, pd.Series] | None,
+    shocks: dict[str, float] | None = None,
+) -> list[Forecast]:
+    """Forecast every requested market, dropping the pre-open features if need be.
+
+    The intraday variant depends on futures bars running into the bell, which
+    a stale or halted feed may not provide. Rather than return nothing, the
+    run is repeated on the daily features alone and the loss of sharpness is
+    reported.
+    """
+    try:
+        return forecast_all(
+            panel,
+            symbols=args.market,
+            c=args.regularisation,
+            hourly=hourly,
+            min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
+            shocks=shocks,
+        )
+    except RuntimeError:
+        if hourly is None:
+            raise
+        log.warning("no pre-open futures bars: falling back to the daily model")
+        return forecast_all(
+            panel,
+            symbols=args.market,
+            c=args.regularisation,
+            min_train=MIN_TRAIN,
+            shocks=shocks,
+        )
+
+
 def _cmd_predict(args: argparse.Namespace) -> None:
     hourly = _hourly(args)
     shocks = dict(scenario(args.scenario).shocks()) if args.scenario else {}
     # An explicit --shock on the same instrument replaces the scenario's leg.
     shocks.update(args.shock or [])
-    forecasts = forecast_all(
-        _panel(args),
-        symbols=args.market,
-        c=args.regularisation,
-        hourly=hourly,
-        min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
-        shocks=shocks,
-    )
+    forecasts = _forecast(_panel(args), args, hourly, shocks)
     if args.scenario:
         print(f"scenario: {args.scenario} — {scenario(args.scenario).description}")
     if shocks:
@@ -130,13 +160,7 @@ def _cmd_predict(args: argparse.Namespace) -> None:
 def _cmd_export(args: argparse.Namespace) -> None:
     panel = _panel(args)
     hourly = _hourly(args)
-    forecasts = forecast_all(
-        panel,
-        symbols=args.market,
-        c=args.regularisation,
-        hourly=hourly,
-        min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
-    )
+    forecasts = _forecast(panel, args, hourly)
     snapshot = build_snapshot(forecasts, oil_readings(panel))
     text = dumps(snapshot)
     if args.out:
