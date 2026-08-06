@@ -11,14 +11,18 @@ i.e. how many standard deviations the last price is above (positive) or below
 scores strongly positive; one grinding along the bottom of a range scores
 negative. The value is unbounded but in practice sits in roughly ``[-4, +4]``.
 
-Why this and not something cleverer: it was reverse-engineered as the best
-single price proxy for the sorted, heat-mapped "Score" column of a ThinkorSwim
-watchlist (a custom study whose formula is not published). Across a 27-name
-sample the 200-day price z-score tracked that column at r ~= 0.47 — better than
-RSI, ROC, MACD, %B or the TTM-squeeze momentum — while shorter windows and a
-fitted blend of many indicators had no out-of-sample skill. So this is an
-*approximation* of that column's ranking, not a reproduction of it: the true
-column is driven by inputs a daily price bar does not contain.
+Why this and not something cleverer: it was reverse-engineered against the
+sorted, heat-mapped "Score" column of a ThinkorSwim watchlist (a custom study
+whose formula is not published). Across a 27-name sample only long-horizon trend
+measures correlate with that column at all, and all weakly: the 200-day price
+z-score tracks it at r ~= 0.47, on par with the 200-day Bollinger %b, while
+short-window RSI/ROC/MACD/%B, the TTM-squeeze momentum and a fitted blend of
+many indicators have essentially no out-of-sample skill. A long-lookback RSI
+shows a higher *raw* correlation but is not reproducible — Wilder's RSI is
+path-dependent on where the price history starts, so its value drifts with the
+download window, whereas this z-score depends only on the trailing window. So
+this is an *approximation* of that column's ranking, not a reproduction of it:
+the true column is driven by inputs a daily price bar does not contain.
 """
 
 from __future__ import annotations

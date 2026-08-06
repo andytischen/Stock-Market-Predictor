@@ -288,12 +288,17 @@ python -m gapmodel score IVZ JPM --window 100 --asof 2026-08-04 --csv out.csv
 
 This was built to approximate the sorted, heat-mapped "Score" column of a
 ThinkorSwim watchlist, whose study formula is not published. Reverse-engineering
-against a 27-name sample of that column, the 200-day price z-score (the default
-`--window`) was the best single price proxy — it tracked the column at r ≈ 0.47,
-ahead of RSI, ROC, MACD, %B and the TTM-squeeze momentum, while a fitted blend of
-many indicators had no out-of-sample skill. So this is an *approximation of the
-ranking*, not a reproduction of the column: the real one is driven by inputs a
-daily price bar does not contain.
+against a 27-name sample of that column, only long-horizon trend measures
+correlate with it at all, and all weakly: the 200-day price z-score (the default
+`--window`) tracks it at r ≈ 0.47, on par with the 200-day Bollinger %b, while
+short-window RSI/ROC/MACD/%B, the TTM-squeeze momentum and a fitted blend of many
+indicators have essentially no out-of-sample skill. A long-lookback RSI shows a
+higher *raw* correlation, but Wilder's RSI is path-dependent on where the price
+history starts, so its value drifts with the download window and it is not
+reproducible; the z-score depends only on the trailing window, so it was chosen
+instead. Either way this is an *approximation of the ranking*, not a reproduction
+of the column: the real one is driven by inputs a daily price bar does not
+contain.
 
 ## Project tracker
 
