@@ -47,7 +47,7 @@ jobs:
 
   deploy:
     # Optional: set repository variable ENABLE_GITHUB_PAGES=true once Pages is enabled.
-    if: ${{ vars.ENABLE_GITHUB_PAGES == 'true' }}
+    if: vars.ENABLE_GITHUB_PAGES == 'true'
     needs: build
     runs-on: ubuntu-latest
     environment:
