@@ -30,8 +30,24 @@ from .regions import dashboard_symbols
 from .scenarios import SCENARIOS, scenario
 from .score import DEFAULT_WINDOW, score_symbols
 from .score import to_frame as score_to_frame
+from .screener import (
+    ATR_WINDOW,
+    AVG_WINDOW,
+    MIN_ATR,
+    MIN_AVG_VOLUME,
+    MIN_CHANGE,
+    MIN_PRICE,
+    MIN_REL_VOLUME,
+    MIN_VOLUME,
+    Criteria,
+    screen,
+)
+from .screener import DEFAULT_START as SCREEN_START
+from .screener import render_text as render_screen_text
+from .screener import to_frame as screen_to_frame
 from .sectors import build_sector_board
 from .sectors import render_text as render_sector_text
+from .universe import read_universe, us_universe
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +80,16 @@ def _positive_float(value: str) -> float:
         raise argparse.ArgumentTypeError(f"{value!r} is not a number") from exc
     if number <= 0:
         raise argparse.ArgumentTypeError("must be greater than 0")
+    return number
+
+
+def _non_negative_float(value: str) -> float:
+    try:
+        number = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a number") from exc
+    if number < 0:
+        raise argparse.ArgumentTypeError("must not be negative")
     return number
 
 
@@ -311,6 +337,57 @@ def _cmd_score(args: argparse.Namespace) -> None:
         print(f"\nwrote {args.csv}")
 
 
+def _screen_universe(args: argparse.Namespace) -> list[str]:
+    """Whatever was asked for: explicit symbols, a file, or the default US list.
+
+    The three are alternatives, so asking for more than one is an error rather
+    than a silent precedence rule.
+    """
+    if args.symbols and args.universe:
+        raise SystemExit("error: pass symbols or --universe, not both")
+    if args.etfs and (args.symbols or args.universe):
+        raise SystemExit("error: --etfs applies to the default universe only")
+    if args.symbols:
+        return [s.upper() for s in args.symbols]
+    if args.universe:
+        try:
+            return read_universe(Path(args.universe))
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"error: --universe {args.universe}: {exc}") from exc
+    return us_universe(include_etfs=args.etfs)
+
+
+def _cmd_screen(args: argparse.Namespace) -> None:
+    asof: pd.Timestamp | None = None
+    if args.asof:
+        try:
+            asof = pd.Timestamp(args.asof).tz_localize(None)
+        except (ValueError, TypeError) as exc:
+            raise SystemExit(f"error: --asof {args.asof!r} is not a valid date: {exc}") from exc
+    criteria = Criteria(
+        min_price=args.min_price,
+        min_volume=args.min_volume * 1e6,
+        min_avg_volume=args.min_avg_volume * 1e6,
+        min_rel_volume=args.min_rel_volume,
+        min_change=args.min_change / 100,
+        min_atr=args.min_atr / 100,
+        avg_window=args.avg_window,
+        atr_window=args.atr_window,
+    )
+    result = screen(
+        _screen_universe(args),
+        criteria=criteria,
+        asof=asof,
+        start=args.screen_start,
+        cache_dir=Path(args.cache),
+        refresh=args.refresh,
+    )
+    print(render_screen_text(result), end="")
+    if args.csv:
+        screen_to_frame(result.readings).to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
+
+
 def _cmd_sectors(args: argparse.Namespace) -> None:
     panel = _panel(args)
     forecasts = forecast_all(panel, symbols=[args.market], c=args.regularisation)
@@ -355,6 +432,82 @@ def build_parser() -> argparse.ArgumentParser:
     )
     score.add_argument("--csv", help="also write the table to this path")
     score.set_defaults(func=_cmd_score)
+
+    screener = sub.add_parser(
+        "screen",
+        help="narrow a US universe to liquid, unusually active, moving stocks",
+    )
+    screener.add_argument("symbols", nargs="*", help="screen these tickers instead of the universe")
+    screener.add_argument(
+        "--universe", metavar="FILE", help="read tickers from a file, one per line"
+    )
+    screener.add_argument(
+        "--etfs", action="store_true", help="include the heavily traded ETFs in the universe"
+    )
+    screener.add_argument(
+        "--min-price",
+        type=_non_negative_float,
+        default=MIN_PRICE,
+        help=f"price floor (default {MIN_PRICE:g})",
+    )
+    screener.add_argument(
+        "--min-volume",
+        type=_non_negative_float,
+        default=MIN_VOLUME / 1e6,
+        metavar="MILLIONS",
+        help=f"today's volume floor in millions of shares (default {MIN_VOLUME / 1e6:g})",
+    )
+    screener.add_argument(
+        "--min-avg-volume",
+        type=_non_negative_float,
+        default=MIN_AVG_VOLUME / 1e6,
+        metavar="MILLIONS",
+        help=f"average volume floor in millions of shares (default {MIN_AVG_VOLUME / 1e6:g})",
+    )
+    screener.add_argument(
+        "--min-rel-volume",
+        type=_non_negative_float,
+        default=MIN_REL_VOLUME,
+        metavar="TIMES",
+        help=f"relative volume floor (default {MIN_REL_VOLUME:g})",
+    )
+    screener.add_argument(
+        "--min-change",
+        type=float,
+        default=MIN_CHANGE * 100,
+        metavar="PERCENT",
+        help=f"daily move floor in percent (default {MIN_CHANGE * 100:g})",
+    )
+    screener.add_argument(
+        "--min-atr",
+        type=_non_negative_float,
+        default=MIN_ATR * 100,
+        metavar="PERCENT",
+        help=f"average true range floor, percent of price (default {MIN_ATR * 100:g})",
+    )
+    screener.add_argument(
+        "--avg-window",
+        type=int,
+        default=AVG_WINDOW,
+        help=f"sessions behind today for the volume baseline (default {AVG_WINDOW})",
+    )
+    screener.add_argument(
+        "--atr-window",
+        type=int,
+        default=ATR_WINDOW,
+        help=f"sessions for the ATR (default {ATR_WINDOW})",
+    )
+    screener.add_argument(
+        "--asof", metavar="DATE", help="screen this session (ISO) instead of the latest"
+    )
+    screener.add_argument(
+        "--screen-start",
+        default=SCREEN_START,
+        metavar="DATE",
+        help=f"first date to download for the screen (default {SCREEN_START})",
+    )
+    screener.add_argument("--csv", help="also write the surviving names to this path")
+    screener.set_defaults(func=_cmd_screen)
 
     predict = sub.add_parser("predict", help="probability that the next open is up")
     predict.add_argument(
