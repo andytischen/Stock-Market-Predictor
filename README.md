@@ -272,9 +272,10 @@ python -m gapmodel export --out snapshot.json   # to a file
 ```
 
 The workflow in `.github/workflows/publish-snapshot.yml` runs it daily at 06:30
-UTC and publishes the file to GitHub Pages (enable Pages with the "GitHub
-Actions" source in repository settings). The published `snapshot.json` is what
-the app downloads and renders.
+UTC and publishes the file to GitHub Pages when Pages is enabled with the
+"GitHub Actions" source in repository settings. Until then the workflow still
+builds the snapshot but skips deployment instead of failing. The published
+`snapshot.json` is what the app downloads and renders.
 
 ## Trend score
 
