@@ -23,7 +23,7 @@ def make_pipeline(c: float = 0.1) -> Pipeline:
             (
                 "clf",
                 LogisticRegression(
-                    C=c, penalty="l2", solver="lbfgs", max_iter=2000, class_weight=None
+                    C=c, solver="lbfgs", max_iter=2000, class_weight=None
                 ),
             ),
         ]
