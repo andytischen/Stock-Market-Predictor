@@ -10,6 +10,7 @@ holds no look-ahead beyond what ``predict`` already reports.
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -103,5 +104,22 @@ def build_snapshot(
     }
 
 
+def _sanitise(value: object) -> object:
+    """Replace non-finite floats (NaN/inf) with ``None`` so the JSON is valid.
+
+    Missing quality metrics (single-class OOS labels give AUC ``nan``) and an
+    undefined crude shock (non-positive volatility) reach the snapshot as
+    non-finite floats, which ``json.dumps`` would otherwise emit as the bare
+    tokens ``NaN``/``Infinity`` that strict parsers reject.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {k: _sanitise(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitise(v) for v in value]
+    return value
+
+
 def dumps(snapshot: dict[str, object]) -> str:
-    return json.dumps(snapshot, indent=2, sort_keys=False)
+    return json.dumps(_sanitise(snapshot), indent=2, sort_keys=False, allow_nan=False)
