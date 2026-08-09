@@ -29,6 +29,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - uses: actions/configure-pages@v5
 
       - name: Install
         run: pip install -e .
