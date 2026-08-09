@@ -83,6 +83,16 @@ def _positive_float(value: str) -> float:
     return number
 
 
+def _non_negative_float(value: str) -> float:
+    try:
+        number = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a number") from exc
+    if number < 0:
+        raise argparse.ArgumentTypeError("must not be negative")
+    return number
+
+
 def _utc_time(value: str) -> float:
     """``HH:MM`` (UTC) as hours from midnight."""
     try:
@@ -328,7 +338,15 @@ def _cmd_score(args: argparse.Namespace) -> None:
 
 
 def _screen_universe(args: argparse.Namespace) -> list[str]:
-    """Whatever was asked for: explicit symbols, a file, or the default US list."""
+    """Whatever was asked for: explicit symbols, a file, or the default US list.
+
+    The three are alternatives, so asking for more than one is an error rather
+    than a silent precedence rule.
+    """
+    if args.symbols and args.universe:
+        raise SystemExit("error: pass symbols or --universe, not both")
+    if args.etfs and (args.symbols or args.universe):
+        raise SystemExit("error: --etfs applies to the default universe only")
     if args.symbols:
         return [s.upper() for s in args.symbols]
     if args.universe:
@@ -427,25 +445,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--etfs", action="store_true", help="include the heavily traded ETFs in the universe"
     )
     screener.add_argument(
-        "--min-price", type=float, default=MIN_PRICE, help=f"price floor (default {MIN_PRICE:g})"
+        "--min-price",
+        type=_non_negative_float,
+        default=MIN_PRICE,
+        help=f"price floor (default {MIN_PRICE:g})",
     )
     screener.add_argument(
         "--min-volume",
-        type=float,
+        type=_non_negative_float,
         default=MIN_VOLUME / 1e6,
         metavar="MILLIONS",
         help=f"today's volume floor in millions of shares (default {MIN_VOLUME / 1e6:g})",
     )
     screener.add_argument(
         "--min-avg-volume",
-        type=float,
+        type=_non_negative_float,
         default=MIN_AVG_VOLUME / 1e6,
         metavar="MILLIONS",
         help=f"average volume floor in millions of shares (default {MIN_AVG_VOLUME / 1e6:g})",
     )
     screener.add_argument(
         "--min-rel-volume",
-        type=float,
+        type=_non_negative_float,
         default=MIN_REL_VOLUME,
         metavar="TIMES",
         help=f"relative volume floor (default {MIN_REL_VOLUME:g})",
@@ -459,7 +480,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     screener.add_argument(
         "--min-atr",
-        type=float,
+        type=_non_negative_float,
         default=MIN_ATR * 100,
         metavar="PERCENT",
         help=f"average true range floor, percent of price (default {MIN_ATR * 100:g})",

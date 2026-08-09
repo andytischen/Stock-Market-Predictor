@@ -200,6 +200,23 @@ def test_screen_defaults_to_the_us_universe(monkeypatch, tmp_path):
     assert "AAPL" in seen["symbols"] and "SPY" not in seen["symbols"]
 
 
+def test_screen_rejects_combining_the_universe_forms(tmp_path):
+    path = tmp_path / "u.txt"
+    path.write_text("AAPL\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as both:
+        main(["screen", "AAPL", "--universe", str(path)])
+    assert "not both" in str(both.value)
+    with pytest.raises(SystemExit) as etfs:
+        main(["screen", "--universe", str(path), "--etfs"])
+    assert "default universe only" in str(etfs.value)
+
+
+def test_screen_rejects_negative_thresholds(capsys):
+    with pytest.raises(SystemExit):
+        main(["screen", "--min-avg-volume", "-5"])
+    assert "must not be negative" in capsys.readouterr().err
+
+
 def test_screen_rejects_an_unreadable_universe_file(tmp_path):
     with pytest.raises(SystemExit) as exit_info:
         main(["screen", "--universe", str(tmp_path / "missing.txt")])

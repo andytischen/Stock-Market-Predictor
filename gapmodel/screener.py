@@ -33,6 +33,11 @@ Volume for a session still in progress is partial, so a screen run mid-session
 understates today's volume and relative volume, and will return fewer names than
 the same screen run after the close. Use ``--asof`` to screen a completed
 session.
+
+Unlike the model panel, the screen is *about* the latest session, so a cached
+series whose last bar predates the session being screened is re-downloaded even
+without ``--refresh``: yesterday's cache would otherwise silently re-screen
+yesterday.
 """
 
 from __future__ import annotations
@@ -60,6 +65,10 @@ ATR_WINDOW = 14
 # Enough history to warm the longest window plus a margin for holidays; the
 # screen reads the recent tail only, so it does not need the model's 20 years.
 DEFAULT_START = "2024-01-01"
+
+# US cash markets close at 20:00 UTC (21:00 outside daylight saving); before it,
+# the session that has actually finished is the previous one.
+US_CLOSE_UTC = 20.0
 
 
 @dataclass(frozen=True)
@@ -130,13 +139,15 @@ def read_metrics(
     enough history to fill the windows, so a freshly listed name is skipped
     rather than screened against a partial average.
     """
-    bars = frame.dropna(subset=["Close"])
-    for column in ("Open", "High", "Low", "Volume"):
-        if column not in bars.columns:
+    for column in ("Open", "High", "Low", "Close", "Volume"):
+        if column not in frame.columns:
             raise ValueError(f"no {column} data")
+    # Every metric reads the same complete sessions, so a bar missing any field
+    # is dropped rather than left to pull older sessions into one window only.
+    bars = frame.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
     needed = max(criteria.avg_window, criteria.atr_window) + 1
     if len(bars) < needed:
-        raise ValueError(f"need {needed} sessions, have {len(bars)}")
+        raise ValueError(f"need {needed} sessions, have {len(bars)} (widen --screen-start?)")
 
     close = bars["Close"].astype(float)
     prior_close = float(close.iloc[-2])
@@ -162,6 +173,20 @@ def read_metrics(
         atr=average_true_range(bars, criteria.atr_window) / last,
         asof=close.index[-1],
     )
+
+
+def last_us_session(now: pd.Timestamp) -> pd.Timestamp:
+    """The most recent weekday whose US session has closed.
+
+    Holidays are not known here, so this can name a day that never traded; the
+    only cost is one re-download of a cache that was already current.
+    """
+    day = now.normalize()
+    if now.hour + now.minute / 60 < US_CLOSE_UTC:
+        day -= pd.Timedelta(days=1)
+    while day.weekday() >= 5:  # Sat, Sun
+        day -= pd.Timedelta(days=1)
+    return day
 
 
 def average_true_range(bars: pd.DataFrame, window: int = ATR_WINDOW) -> float:
@@ -231,9 +256,14 @@ def screen(
     a few hundred names always meets a few dead ones.
     """
     readings: list[Reading] = []
+    target = (
+        asof if asof is not None else last_us_session(pd.Timestamp.now("UTC").tz_localize(None))
+    )
     for symbol in symbols:
         try:
             frame = load_symbol(symbol, start, cache_dir, refresh, require=("Volume",))
+            if not refresh and (frame.empty or frame.index[-1] < target):
+                frame = load_symbol(symbol, start, cache_dir, True, require=("Volume",))
             if asof is not None:
                 frame = frame.loc[frame.index <= asof]
             reading = read_metrics(frame, criteria, symbol=symbol)

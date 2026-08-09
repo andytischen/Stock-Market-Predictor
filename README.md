@@ -371,9 +371,15 @@ liquid US listings — the S&P 100 plus the mid-caps and high-beta names that
 actually print unusual volume, with the heavily traded ETFs behind `--etfs`. It
 is deliberately a superset: every filter is applied to real bars, so a name that
 has gone quiet or been delisted is dropped by the funnel rather than needing to
-be pruned by hand. Volume for a session still in progress is partial, so a screen
-run mid-session understates today's volume and relative volume and returns fewer
-names than the same screen after the close; `--asof` screens a completed session.
+be pruned by hand. Symbols, `--universe` and `--etfs` are alternatives; asking for
+more than one is an error rather than a silent precedence rule.
+
+Volume for a session still in progress is partial, so a screen run mid-session
+understates today's volume and relative volume and returns fewer names than the
+same screen after the close; `--asof` screens a completed session. Unlike the
+model panel, the screen is *about* the latest session, so a cached series whose
+last bar predates the session being screened is re-downloaded even without
+`--refresh` — yesterday's cache would otherwise silently re-screen yesterday.
 
 ## Project tracker
 

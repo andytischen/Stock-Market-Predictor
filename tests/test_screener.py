@@ -5,6 +5,7 @@ from gapmodel.screener import (
     Criteria,
     Reading,
     average_true_range,
+    last_us_session,
     read_metrics,
     render_text,
     to_frame,
@@ -188,6 +189,54 @@ def test_render_reports_the_funnel_and_says_so_when_empty(monkeypatch):
     text = render_text(run_screen(["FLAT"], criteria=CRITERIA))
     assert "universe" in text and "moving" in text
     assert "nothing cleared every filter" in text
+
+
+def test_stale_cache_is_redownloaded_for_the_session_being_screened(monkeypatch):
+    """The screen is about the latest session, so yesterday's cache is refetched."""
+    fresh = _bars([100.0] * 6 + [102.0], [8e6] * 6 + [20e6], 0.03)
+    stale = fresh.iloc[:-1]
+    calls = []
+
+    def fake_load(symbol, start, cache_dir, refresh, require=()):
+        calls.append(refresh)
+        return fresh if refresh else stale
+
+    monkeypatch.setattr("gapmodel.screener.load_symbol", fake_load)
+    result = run_screen(["AAA"], criteria=CRITERIA, asof=fresh.index[-1])
+    assert calls == [False, True]
+    assert result.readings[0].asof == fresh.index[-1]
+
+
+def test_a_cache_covering_the_session_is_not_redownloaded(monkeypatch):
+    fresh = _bars([100.0] * 6 + [102.0], [8e6] * 6 + [20e6], 0.03)
+    calls = []
+
+    def fake_load(symbol, start, cache_dir, refresh, require=()):
+        calls.append(refresh)
+        return fresh
+
+    monkeypatch.setattr("gapmodel.screener.load_symbol", fake_load)
+    run_screen(["AAA"], criteria=CRITERIA, asof=fresh.index[-1])
+    assert calls == [False]
+
+
+def test_last_us_session_is_the_last_weekday_to_have_closed():
+    # Friday 21:00 UTC: Friday's session is over.
+    assert last_us_session(pd.Timestamp("2026-08-07 21:00")) == pd.Timestamp("2026-08-07")
+    # Friday 12:00 UTC, before the bell: Thursday is the last closed session.
+    assert last_us_session(pd.Timestamp("2026-08-07 12:00")) == pd.Timestamp("2026-08-06")
+    # Sunday, and Monday pre-open, both point back to Friday.
+    assert last_us_session(pd.Timestamp("2026-08-09 12:00")) == pd.Timestamp("2026-08-07")
+    assert last_us_session(pd.Timestamp("2026-08-10 12:00")) == pd.Timestamp("2026-08-07")
+
+
+def test_bars_missing_any_field_are_dropped_whole():
+    bars = _bars([100.0] * 8, [8e6] * 8)
+    bars.loc[bars.index[-1], "High"] = float("nan")
+    # The incomplete session cannot be screened, and does not silently supply a
+    # close to one window and an older true range to another.
+    with pytest.raises(ValueError):
+        read_metrics(bars.iloc[-6:], CRITERIA)
 
 
 def test_criteria_reject_unusable_windows():
