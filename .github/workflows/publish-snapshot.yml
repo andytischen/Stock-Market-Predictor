@@ -40,11 +40,22 @@ jobs:
           # A tiny index so the Pages root is not a 404.
           cp site/snapshot.json site/latest.json
 
-      - uses: actions/upload-pages-artifact@v3
+      - if: ${{ vars.PUBLISH_SNAPSHOT_TO_PAGES == 'true' }}
+        uses: actions/configure-pages@v5
+
+      - if: ${{ vars.PUBLISH_SNAPSHOT_TO_PAGES == 'true' }}
+        uses: actions/upload-pages-artifact@v3
         with:
           path: site
 
+      - if: ${{ vars.PUBLISH_SNAPSHOT_TO_PAGES != 'true' }}
+        run: |
+          echo "GitHub Pages is not enabled for workflow deploys."
+          echo "Skipping deploy. Enable Pages with the GitHub Actions source and set"
+          echo "the PUBLISH_SNAPSHOT_TO_PAGES repository variable to true to publish."
+
   deploy:
+    if: ${{ vars.PUBLISH_SNAPSHOT_TO_PAGES == 'true' }}
     needs: build
     runs-on: ubuntu-latest
     environment:
