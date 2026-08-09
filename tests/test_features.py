@@ -7,6 +7,15 @@ from gapmodel.markets import INDICATORS, MARKETS, SECTOR_SYMBOLS, all_symbols, m
 from gapmodel.model import walk_forward
 
 
+def test_the_dow_is_modelled_alongside_the_other_wall_street_indices():
+    dow = market("^DJI")
+    assert dow.region == "Americas"
+    # It opens and closes with the S&P, so the two read the same indicator lags.
+    spx = market("^GSPC")
+    assert (dow.open_utc, dow.close_utc) == (spx.open_utc, spx.close_utc)
+    assert "^DJI" in all_symbols()
+
+
 def synthetic_bars(n: int = 900, seed: int = 0) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     dates = pd.bdate_range("2015-01-01", periods=n)

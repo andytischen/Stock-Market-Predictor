@@ -167,6 +167,22 @@ CURVE_CLOSE_UTC = 20.0
 # noise cannot dominate it, short enough to still describe the current regime.
 CURVE_WINDOW = 60
 
+# What the market thinks the Fed will do, rather than what long bonds yield.
+# The 30-day fed funds future settles on the average effective funds rate over
+# its delivery month, so 100 minus its price is the rate the front month is
+# priced for. The 13-week bill carries the same expectation three months out, so
+# the difference between the two is the tightening (or easing) the next quarter
+# has priced in: the "is September a hike?" question the yield curve features
+# cannot express, since a 10y yield rises both on inflation and on growth.
+FUNDS_FUTURE = "ZQ=F"
+BILL_YIELD = "^IRX"
+# Funds futures settle with the other CME contracts; the bill yield is a US
+# cash-market print. Neither is used as a log return — bill yields have touched
+# zero, and a future priced near 100 moves in fractions of a percent — so both
+# enter the model as levels, in percentage points.
+FUNDS_CLOSE_UTC = 21.0
+BILL_CLOSE_UTC = 20.0
+
 MARKETS_BY_SYMBOL = {m.symbol: m for m in MARKETS}
 
 # Regions in the order their sessions run through the day.
@@ -176,6 +192,20 @@ REGIONS: tuple[str, ...] = tuple(dict.fromkeys(m.region for m in MARKETS))
 def lag_days(source_close_utc: float, target_open_utc: float) -> int:
     """0 if the source bar closes before the target opens, otherwise 1."""
     return 0 if source_close_utc < target_open_utc else 1
+
+
+def last_observed_utc(target_open_utc: float) -> float:
+    """When the freshest bar a target may use actually closed.
+
+    On the target session's own clock — hours from midnight UTC of the session
+    date, so negative for a bar stamped the previous calendar day. This is the
+    boundary between what the features contain and what they cannot: a Sydney
+    session opening at 23:00 the day before reads Wall Street's close from that
+    same evening, hours after the New York afternoon it opens behind.
+    """
+    closes = [m.close_utc for m in MARKETS] + [i.close_utc for i in INDICATORS]
+    closes += [CURVE_CLOSE_UTC, FUNDS_CLOSE_UTC, BILL_CLOSE_UTC]
+    return max(close - 24.0 * lag_days(close, target_open_utc) for close in closes)
 
 
 def market(symbol: str) -> Market:
@@ -189,5 +219,5 @@ def market(symbol: str) -> Market:
 def all_symbols() -> list[str]:
     symbols = [m.symbol for m in MARKETS] + [i.symbol for i in INDICATORS]
     symbols += [m.open_source for m in MARKETS if m.open_source]
-    symbols += [CURVE_FRONT, CURVE_STRIP]
+    symbols += [CURVE_FRONT, CURVE_STRIP, FUNDS_FUTURE, BILL_YIELD]
     return symbols

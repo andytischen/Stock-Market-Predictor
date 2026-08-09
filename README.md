@@ -6,11 +6,12 @@ indices. For every market it answers one question:
 > Given everything the world knew before the bell, what is the probability that
 > this index opens above its previous close?
 
-Seventeen indices are covered across Asia, Europe and the Americas, driven by
-the sessions that have already closed plus a set of cross-asset indicators (VIX,
-the US 5y/10y/30y yields, Russell 2000, the semiconductor index, ASML, the
-eighteen STOXX Europe 600 sectors, dollar index, USD/JPY, EUR/USD, GBP/USD, WTI
-and Brent crude, gold, silver, copper, S&P 500 and Nasdaq futures). Run
+Seventeen indices are covered across Asia, Europe and the Americas, driven by the
+sessions that have already closed plus a set of cross-asset indicators (VIX, the
+US 5y/10y/30y yields, the priced policy rate, Russell 2000, the semiconductor
+index, ASML, the eighteen STOXX Europe 600 sectors, dollar index, USD/JPY,
+EUR/USD, GBP/USD, WTI and Brent crude, gold, silver, copper, S&P 500 and Nasdaq
+futures). Run
 `python -m gapmodel markets` for the full list with session times.
 
 Each market is then analysed by its own bespoke model: a separate probability
@@ -53,6 +54,53 @@ shocked, which tilts the curve without moving the level:
 python -m gapmodel predict --shock 'USO=-2%'   # front month sells off: deeper contango
 ```
 
+What the market has priced for the Fed is carried separately from what long
+bonds yield, because a 10-year yield rises on inflation and on growth alike and
+cannot express "is September a hike?". The 30-day fed funds future settles on the
+average effective funds rate over its delivery month, so 100 minus its price is
+the rate the front month is priced for; the 13-week bill carries the same
+expectation a quarter out, and the difference between the two is the tightening
+(or easing) the next three months have priced in. Both readings are levels in
+percentage points rather than log returns: a future priced near 100 has
+meaninglessly small returns, and bill yields have sat at zero, where a log return
+is undefined. The *changes* in the priced rate were built too, and dropped —
+last of eighty-three features by weight, as a series moving in single basis
+points outside a meeting week deserves to be.
+
+A hawkish turn is only partly visible this way. The pricing moves, so the model
+sees it; the speech that moved it, it does not. Measured over the full
+walk-forward, these features are worth about ±0.004 AUC depending on the market —
+inside the noise, and not the reason to keep them. They earn their place in the
+attribution, where the policy legs make an otherwise unexplained call legible.
+
+### Scheduled releases the model cannot anticipate
+
+Every feature is a price, and a price cannot anticipate a number that has not
+been published. A call for a session carrying payrolls, CPI, PCE or an FOMC
+decision is built entirely from a world in which that release has not happened,
+which makes it a narrower answer than it looks. `predict` says so:
+
+```
+scheduled releases this model cannot see:
+  S&P 500: US payrolls at 12:30 UTC, before this open: the auction prices it and
+  the model cannot — treat the probability as stale
+  FTSE 100: US payrolls at 12:30 UTC, after this open: the call still stands for
+  the auction but says nothing about the session
+```
+
+Every date comes from the publishing agency's own calendar — BLS for payrolls and
+CPI, BEA for PCE, the Board for FOMC decisions — and none is derived from a rule,
+because the rules do not hold: payrolls are conventionally the first Friday of
+the month, and in 2026 the BLS scheduled them for a Wednesday in February, the
+second Friday in May and a Thursday before Independence Day in July. Times are
+converted from New York's clock for the date in question, so a 14:00 ET statement
+reads 18:00 UTC in September and 19:00 UTC in December.
+
+The cost of not guessing is that the tables end: **past `CALENDAR_END` the
+absence of a warning means nothing was checked, not that nothing is scheduled.**
+Refreshing them is a yearly job, and each `Schedule` carries the page it came
+from.
+
 ## Install
 
 ```bash
@@ -70,6 +118,7 @@ python -m gapmodel predict --shock '^KS11=+2%'  # what-if: re-run under a hypoth
 python -m gapmodel predict --shock 'CL=F=-5%' --shock 'JPY=X=+2%'  # shocks compose
 python -m gapmodel backtest --reliability
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
+python -m gapmodel screen             # US stocks: liquid, unusually active, moving
 ```
 
 `predict` prints one row per market with the probability and the out-of-sample
@@ -136,22 +185,22 @@ observation rather than silently borrowing a future one.
 | Market | AUC | Accuracy | Brier skill |
 | --- | --- | --- | --- |
 | KOSPI | 0.85 | 0.78 | 0.37 |
-| Nikkei 225 | 0.85 | 0.77 | 0.36 |
-| ASX 200 | 0.85 | 0.77 | 0.36 |
-| DAX | 0.81 | 0.73 | 0.28 |
-| CAC 40 | 0.80 | 0.73 | 0.27 |
-| Euro Stoxx 50 | 0.80 | 0.73 | 0.27 |
-| FTSE 100 | 0.80 | 0.73 | 0.27 |
-| IBEX 35 | 0.80 | 0.72 | 0.26 |
-| Hang Seng | 0.78 | 0.71 | 0.23 |
-| Swiss Market Index | 0.78 | 0.70 | 0.22 |
-| Shanghai Composite | 0.77 | 0.71 | 0.20 |
-| Nifty 50 | 0.75 | 0.72 | 0.18 |
-| Nasdaq Composite | 0.70 | 0.65 | 0.12 |
-| S&P 500 | 0.69 | 0.65 | 0.11 |
-| S&P/TSX | 0.69 | 0.64 | 0.10 |
-| Dow Jones | 0.67 | 0.63 | 0.09 |
-| Bovespa | 0.65 | 0.61 | 0.06 |
+| ASX 200 | 0.85 | 0.78 | 0.37 |
+| Nikkei 225 | 0.85 | 0.77 | 0.37 |
+| DAX | 0.81 | 0.74 | 0.29 |
+| Euro Stoxx 50 | 0.81 | 0.73 | 0.28 |
+| CAC 40 | 0.81 | 0.74 | 0.28 |
+| IBEX 35 | 0.81 | 0.74 | 0.28 |
+| FTSE 100 | 0.81 | 0.73 | 0.28 |
+| Hang Seng | 0.79 | 0.72 | 0.25 |
+| Swiss Market Index | 0.78 | 0.71 | 0.24 |
+| Shanghai Composite | 0.77 | 0.72 | 0.21 |
+| Nifty 50 | 0.75 | 0.73 | 0.18 |
+| Nasdaq Composite | 0.71 | 0.66 | 0.13 |
+| S&P 500 | 0.70 | 0.66 | 0.11 |
+| S&P/TSX | 0.69 | 0.64 | 0.11 |
+| Dow Jones Industrial Average | 0.67 | 0.62 | 0.08 |
+| Bovespa | 0.65 | 0.62 | 0.07 |
 
 Asian and European opens are largely explained by the US session that closed
 while they slept. Wall Street's own open is much harder from daily bars alone:
@@ -308,6 +357,78 @@ reproducible; the z-score depends only on the trailing window, so it was chosen
 instead. Either way this is an *approximation of the ranking*, not a reproduction
 of the column: the real one is driven by inputs a daily price bar does not
 contain.
+
+## Stock screener
+
+The model calls the *index*. `screen` is the layer below it on the US side: of
+the names inside that market, which ones are worth looking at for the session
+just traded. It narrows the universe in three stages, printing how many names
+survive each one, so the result reads as a funnel:
+
+```
+US universe  ->  liquid  ->  unusually active  ->  actually moving
+```
+
+```bash
+python -m gapmodel screen                        # the default US universe
+python -m gapmodel screen --etfs --csv movers.csv
+python -m gapmodel screen --asof 2026-08-07      # screen a completed session
+python -m gapmodel screen AAPL NVDA PLTR         # or just these names
+python -m gapmodel screen --universe my_list.txt --min-rel-volume 2
+```
+
+```
+Screen funnel:
+  universe     155  US names with enough history to screen
+  liquid       104  price >= $5, 30d average volume >= 5M
+  active        12  volume >= 2M, relative volume >= 1.25x
+  moving         8  change >= +1.0%, ATR >= 2.0% of price
+
+symbol   last  change  volume_m  avg_volume_m  rel_volume  atr_pct       asof
+  DKNG  24.03    8.39     37.76         12.06        3.13     4.55 2026-08-07
+     U  43.00    5.37     18.55          9.07        2.05     5.43 2026-08-07
+  LYFT  17.46    7.12     23.94         11.87        2.02     4.14 2026-08-07
+  PLTR 172.01   10.32     77.38         45.48        1.70     5.39 2026-08-07
+```
+
+| stage | filter | flag |
+| --- | --- | --- |
+| liquid | price ≥ $5 | `--min-price` |
+| liquid | 30-day average volume ≥ 5M shares | `--min-avg-volume`, `--avg-window` |
+| active | today's volume ≥ 2M shares | `--min-volume` |
+| active | relative volume ≥ 1.25× | `--min-rel-volume` |
+| moving | daily move ≥ +1% | `--min-change` |
+| moving | ATR ≥ 2% of price | `--min-atr`, `--atr-window` |
+
+Survivors are ranked by relative volume, since that is what separates a real
+move from a name that happens to be up on its usual turnover.
+
+Two details decide what the numbers mean. **Relative volume** is measured against
+the 30 sessions *before* the one being screened: including today would put the
+day's own volume into its own baseline, which flattens exactly the spikes the
+test is looking for (a day trading 10× its average reads as only ~7.5× on a
+window that contains it). **ATR** is a plain mean of the true ranges over the
+window, not Wilder's smoothing, for the same reason the trend score avoids
+Wilder's RSI — that recursion is path-dependent on where the price history
+starts, so its value drifts with the download window, while a mean of the last
+14 true ranges depends only on those sessions. True range counts overnight gaps,
+not just the session's own high-low, so a stock that gaps and then sits still is
+still recognised as one that moves.
+
+The starting universe (`gapmodel/universe.py`) is a hand-maintained snapshot of
+liquid US listings — the S&P 100 plus the mid-caps and high-beta names that
+actually print unusual volume, with the heavily traded ETFs behind `--etfs`. It
+is deliberately a superset: every filter is applied to real bars, so a name that
+has gone quiet or been delisted is dropped by the funnel rather than needing to
+be pruned by hand. Symbols, `--universe` and `--etfs` are alternatives; asking for
+more than one is an error rather than a silent precedence rule.
+
+Volume for a session still in progress is partial, so a screen run mid-session
+understates today's volume and relative volume and returns fewer names than the
+same screen after the close; `--asof` screens a completed session. Unlike the
+model panel, the screen is *about* the latest session, so a cached series whose
+last bar predates the session being screened is re-downloaded even without
+`--refresh` — yesterday's cache would otherwise silently re-screen yesterday.
 
 ## Project tracker
 
