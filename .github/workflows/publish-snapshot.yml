@@ -52,5 +52,22 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Check whether GitHub Pages is enabled
+        id: pages
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: repo } = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            core.setOutput("enabled", repo.has_pages ? "true" : "false");
+
+      - name: Skip deploy when GitHub Pages is disabled
+        if: steps.pages.outputs.enabled != 'true'
+        run: |
+          echo "GitHub Pages is not enabled for this repository; skipping deployment."
+
       - id: deployment
+        if: steps.pages.outputs.enabled == 'true'
         uses: actions/deploy-pages@v4
