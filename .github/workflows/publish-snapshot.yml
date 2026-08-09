@@ -46,6 +46,7 @@ jobs:
           path: site
 
   deploy:
+    if: ${{ vars.ENABLE_GITHUB_PAGES == 'true' }}
     needs: build
     runs-on: ubuntu-latest
     environment:
