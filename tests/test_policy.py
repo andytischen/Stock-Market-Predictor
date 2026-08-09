@@ -2,13 +2,7 @@ import pandas as pd
 import pytest
 
 from gapmodel.features import build_features, policy_features
-from gapmodel.markets import (
-    BILL_YIELD,
-    FUNDS_FUTURE,
-    POLICY_WINDOW,
-    all_symbols,
-    market,
-)
+from gapmodel.markets import BILL_YIELD, FUNDS_FUTURE, all_symbols, market
 from tests.test_features import synthetic_bars
 
 
@@ -66,13 +60,11 @@ def test_a_zero_bill_yield_still_produces_a_spread(panel):
     assert built["ind_policy_tightening_3m"].iloc[1:].notna().all()
 
 
-def test_the_change_features_span_one_session_and_the_window(panel):
+def test_only_the_two_levels_are_built(panel):
+    """The change features were measured as inert and removed; stay removed."""
     dates = pd.DatetimeIndex(panel["^GSPC"].index)
     built = policy_features(panel, dates, market("^GSPC"))
-    priced = 100.0 - panel[FUNDS_FUTURE]["Close"]
-    assert built["ind_policy_rate_change"].iloc[-1] == pytest.approx(priced.diff().iloc[-2])
-    slow = built[f"ind_policy_rate_change_{POLICY_WINDOW}"]
-    assert slow.iloc[-1] == pytest.approx(priced.diff(POLICY_WINDOW).iloc[-2])
+    assert set(built) == {"ind_policy_rate", "ind_policy_tightening_3m"}
 
 
 def test_policy_features_are_absent_without_both_legs(panel):

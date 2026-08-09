@@ -60,37 +60,46 @@ cannot express "is September a hike?". The 30-day fed funds future settles on th
 average effective funds rate over its delivery month, so 100 minus its price is
 the rate the front month is priced for; the 13-week bill carries the same
 expectation a quarter out, and the difference between the two is the tightening
-(or easing) the next three months have priced in. All four readings — the rate,
-its one-day and 20-session change, and the spread — are levels in percentage
-points rather than log returns: a future priced near 100 has meaninglessly small
-returns, and bill yields have sat at zero, where a log return is undefined.
+(or easing) the next three months have priced in. Both readings are levels in
+percentage points rather than log returns: a future priced near 100 has
+meaninglessly small returns, and bill yields have sat at zero, where a log return
+is undefined. The *changes* in the priced rate were built too, and dropped —
+last of eighty-three features by weight, as a series moving in single basis
+points outside a meeting week deserves to be.
 
 A hawkish turn is only partly visible this way. The pricing moves, so the model
 sees it; the speech that moved it, it does not. Measured over the full
-walk-forward, these features are worth about ±0.003 AUC depending on the market —
+walk-forward, these features are worth about ±0.004 AUC depending on the market —
 inside the noise, and not the reason to keep them. They earn their place in the
 attribution, where the policy legs make an otherwise unexplained call legible.
 
 ### Scheduled releases the model cannot anticipate
 
 Every feature is a price, and a price cannot anticipate a number that has not
-been published. A call for a session carrying the payrolls report or an FOMC
+been published. A call for a session carrying payrolls, CPI, PCE or an FOMC
 decision is built entirely from a world in which that release has not happened,
 which makes it a narrower answer than it looks. `predict` says so:
 
 ```
 scheduled releases this model cannot see:
-  S&P 500: US payrolls at 13:30 UTC, before this open: the auction prices it and
+  S&P 500: US payrolls at 12:30 UTC, before this open: the auction prices it and
   the model cannot — treat the probability as stale
-  FTSE 100: US payrolls at 13:30 UTC, after this open: the call still stands for
+  FTSE 100: US payrolls at 12:30 UTC, after this open: the call still stands for
   the auction but says nothing about the session
 ```
 
-Payrolls follow a rule (first Friday, 13:30 UTC). FOMC decisions follow none and
-come from the published calendar, so that table ends: **past `CALENDAR_END` the
+Every date comes from the publishing agency's own calendar — BLS for payrolls and
+CPI, BEA for PCE, the Board for FOMC decisions — and none is derived from a rule,
+because the rules do not hold: payrolls are conventionally the first Friday of
+the month, and in 2026 the BLS scheduled them for a Wednesday in February, the
+second Friday in May and a Thursday before Independence Day in July. Times are
+converted from New York's clock for the date in question, so a 14:00 ET statement
+reads 18:00 UTC in September and 19:00 UTC in December.
+
+The cost of not guessing is that the tables end: **past `CALENDAR_END` the
 absence of a warning means nothing was checked, not that nothing is scheduled.**
-CPI and the other announced-but-not-derivable releases are deliberately left
-out — a caveat that fires on the wrong day teaches you to ignore it.
+Refreshing them is a yearly job, and each `Schedule` carries the page it came
+from.
 
 ## Install
 

@@ -19,7 +19,6 @@ from .markets import (
     INDICATORS,
     MARKETS,
     OIL_SYMBOLS,
-    POLICY_WINDOW,
     SECTOR_SYMBOLS,
     Market,
     lag_days,
@@ -99,14 +98,18 @@ def curve_features(
 def policy_features(
     panel: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, target: Market
 ) -> dict[str, pd.Series]:
-    """What the market has priced for the policy rate, and how fast that changed.
+    """What the market has priced for the policy rate, now and a quarter out.
 
-    Four readings in percentage points: the rate the front fed funds future is
-    priced for, its change over one session and over ``POLICY_WINDOW``, and the
-    tightening priced into the next quarter as the 13-week bill's premium over
-    that rate. A positive spread widening is the market pulling a hike forward,
-    which is the part of a hawkish turn a price-only model can actually observe;
-    the words spoken to cause it remain invisible.
+    Two readings in percentage points: the rate the front fed funds future is
+    priced for, and the tightening priced into the next quarter as the 13-week
+    bill's premium over it. A widening spread is the market pulling a hike
+    forward, which is the part of a hawkish turn a price-only model can actually
+    observe; the words spoken to cause it remain invisible.
+
+    The daily and monthly *changes* in the priced rate were measured and
+    dropped: they ranked last of eighty-three features by log-odds weight, which
+    is what one should expect of a series that moves in single basis points
+    outside a meeting week.
 
     Levels, not log returns: a future priced near 100 has meaninglessly small
     returns, and bill yields have sat at zero, where a log return is undefined.
@@ -124,10 +127,6 @@ def policy_features(
     spread = bill.reindex(implied.index.union(bill.index)).ffill().reindex(implied.index) - implied
     return {
         "ind_policy_rate": as_of(implied, dates, lag),
-        "ind_policy_rate_change": as_of(implied.diff().dropna(), dates, lag),
-        f"ind_policy_rate_change_{POLICY_WINDOW}": as_of(
-            implied.diff(POLICY_WINDOW).dropna(), dates, lag
-        ),
         "ind_policy_tightening_3m": as_of(spread.dropna(), dates, lag),
     }
 
