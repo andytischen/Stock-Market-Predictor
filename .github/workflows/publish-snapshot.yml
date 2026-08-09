@@ -46,7 +46,7 @@ jobs:
           path: site
 
   deploy:
-    if: ${{ github.event.repository.has_pages }}
+    if: github.event.repository.has_pages
     needs: build
     runs-on: ubuntu-latest
     environment:
