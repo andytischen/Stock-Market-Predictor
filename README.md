@@ -6,11 +6,11 @@ indices. For every market it answers one question:
 > Given everything the world knew before the bell, what is the probability that
 > this index opens above its previous close?
 
-Sixteen indices are covered across Asia, Europe and the Americas, driven by the
-sessions that have already closed plus a set of cross-asset indicators (VIX, the
-US 5y/10y/30y yields, Russell 2000, the semiconductor index, ASML, the eighteen
-STOXX Europe 600 sectors, dollar index, USD/JPY, EUR/USD, GBP/USD, WTI and
-Brent crude, gold, silver, copper, S&P 500 and Nasdaq futures). Run
+Seventeen indices are covered across Asia, Europe and the Americas, driven by
+the sessions that have already closed plus a set of cross-asset indicators (VIX,
+the US 5y/10y/30y yields, Russell 2000, the semiconductor index, ASML, the
+eighteen STOXX Europe 600 sectors, dollar index, USD/JPY, EUR/USD, GBP/USD, WTI
+and Brent crude, gold, silver, copper, S&P 500 and Nasdaq futures). Run
 `python -m gapmodel markets` for the full list with session times.
 
 Each market is then analysed by its own bespoke model: a separate probability
@@ -136,21 +136,22 @@ observation rather than silently borrowing a future one.
 | Market | AUC | Accuracy | Brier skill |
 | --- | --- | --- | --- |
 | KOSPI | 0.85 | 0.78 | 0.37 |
-| ASX 200 | 0.85 | 0.78 | 0.37 |
-| Nikkei 225 | 0.85 | 0.77 | 0.37 |
-| DAX | 0.81 | 0.74 | 0.29 |
-| Euro Stoxx 50 | 0.81 | 0.73 | 0.28 |
-| CAC 40 | 0.81 | 0.74 | 0.28 |
-| IBEX 35 | 0.81 | 0.74 | 0.28 |
-| FTSE 100 | 0.81 | 0.73 | 0.28 |
-| Hang Seng | 0.79 | 0.72 | 0.25 |
-| Swiss Market Index | 0.78 | 0.71 | 0.24 |
-| Shanghai Composite | 0.77 | 0.72 | 0.21 |
-| Nifty 50 | 0.75 | 0.73 | 0.18 |
-| Nasdaq Composite | 0.71 | 0.66 | 0.13 |
-| S&P 500 | 0.70 | 0.66 | 0.12 |
-| S&P/TSX | 0.69 | 0.64 | 0.11 |
-| Bovespa | 0.65 | 0.62 | 0.07 |
+| Nikkei 225 | 0.85 | 0.77 | 0.36 |
+| ASX 200 | 0.85 | 0.77 | 0.36 |
+| DAX | 0.81 | 0.73 | 0.28 |
+| CAC 40 | 0.80 | 0.73 | 0.27 |
+| Euro Stoxx 50 | 0.80 | 0.73 | 0.27 |
+| FTSE 100 | 0.80 | 0.73 | 0.27 |
+| IBEX 35 | 0.80 | 0.72 | 0.26 |
+| Hang Seng | 0.78 | 0.71 | 0.23 |
+| Swiss Market Index | 0.78 | 0.70 | 0.22 |
+| Shanghai Composite | 0.77 | 0.71 | 0.20 |
+| Nifty 50 | 0.75 | 0.72 | 0.18 |
+| Nasdaq Composite | 0.70 | 0.65 | 0.12 |
+| S&P 500 | 0.69 | 0.65 | 0.11 |
+| S&P/TSX | 0.69 | 0.64 | 0.10 |
+| Dow Jones | 0.67 | 0.63 | 0.09 |
+| Bovespa | 0.65 | 0.61 | 0.06 |
 
 Asian and European opens are largely explained by the US session that closed
 while they slept. Wall Street's own open is much harder from daily bars alone:
