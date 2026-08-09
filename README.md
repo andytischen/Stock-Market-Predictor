@@ -6,11 +6,12 @@ indices. For every market it answers one question:
 > Given everything the world knew before the bell, what is the probability that
 > this index opens above its previous close?
 
-Sixteen indices are covered across Asia, Europe and the Americas, driven by the
+Seventeen indices are covered across Asia, Europe and the Americas, driven by the
 sessions that have already closed plus a set of cross-asset indicators (VIX, the
-US 5y/10y/30y yields, Russell 2000, the semiconductor index, ASML, the eighteen
-STOXX Europe 600 sectors, dollar index, USD/JPY, EUR/USD, GBP/USD, WTI and
-Brent crude, gold, silver, copper, S&P 500 and Nasdaq futures). Run
+US 5y/10y/30y yields, the priced policy rate, Russell 2000, the semiconductor
+index, ASML, the eighteen STOXX Europe 600 sectors, dollar index, USD/JPY,
+EUR/USD, GBP/USD, WTI and Brent crude, gold, silver, copper, S&P 500 and Nasdaq
+futures). Run
 `python -m gapmodel markets` for the full list with session times.
 
 Each market is then analysed by its own bespoke model: a separate probability
@@ -52,6 +53,44 @@ shocked, which tilts the curve without moving the level:
 ```bash
 python -m gapmodel predict --shock 'USO=-2%'   # front month sells off: deeper contango
 ```
+
+What the market has priced for the Fed is carried separately from what long
+bonds yield, because a 10-year yield rises on inflation and on growth alike and
+cannot express "is September a hike?". The 30-day fed funds future settles on the
+average effective funds rate over its delivery month, so 100 minus its price is
+the rate the front month is priced for; the 13-week bill carries the same
+expectation a quarter out, and the difference between the two is the tightening
+(or easing) the next three months have priced in. All four readings — the rate,
+its one-day and 20-session change, and the spread — are levels in percentage
+points rather than log returns: a future priced near 100 has meaninglessly small
+returns, and bill yields have sat at zero, where a log return is undefined.
+
+A hawkish turn is only partly visible this way. The pricing moves, so the model
+sees it; the speech that moved it, it does not. Measured over the full
+walk-forward, these features are worth about ±0.003 AUC depending on the market —
+inside the noise, and not the reason to keep them. They earn their place in the
+attribution, where the policy legs make an otherwise unexplained call legible.
+
+### Scheduled releases the model cannot anticipate
+
+Every feature is a price, and a price cannot anticipate a number that has not
+been published. A call for a session carrying the payrolls report or an FOMC
+decision is built entirely from a world in which that release has not happened,
+which makes it a narrower answer than it looks. `predict` says so:
+
+```
+scheduled releases this model cannot see:
+  S&P 500: US payrolls at 13:30 UTC, before this open: the auction prices it and
+  the model cannot — treat the probability as stale
+  FTSE 100: US payrolls at 13:30 UTC, after this open: the call still stands for
+  the auction but says nothing about the session
+```
+
+Payrolls follow a rule (first Friday, 13:30 UTC). FOMC decisions follow none and
+come from the published calendar, so that table ends: **past `CALENDAR_END` the
+absence of a warning means nothing was checked, not that nothing is scheduled.**
+CPI and the other announced-but-not-derivable releases are deliberately left
+out — a caveat that fires on the wrong day teaches you to ignore it.
 
 ## Install
 
@@ -148,8 +187,9 @@ observation rather than silently borrowing a future one.
 | Shanghai Composite | 0.77 | 0.72 | 0.21 |
 | Nifty 50 | 0.75 | 0.73 | 0.18 |
 | Nasdaq Composite | 0.71 | 0.66 | 0.13 |
-| S&P 500 | 0.70 | 0.66 | 0.12 |
+| S&P 500 | 0.70 | 0.66 | 0.11 |
 | S&P/TSX | 0.69 | 0.64 | 0.11 |
+| Dow Jones Industrial Average | 0.67 | 0.62 | 0.08 |
 | Bovespa | 0.65 | 0.62 | 0.07 |
 
 Asian and European opens are largely explained by the US session that closed

@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from . import model as model_mod
+from .events import caveats
 from .features import _column_name, build_features, live_feature_row
 from .markets import CURVE_FRONT, CURVE_STRIP, CURVE_WINDOW, MARKETS, market
 
@@ -27,6 +28,8 @@ class Forecast:
     top_drivers: int = 5
     # Probability under the hypothetical moves asked for, if any were.
     shocked_probability: float | None = None
+    # Scheduled releases that this session's probability cannot account for.
+    caveats: tuple[str, ...] = ()
 
     @property
     def drivers(self) -> pd.Series:
@@ -151,6 +154,7 @@ def forecast_market(
 
     meta = market(symbol)
     return Forecast(
+        caveats=caveats(meta, session),
         symbol=symbol,
         name=meta.name,
         region=meta.region,

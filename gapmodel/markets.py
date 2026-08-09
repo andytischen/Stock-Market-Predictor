@@ -62,6 +62,7 @@ MARKETS: tuple[Market, ...] = (
     Market("^FTSE", "FTSE 100", "Europe", open_utc=7.0, close_utc=15.5, open_source="ISF.L"),
     Market("^GSPC", "S&P 500", "Americas", open_utc=13.5, close_utc=20.0),
     Market("^IXIC", "Nasdaq Composite", "Americas", open_utc=13.5, close_utc=20.0),
+    Market("^DJI", "Dow Jones Industrial Average", "Americas", open_utc=13.5, close_utc=20.0),
     Market("^GSPTSE", "S&P/TSX Composite", "Americas", open_utc=13.5, close_utc=20.0),
     Market("^BVSP", "Bovespa", "Americas", open_utc=13.0, close_utc=20.0),
 )
@@ -162,6 +163,27 @@ CURVE_CLOSE_UTC = 20.0
 # noise cannot dominate it, short enough to still describe the current regime.
 CURVE_WINDOW = 60
 
+# What the market thinks the Fed will do, rather than what long bonds yield.
+# The 30-day fed funds future settles on the average effective funds rate over
+# its delivery month, so 100 minus its price is the rate the front month is
+# priced for — a direct read on the current setting and, through its own moves,
+# on the odds of it changing. The 13-week bill carries the same expectation
+# three months out, so the difference between the two is the tightening (or
+# easing) the next quarter has priced in: the "is September a hike?" question
+# the yield curve features cannot express, since a 10y yield rises both on
+# inflation and on growth.
+FUNDS_FUTURE = "ZQ=F"
+BILL_YIELD = "^IRX"
+# Funds futures settle with the other CME contracts; the bill yield is a US
+# cash-market print. Neither is used as a log return — bill yields have touched
+# zero, and a future priced near 100 moves in fractions of a percent — so both
+# enter the model as levels and differences of levels, in percentage points.
+FUNDS_CLOSE_UTC = 21.0
+BILL_CLOSE_UTC = 20.0
+# Sessions over which the slow change in pricing is measured: about a month, so
+# it spans the run-up to a meeting without being dominated by one session.
+POLICY_WINDOW = 20
+
 MARKETS_BY_SYMBOL = {m.symbol: m for m in MARKETS}
 
 # Regions in the order their sessions run through the day.
@@ -184,5 +206,5 @@ def market(symbol: str) -> Market:
 def all_symbols() -> list[str]:
     symbols = [m.symbol for m in MARKETS] + [i.symbol for i in INDICATORS]
     symbols += [m.open_source for m in MARKETS if m.open_source]
-    symbols += [CURVE_FRONT, CURVE_STRIP]
+    symbols += [CURVE_FRONT, CURVE_STRIP, FUNDS_FUTURE, BILL_YIELD]
     return symbols

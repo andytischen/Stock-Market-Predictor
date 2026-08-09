@@ -7,14 +7,19 @@ import pandas as pd
 
 from .intraday import preopen_features
 from .markets import (
+    BILL_CLOSE_UTC,
+    BILL_YIELD,
     CURVE_CLOSE_UTC,
     CURVE_FRONT,
     CURVE_STRIP,
     CURVE_WINDOW,
+    FUNDS_CLOSE_UTC,
+    FUNDS_FUTURE,
     FX_SYMBOLS,
     INDICATORS,
     MARKETS,
     OIL_SYMBOLS,
+    POLICY_WINDOW,
     SECTOR_SYMBOLS,
     Market,
     lag_days,
@@ -88,6 +93,42 @@ def curve_features(
     return {
         "ind_oil_curve_return": as_of(daily.dropna(), dates, lag),
         f"ind_oil_curve_slope_{CURVE_WINDOW}": as_of(slow.dropna(), dates, lag),
+    }
+
+
+def policy_features(
+    panel: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, target: Market
+) -> dict[str, pd.Series]:
+    """What the market has priced for the policy rate, and how fast that changed.
+
+    Four readings in percentage points: the rate the front fed funds future is
+    priced for, its change over one session and over ``POLICY_WINDOW``, and the
+    tightening priced into the next quarter as the 13-week bill's premium over
+    that rate. A positive spread widening is the market pulling a hike forward,
+    which is the part of a hawkish turn a price-only model can actually observe;
+    the words spoken to cause it remain invisible.
+
+    Levels, not log returns: a future priced near 100 has meaninglessly small
+    returns, and bill yields have sat at zero, where a log return is undefined.
+    The two legs close an hour apart, so both are read on the later of the two
+    clocks and the bill is carried forward onto the future's sessions.
+    """
+    if FUNDS_FUTURE not in panel or BILL_YIELD not in panel:
+        return {}
+    price = panel[FUNDS_FUTURE]["Close"].dropna()
+    bill = panel[BILL_YIELD]["Close"].dropna()
+    if price.empty or bill.empty:
+        return {}
+    implied = 100.0 - price
+    lag = _lag_days(max(FUNDS_CLOSE_UTC, BILL_CLOSE_UTC), target)
+    spread = bill.reindex(implied.index.union(bill.index)).ffill().reindex(implied.index) - implied
+    return {
+        "ind_policy_rate": as_of(implied, dates, lag),
+        "ind_policy_rate_change": as_of(implied.diff().dropna(), dates, lag),
+        f"ind_policy_rate_change_{POLICY_WINDOW}": as_of(
+            implied.diff(POLICY_WINDOW).dropna(), dates, lag
+        ),
+        "ind_policy_tightening_3m": as_of(spread.dropna(), dates, lag),
     }
 
 
@@ -178,6 +219,7 @@ def build_features(
             features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
 
     features.update(curve_features(panel, dates, target))
+    features.update(policy_features(panel, dates, target))
 
     frame = pd.DataFrame(features, index=dates)
     if hourly:

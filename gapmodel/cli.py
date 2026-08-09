@@ -17,8 +17,10 @@ from .export import build_snapshot, dumps
 from .features import build_features
 from .intraday import load_hourly_panel
 from .markets import (
+    BILL_YIELD,
     CURVE_FRONT,
     CURVE_STRIP,
+    FUNDS_FUTURE,
     INDICATORS,
     MARKETS,
     MARKETS_BY_SYMBOL,
@@ -104,6 +106,8 @@ def _cmd_markets(_: argparse.Namespace) -> None:
         print(f"  {i.symbol:<12} {i.name}")
     curve = f"{CURVE_FRONT}/{CURVE_STRIP}"
     print(f"  {curve:<12} crude curve: front month against the 12-month strip")
+    policy = f"{FUNDS_FUTURE}/{BILL_YIELD}"
+    print(f"  {policy:<12} priced policy rate and the tightening priced 3 months out")
     print("\nScenarios (predict --scenario):")
     for s in SCENARIOS.values():
         legs = ", ".join(f"{sym} {move:+.1%}" for sym, move in s.moves.items())
@@ -158,6 +162,7 @@ def _cmd_predict(args: argparse.Namespace) -> None:
         print(f"hypothetical: {described}\n")
     frame = to_frame(forecasts).sort_values("p_open_up", ascending=False)
     print(frame.to_string(index=False))
+    _print_caveats(forecasts)
     if args.explain:
         for f in forecasts:
             print(f"\n{f.name} — top drivers (log-odds contribution):")
@@ -166,6 +171,17 @@ def _cmd_predict(args: argparse.Namespace) -> None:
     if args.csv:
         frame.to_csv(args.csv, index=False)
         print(f"\nwrote {args.csv}")
+
+
+def _print_caveats(forecasts: list[Forecast]) -> None:
+    """Warn where a scheduled release makes a probability less than it looks."""
+    flagged = [f for f in forecasts if f.caveats]
+    if not flagged:
+        return
+    print("\nscheduled releases this model cannot see:")
+    for forecast in flagged:
+        for note in forecast.caveats:
+            print(f"  {forecast.name}: {note}")
 
 
 def _cmd_export(args: argparse.Namespace) -> None:
