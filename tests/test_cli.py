@@ -272,3 +272,34 @@ def test_a_total_hourly_outage_still_yields_a_daily_forecast(monkeypatch, tmp_pa
     args = argparse.Namespace(intraday=True, cache=str(tmp_path), refresh=False)
 
     assert cli._hourly(args) is None
+
+
+def _stub_forecast(name: str, caveats: tuple[str, ...]):
+    from gapmodel.predict import Forecast
+
+    return Forecast(
+        symbol="^GSPC",
+        name=name,
+        region="Americas",
+        session=pd.Timestamp("2026-09-04"),
+        probability_up=0.6,
+        backtest={},
+        contributions=pd.Series(dtype=float),
+        caveats=caveats,
+    )
+
+
+def test_a_scheduled_release_is_reported_next_to_the_probability(capsys):
+    from gapmodel import cli
+
+    cli._print_caveats([_stub_forecast("S&P 500", ("US payrolls at 13:30 UTC, before this open",))])
+    out = capsys.readouterr().out
+    assert "cannot see" in out
+    assert "S&P 500: US payrolls at 13:30 UTC" in out
+
+
+def test_an_uneventful_run_prints_no_caveat_section(capsys):
+    from gapmodel import cli
+
+    cli._print_caveats([_stub_forecast("S&P 500", ())])
+    assert capsys.readouterr().out == ""

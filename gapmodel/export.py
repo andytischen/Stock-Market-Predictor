@@ -47,6 +47,8 @@ def _market_entry(f: Forecast) -> dict[str, object]:
             for name, value in f.drivers.items()
         ],
     }
+    if f.caveats:
+        entry["caveats"] = list(f.caveats)
     if f.shocked_probability is not None:
         entry["p_shocked"] = _display(f.shocked_probability)
         entry["p_change"] = round(f.shocked_probability - f.probability_up, 4)
