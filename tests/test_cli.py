@@ -145,6 +145,67 @@ def test_shock_moves_every_feature_derived_from_the_instrument():
     assert bumped["ind_cl_f_shock"].iloc[0] == pytest.approx(0.5 + 0.04 / 0.02)
 
 
+def test_screen_flags_are_scaled_into_criteria(monkeypatch, tmp_path):
+    from gapmodel import cli
+    from gapmodel.screener import Screen
+
+    captured = {}
+
+    def fake_screen(symbols, **kwargs):
+        captured["symbols"] = symbols
+        captured["criteria"] = kwargs["criteria"]
+        captured["asof"] = kwargs["asof"]
+        return Screen(criteria=kwargs["criteria"], stages=(), readings=(), asof=None)
+
+    monkeypatch.setattr(cli, "screen", fake_screen)
+    main(
+        [
+            "--cache",
+            str(tmp_path),
+            "screen",
+            "nvda",
+            "--min-volume",
+            "3",
+            "--min-avg-volume",
+            "8",
+            "--min-change",
+            "2.5",
+            "--min-atr",
+            "4",
+            "--asof",
+            "2026-08-07",
+        ]
+    )
+    criteria = captured["criteria"]
+    assert captured["symbols"] == ["NVDA"]
+    assert criteria.min_volume == pytest.approx(3e6)
+    assert criteria.min_avg_volume == pytest.approx(8e6)
+    assert criteria.min_change == pytest.approx(0.025)
+    assert criteria.min_atr == pytest.approx(0.04)
+    assert captured["asof"] == pd.Timestamp("2026-08-07")
+
+
+def test_screen_defaults_to_the_us_universe(monkeypatch, tmp_path):
+    from gapmodel import cli
+    from gapmodel.screener import Screen
+
+    seen = {}
+
+    def fake_screen(symbols, **kwargs):
+        seen["symbols"] = symbols
+        return Screen(criteria=kwargs["criteria"], stages=(), readings=(), asof=None)
+
+    monkeypatch.setattr(cli, "screen", fake_screen)
+    main(["--cache", str(tmp_path), "screen"])
+    assert "AAPL" in seen["symbols"] and "SPY" not in seen["symbols"]
+
+
+def test_screen_rejects_an_unreadable_universe_file(tmp_path):
+    with pytest.raises(SystemExit) as exit_info:
+        main(["screen", "--universe", str(tmp_path / "missing.txt")])
+    assert "error:" in str(exit_info.value)
+
+
 def test_intraday_falls_back_to_the_daily_model_when_futures_bars_are_missing(monkeypatch):
     """A stale futures feed should cost sharpness, not the whole forecast."""
     import argparse

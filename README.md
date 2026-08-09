@@ -70,6 +70,7 @@ python -m gapmodel predict --shock '^KS11=+2%'  # what-if: re-run under a hypoth
 python -m gapmodel predict --shock 'CL=F=-5%' --shock 'JPY=X=+2%'  # shocks compose
 python -m gapmodel backtest --reliability
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
+python -m gapmodel screen             # US stocks: liquid, unusually active, moving
 ```
 
 `predict` prints one row per market with the probability and the out-of-sample
@@ -307,6 +308,72 @@ reproducible; the z-score depends only on the trailing window, so it was chosen
 instead. Either way this is an *approximation of the ranking*, not a reproduction
 of the column: the real one is driven by inputs a daily price bar does not
 contain.
+
+## Stock screener
+
+The model calls the *index*. `screen` is the layer below it on the US side: of
+the names inside that market, which ones are worth looking at for the session
+just traded. It narrows the universe in three stages, printing how many names
+survive each one, so the result reads as a funnel:
+
+```
+US universe  ->  liquid  ->  unusually active  ->  actually moving
+```
+
+```bash
+python -m gapmodel screen                        # the default US universe
+python -m gapmodel screen --etfs --csv movers.csv
+python -m gapmodel screen --asof 2026-08-07      # screen a completed session
+python -m gapmodel screen AAPL NVDA PLTR         # or just these names
+python -m gapmodel screen --universe my_list.txt --min-rel-volume 2
+```
+
+```
+Screen funnel:
+  universe     155  US names with enough history to screen
+  liquid       104  price >= $5, 30d average volume >= 5M
+  active        12  volume >= 2M, relative volume >= 1.25x
+  moving         8  change >= +1.0%, ATR >= 2.0% of price
+
+symbol   last  change  volume_m  avg_volume_m  rel_volume  atr_pct       asof
+  DKNG  24.03    8.39     37.76         12.06        3.13     4.55 2026-08-07
+     U  43.00    5.37     18.55          9.07        2.05     5.43 2026-08-07
+  LYFT  17.46    7.12     23.94         11.87        2.02     4.14 2026-08-07
+  PLTR 172.01   10.32     77.38         45.48        1.70     5.39 2026-08-07
+```
+
+| stage | filter | flag |
+| --- | --- | --- |
+| liquid | price ≥ $5 | `--min-price` |
+| liquid | 30-day average volume ≥ 5M shares | `--min-avg-volume`, `--avg-window` |
+| active | today's volume ≥ 2M shares | `--min-volume` |
+| active | relative volume ≥ 1.25× | `--min-rel-volume` |
+| moving | daily move ≥ +1% | `--min-change` |
+| moving | ATR ≥ 2% of price | `--min-atr`, `--atr-window` |
+
+Survivors are ranked by relative volume, since that is what separates a real
+move from a name that happens to be up on its usual turnover.
+
+Two details decide what the numbers mean. **Relative volume** is measured against
+the 30 sessions *before* the one being screened: including today would put the
+day's own volume into its own baseline, which flattens exactly the spikes the
+test is looking for (a day trading 10× its average reads as only ~7.5× on a
+window that contains it). **ATR** is a plain mean of the true ranges over the
+window, not Wilder's smoothing, for the same reason the trend score avoids
+Wilder's RSI — that recursion is path-dependent on where the price history
+starts, so its value drifts with the download window, while a mean of the last
+14 true ranges depends only on those sessions. True range counts overnight gaps,
+not just the session's own high-low, so a stock that gaps and then sits still is
+still recognised as one that moves.
+
+The starting universe (`gapmodel/universe.py`) is a hand-maintained snapshot of
+liquid US listings — the S&P 100 plus the mid-caps and high-beta names that
+actually print unusual volume, with the heavily traded ETFs behind `--etfs`. It
+is deliberately a superset: every filter is applied to real bars, so a name that
+has gone quiet or been delisted is dropped by the funnel rather than needing to
+be pruned by hand. Volume for a session still in progress is partial, so a screen
+run mid-session understates today's volume and relative volume and returns fewer
+names than the same screen after the close; `--asof` screens a completed session.
 
 ## Project tracker
 
