@@ -20,7 +20,7 @@ from .markets import Market
 log = logging.getLogger(__name__)
 
 # Instruments that trade through the night and lead the cash open.
-INTRADAY_SYMBOLS: tuple[str, ...] = ("ES=F", "NQ=F", "CL=F", "GC=F")
+INTRADAY_SYMBOLS: tuple[str, ...] = ("ES=F", "NQ=F", "YM=F", "CL=F", "GC=F")
 MAX_HOURLY_PERIOD = "730d"
 MOMENTUM_HOURS = 3
 # Yahoo timestamps an hourly bar with the *start* of the hour it covers, so a
