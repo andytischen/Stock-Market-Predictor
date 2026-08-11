@@ -25,6 +25,7 @@ from .markets import (
     MARKETS,
     MARKETS_BY_SYMBOL,
     REGIONS,
+    all_symbols,
 )
 from .model import MIN_TRAIN, walk_forward
 from .predict import Forecast, forecast_all, parse_shock, to_frame
@@ -49,6 +50,7 @@ from .screener import render_text as render_screen_text
 from .screener import to_frame as screen_to_frame
 from .sectors import build_sector_board
 from .sectors import render_text as render_sector_text
+from .stocks import BLIND_SPOTS, STOCKS, STOCKS_BY_SYMBOL, stock_symbols
 from .universe import read_universe, us_universe
 
 log = logging.getLogger(__name__)
@@ -64,8 +66,17 @@ def _market_symbol(value: str) -> str:
     return value
 
 
+def _stock_symbol(value: str) -> str:
+    symbol = value.upper()
+    if symbol not in STOCKS_BY_SYMBOL:
+        known = ", ".join(STOCKS_BY_SYMBOL)
+        raise argparse.ArgumentTypeError(f"unknown stock {value!r}; choose from {known}")
+    return symbol
+
+
 def _shock(value: str) -> tuple[str, float]:
     known = set(MARKETS_BY_SYMBOL) | {i.symbol for i in INDICATORS} | {CURVE_FRONT, CURVE_STRIP}
+    known |= set(stock_symbols())
     try:
         symbol, move = parse_shock(value)
     except ValueError as exc:
@@ -104,8 +115,10 @@ def _utc_time(value: str) -> float:
     return moment.hour + moment.minute / 60
 
 
-def _panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
-    return load_panel(start=args.start, cache_dir=Path(args.cache), refresh=args.refresh)
+def _panel(args: argparse.Namespace, symbols: list[str] | None = None) -> dict[str, pd.DataFrame]:
+    return load_panel(
+        symbols=symbols, start=args.start, cache_dir=Path(args.cache), refresh=args.refresh
+    )
 
 
 def _hourly(args: argparse.Namespace) -> dict[str, pd.Series] | None:
@@ -134,6 +147,10 @@ def _cmd_markets(_: argparse.Namespace) -> None:
     print(f"  {curve:<12} crude curve: front month against the 12-month strip")
     policy = f"{FUNDS_FUTURE}/{BILL_YIELD}"
     print(f"  {policy:<12} priced policy rate and the tightening priced 3 months out")
+    print("\nSingle stocks (gapmodel stock):")
+    for s in STOCKS:
+        peers = ", ".join(p.symbol for p in s.peers if p.symbol != s.symbol)
+        print(f"  {s.symbol:<12} {s.name:<24} {s.theme}\n  {'':<12} peers: {peers}")
     print("\nScenarios (predict --scenario):")
     for s in SCENARIOS.values():
         legs = ", ".join(f"{sym} {move:+.1%}" for sym, move in s.moves.items())
@@ -145,6 +162,7 @@ def _forecast(
     args: argparse.Namespace,
     hourly: dict[str, pd.Series] | None,
     shocks: dict[str, float] | None = None,
+    symbols: list[str] | None = None,
 ) -> list[Forecast]:
     """Forecast every requested market, dropping the pre-open features if need be.
 
@@ -153,10 +171,11 @@ def _forecast(
     run is repeated on the daily features alone and the loss of sharpness is
     reported.
     """
+    wanted = symbols if symbols is not None else args.market
     try:
         return forecast_all(
             panel,
-            symbols=args.market,
+            symbols=wanted,
             c=args.regularisation,
             hourly=hourly,
             min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
@@ -168,7 +187,7 @@ def _forecast(
         log.warning("no pre-open futures bars: falling back to the daily model")
         return forecast_all(
             panel,
-            symbols=args.market,
+            symbols=wanted,
             c=args.regularisation,
             min_train=MIN_TRAIN,
             shocks=shocks,
@@ -208,6 +227,31 @@ def _print_caveats(forecasts: list[Forecast]) -> None:
     for forecast in flagged:
         for note in forecast.caveats:
             print(f"  {forecast.name}: {note}")
+
+
+def _cmd_stock(args: argparse.Namespace) -> None:
+    """Next-open probabilities for the modelled single stocks.
+
+    The peer series live outside the index panel, so the download is widened
+    rather than reusing whatever ``predict`` happens to need.
+    """
+    symbols = args.symbols or [s.symbol for s in STOCKS]
+    panel = _panel(args, symbols=all_symbols() + stock_symbols())
+    forecasts = _forecast(panel, args, _hourly(args), dict(args.shock or []), symbols=symbols)
+    frame = to_frame(forecasts).sort_values("p_open_up", ascending=False)
+    print(frame.to_string(index=False))
+    _print_caveats(forecasts)
+    print("\nnot in the model, and larger than the overnight tape for one company:")
+    for note in BLIND_SPOTS:
+        print(f"  {note}")
+    if args.explain:
+        for f in forecasts:
+            print(f"\n{f.name} — top drivers (log-odds contribution):")
+            for feature, value in f.drivers.items():
+                print(f"  {feature:<28} {value:+.3f}")
+    if args.csv:
+        frame.to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
 
 
 def _cmd_export(args: argparse.Namespace) -> None:
@@ -549,6 +593,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     predict.set_defaults(func=_cmd_predict)
+
+    stock = sub.add_parser(
+        "stock",
+        help="probability that one company's next open is up",
+    )
+    stock.add_argument(
+        "symbols",
+        nargs="*",
+        type=_stock_symbol,
+        help=f"modelled stocks (default all): {', '.join(STOCKS_BY_SYMBOL)}",
+    )
+    stock.add_argument("--explain", action="store_true", help="show top drivers")
+    stock.add_argument("--csv", help="also write the table to this path")
+    stock.add_argument(
+        "--shock",
+        action="append",
+        type=_shock,
+        metavar="SYMBOL=MOVE",
+        help="re-run under a hypothetical move, e.g. --shock '000660.KS=+3%%'",
+    )
+    stock.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
+    stock.set_defaults(func=_cmd_stock)
 
     backtest = sub.add_parser("backtest", help="walk-forward out-of-sample metrics")
     backtest.add_argument(

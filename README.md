@@ -18,6 +18,11 @@ Each market is then analysed by its own bespoke model: a separate probability
 model is fitted, back-tested and explained per index, so Tokyo is never scored
 with Wall Street's coefficients.
 
+The same question can be asked of one company rather than an index —
+`python -m gapmodel stock MU` — with the peers that trade the same demand
+overnight added to its features. That is a narrower claim, and the section below
+says exactly how much narrower.
+
 Crude is the market's fastest read on Middle East supply risk — strikes on Iran
 push it up, negotiations and a deal unwind it — so both benchmarks additionally
 carry a 5-day return, 20-day realised volatility and a shock feature (the daily
@@ -114,6 +119,7 @@ python -m gapmodel markets            # what is modelled, and when each session 
 python -m gapmodel fetch              # download and cache ~20 years of daily bars
 python -m gapmodel predict --explain  # probability that the next open is up
 python -m gapmodel predict --intraday # add pre-open futures moves (recent window)
+python -m gapmodel stock MU --explain  # one company's next open, with its drivers
 python -m gapmodel predict --shock '^KS11=+2%'  # what-if: re-run under a hypothetical move
 python -m gapmodel predict --shock 'CL=F=-5%' --shock 'JPY=X=+2%'  # shocks compose
 python -m gapmodel backtest --reliability
@@ -239,6 +245,44 @@ before its finer ones do, so a stale hourly tail is topped up from 30-, 15- or
 small enough for those feeds to bridge, since they carry a few days of history
 each. And if the pre-open features still cannot be built, the run falls back to
 the daily model with a warning instead of returning nothing.
+
+### Single stocks
+
+`stock` forecasts one company's opening auction with the same machinery, and the
+memory and storage complex is what it is pointed at first:
+
+```bash
+python -m gapmodel stock                 # every modelled stock
+python -m gapmodel stock MU --explain    # one name, with its drivers
+python -m gapmodel stock MU --shock '000660.KS=-4%'   # peers are shockable too
+```
+
+On top of the indices and cross-asset indicators every target reads, a stock
+reads its **peers**: the companies pricing the same end demand. Half of them are
+Asian, which is the structural point — Seoul closes at 06:30 UTC and Tokyo at
+06:00, so Samsung, SK Hynix, Tokyo Electron, Advantest and TSMC have already
+traded the overnight memory story hours before New York opens, and their bars are
+*same-session* information for a US listing. The US legs (NVDA, AMAT, SMH and the
+other storage names) close with Wall Street and are read a session late, as every
+other American bar is.
+
+| Stock | AUC | Accuracy | Brier skill | Base rate |
+| --- | --- | --- | --- | --- |
+| Micron (MU) | 0.69 | 0.65 | 0.10 | 0.57 |
+| Western Digital (WDC) | 0.66 | 0.62 | 0.07 | 0.53 |
+| Seagate (STX) | 0.65 | 0.61 | 0.06 | 0.54 |
+
+Better than the S&P's daily model, and for a plain reason: a single stock's gap
+is more autocorrelated and more exposed to a sector move than an index average
+is. The peer block is worth little over the whole 2008–2026 sample (±0.006 AUC,
+inside the noise) but clearly earns its place on the last two years, where memory
+dispersion has been the whole story — MU 0.709 with peers against 0.685 without.
+
+None of this makes a single-name probability comparable to an index one. Results,
+guidance, analyst actions, index changes and company news move an individual open
+more than the overnight tape does, and none of them are features, so every
+`stock` run prints that list underneath the table. The scheduled-release caveats
+apply unchanged: a US stock opens at 13:30 UTC, an hour after a CPI print.
 
 ### What-if shocks
 

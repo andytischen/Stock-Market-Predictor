@@ -22,8 +22,8 @@ from .markets import (
     SECTOR_SYMBOLS,
     Market,
     lag_days,
-    market,
 )
+from .stocks import peers_of, target_market
 
 MIN_HISTORY = 60
 OIL_VOL_WINDOW = 20
@@ -95,6 +95,28 @@ def curve_features(
     }
 
 
+def peer_features(
+    target_symbol: str, panel: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, target: Market
+) -> dict[str, pd.Series]:
+    """What the companies trading the same end demand did, daily and weekly.
+
+    Only single stocks have peers; an index is the average of its own. The lag
+    is the ordinary one, which is the point: Seoul and Tokyo close before New
+    York opens, so their sessions are same-day information for a US chipmaker,
+    while the US legs are read a session late like every other Wall Street bar.
+    """
+    built: dict[str, pd.Series] = {}
+    for peer in peers_of(target_symbol):
+        if peer.symbol not in panel:
+            continue
+        close = panel[peer.symbol]["Close"].dropna()
+        lag = _lag_days(peer.close_utc, target)
+        name = _column_name(peer.symbol)
+        built[f"peer_{name}_return"] = as_of(log_return(close), dates, lag)
+        built[f"peer_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
+    return built
+
+
 def policy_features(
     panel: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, target: Market
 ) -> dict[str, pd.Series]:
@@ -146,7 +168,7 @@ def build_features(
     With ``hourly`` the pre-open futures moves are added, which restricts the
     sample to the window those hourly bars cover.
     """
-    target = market(target_symbol)
+    target = target_market(target_symbol)
     if target_symbol not in panel:
         raise KeyError(f"no price history loaded for {target_symbol}")
 
@@ -217,6 +239,7 @@ def build_features(
         elif indicator.symbol in SECTOR_SYMBOLS:
             features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
 
+    features.update(peer_features(target_symbol, panel, dates, target))
     features.update(curve_features(panel, dates, target))
     features.update(policy_features(panel, dates, target))
 

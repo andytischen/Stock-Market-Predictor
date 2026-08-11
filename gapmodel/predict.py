@@ -11,7 +11,8 @@ import pandas as pd
 from . import model as model_mod
 from .events import caveats
 from .features import _column_name, build_features, live_feature_row
-from .markets import CURVE_FRONT, CURVE_STRIP, CURVE_WINDOW, MARKETS, market
+from .markets import CURVE_FRONT, CURVE_STRIP, CURVE_WINDOW, MARKETS
+from .stocks import target_market
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +81,8 @@ def shocked_row(live: pd.DataFrame, shocks: dict[str, float]) -> pd.DataFrame:
             f"mkt_{name}_return_5",
             f"ind_{name}_return",
             f"ind_{name}_return_5",
+            f"peer_{name}_return",
+            f"peer_{name}_return_5",
         ):
             if column in bumped:
                 bumped[column] += move
@@ -152,7 +155,7 @@ def forecast_market(
     standardised = pd.Series(scaler.transform(explained.to_numpy())[0], index=features.columns)
     contributions = (weights * standardised).sort_values(key=abs, ascending=False)
 
-    meta = market(symbol)
+    meta = target_market(symbol)
     return Forecast(
         caveats=caveats(meta, session),
         symbol=symbol,
