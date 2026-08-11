@@ -140,10 +140,8 @@ def _utc_time(value: str) -> float:
     return moment.hour + moment.minute / 60
 
 
-def _panel(args: argparse.Namespace, symbols: list[str] | None = None) -> dict[str, pd.DataFrame]:
-    return load_panel(
-        symbols=symbols, start=args.start, cache_dir=Path(args.cache), refresh=args.refresh
-    )
+def _panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
+    return load_panel(start=args.start, cache_dir=Path(args.cache), refresh=args.refresh)
 
 
 def _stock_panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:

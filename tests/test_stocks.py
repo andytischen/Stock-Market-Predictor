@@ -200,11 +200,37 @@ def test_the_metrics_behind_a_stock_can_be_reproduced_from_the_command_line():
     assert build_parser().parse_args(["backtest", "--market", "^GSPC"]).market == ["^GSPC"]
 
 
-def test_a_peer_can_be_shocked_like_any_other_instrument(panel):
+def test_a_dividend_paid_before_the_first_factor_is_not_a_gap_at_the_boundary():
+    """A leading block of unadjusted bars must not invent one enormous gap."""
+    bars = synthetic_bars(n=10)
+    adj = bars["Close"] * 0.6
+    adj.iloc[:4] = np.nan  # Yahoo served no factor for the earliest bars
+    bars = bars.assign(**{"Adj Close": adj})
+
+    gap = opening_gap(dividend_adjusted(bars))
+    raw = opening_gap(bars)
+    assert gap.to_numpy()[1:] == pytest.approx(raw.to_numpy()[1:])
+
+
+def test_a_move_in_something_the_target_never_reads_is_called_unmodelled(panel, caplog):
+    """Including the company's own price: no model may predict itself."""
     from gapmodel.features import live_feature_row
     from gapmodel.predict import shocked_row
 
     live, _ = live_feature_row("MU", panel)
-    bumped = shocked_row(live, {"000660.KS": 0.05})
+    with caplog.at_level("WARNING"):
+        bumped = shocked_row(live, {"MU": 0.05})
+    assert bumped.equals(live)
+    assert "MU is not a feature of this target" in caplog.text
+
+
+def test_a_peer_can_be_shocked_like_any_other_instrument(panel, caplog):
+    from gapmodel.features import live_feature_row
+    from gapmodel.predict import shocked_row
+
+    live, _ = live_feature_row("MU", panel)
+    with caplog.at_level("WARNING"):
+        bumped = shocked_row(live, {"000660.KS": 0.05})
+    assert "not a feature" not in caplog.text
     for column in ("peer_000660_ks_return", "peer_000660_ks_return_5"):
         assert bumped[column].iloc[0] == pytest.approx(live[column].iloc[0] + 0.05)
