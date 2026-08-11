@@ -274,14 +274,14 @@ def test_a_total_hourly_outage_still_yields_a_daily_forecast(monkeypatch, tmp_pa
     assert cli._hourly(args) is None
 
 
-def _stub_forecast(name: str, caveats: tuple[str, ...]):
+def _stub_forecast(name: str, caveats: tuple[str, ...], session: str = "2026-09-04"):
     from gapmodel.predict import Forecast
 
     return Forecast(
         symbol="^GSPC",
         name=name,
         region="Americas",
-        session=pd.Timestamp("2026-09-04"),
+        session=pd.Timestamp(session),
         probability_up=0.6,
         backtest={},
         contributions=pd.Series(dtype=float),
@@ -303,3 +303,14 @@ def test_an_uneventful_run_prints_no_caveat_section(capsys):
 
     cli._print_caveats([_stub_forecast("S&P 500", ())])
     assert capsys.readouterr().out == ""
+
+
+def test_a_session_past_a_calendar_is_told_the_calendar_ran_out(capsys):
+    """Only the FOMC table reaches 2027, so the rest must say they were unread."""
+    from gapmodel import cli
+
+    cli._print_caveats([_stub_forecast("S&P 500", (), session="2027-09-15")])
+    out = capsys.readouterr().out
+    assert "not checked for 2027-09-15" in out
+    assert "US CPI: table ends 2026-12-31" in out
+    assert "FOMC decision" not in out

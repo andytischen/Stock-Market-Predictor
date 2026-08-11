@@ -96,10 +96,23 @@ second Friday in May and a Thursday before Independence Day in July. Times are
 converted from New York's clock for the date in question, so a 14:00 ET statement
 reads 18:00 UTC in September and 19:00 UTC in December.
 
-The cost of not guessing is that the tables end: **past `CALENDAR_END` the
-absence of a warning means nothing was checked, not that nothing is scheduled.**
-Refreshing them is a yearly job, and each `Schedule` carries the page it came
-from.
+The cost of not guessing is that the tables end, and they do not end together:
+the Committee announces its next year each September, so decisions are known
+through 2027, while the BLS and BEA pages carry only the coming twelve months and
+stop at the end of 2026. Each `Schedule` records how far it is maintained in
+`covers_until`, and **past that point the absence of a warning means nothing was
+checked, not that nothing is scheduled** — so `predict` names the series that
+have run out rather than letting the silence pass for a quiet day:
+
+```
+not checked for 2027-09-15 — these calendars end earlier:
+  US payrolls: table ends 2026-12-31 (bls.gov/schedule/news_release/empsit.htm)
+  US CPI: table ends 2026-12-31 (bls.gov/schedule/news_release/cpi.htm)
+  US PCE inflation: table ends 2026-12-31 (bea.gov/news/schedule)
+```
+
+Refreshing them is a yearly job: extend `dates` from the page each `Schedule`
+names and move its `covers_until` to match.
 
 ## Install
 
