@@ -111,6 +111,10 @@ not checked for 2027-09-15 — these calendars end earlier:
   US PCE inflation: table ends 2026-12-31 (bea.gov/news/schedule)
 ```
 
+`export` carries the same thing per market as `unchecked_releases`, so a snapshot
+consumer reading an empty `caveats` is not left to guess which of the two it
+means.
+
 Refreshing them is a yearly job: extend `dates` from the page each `Schedule`
 names and move its `covers_until` to match.
 

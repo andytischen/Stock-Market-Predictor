@@ -15,8 +15,11 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from .dashboard import OilReading
+from .events import SCHEDULES, unmaintained_on
 from .markets import market
 from .predict import Forecast, _display
+
+_COVERAGE = {schedule.name: schedule for schedule in SCHEDULES}
 
 
 def _session_open_utc(symbol: str, session: pd.Timestamp) -> str:
@@ -49,10 +52,26 @@ def _market_entry(f: Forecast) -> dict[str, object]:
     }
     if f.caveats:
         entry["caveats"] = list(f.caveats)
+    unchecked = _unchecked(f.session)
+    if unchecked:
+        entry["unchecked_releases"] = unchecked
     if f.shocked_probability is not None:
         entry["p_shocked"] = _display(f.shocked_probability)
         entry["p_change"] = round(f.shocked_probability - f.probability_up, 4)
     return entry
+
+
+def _unchecked(session: pd.Timestamp) -> list[dict[str, str]]:
+    """Release series whose published calendar does not reach ``session``.
+
+    A consumer reading an empty ``caveats`` cannot otherwise tell a session with
+    nothing scheduled from one nobody has a calendar for, which is the same
+    silence the terminal output refuses to keep.
+    """
+    return [
+        {"series": name, "table_ends": _COVERAGE[name].covers_until}
+        for name in unmaintained_on(session)
+    ]
 
 
 def _crude_entry(reading: OilReading) -> dict[str, object]:
