@@ -314,3 +314,18 @@ def test_a_session_past_a_calendar_is_told_the_calendar_ran_out(capsys):
     assert "not checked for 2027-09-15" in out
     assert "US CPI: table ends 2026-12-31" in out
     assert "FOMC decision" not in out
+
+
+def test_a_run_spanning_the_year_end_warns_about_the_session_that_needs_it(capsys):
+    """Tokyo's next session can be past the tables while New York's is not."""
+    from gapmodel import cli
+
+    cli._print_caveats(
+        [
+            _stub_forecast("S&P 500", (), session="2026-12-31"),
+            _stub_forecast("Nikkei 225", (), session="2027-01-04"),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "not checked for 2027-01-04" in out
+    assert "2026-12-31 —" not in out
