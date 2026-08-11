@@ -96,6 +96,11 @@ def stock(symbol: str) -> Stock:
         raise KeyError(f"unknown stock {symbol!r}; modelled stocks: {known}") from exc
 
 
+def is_stock(symbol: str) -> bool:
+    """Whether ``symbol`` is one company rather than an index of them."""
+    return symbol in STOCKS_BY_SYMBOL
+
+
 def target_market(symbol: str) -> Market:
     """How to align features for ``symbol``, whether it is an index or a stock."""
     known = STOCKS_BY_SYMBOL.get(symbol)

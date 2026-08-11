@@ -255,6 +255,7 @@ memory and storage complex is what it is pointed at first:
 python -m gapmodel stock                 # every modelled stock
 python -m gapmodel stock MU --explain    # one name, with its drivers
 python -m gapmodel stock MU --shock '000660.KS=-4%'   # peers are shockable too
+python -m gapmodel backtest --market MU --reliability  # the table below, rebuilt
 ```
 
 On top of the indices and cross-asset indicators every target reads, a stock
@@ -270,13 +271,22 @@ other American bar is.
 | --- | --- | --- | --- | --- |
 | Micron (MU) | 0.69 | 0.65 | 0.10 | 0.57 |
 | Western Digital (WDC) | 0.66 | 0.62 | 0.07 | 0.53 |
-| Seagate (STX) | 0.65 | 0.61 | 0.06 | 0.54 |
+| Seagate (STX) | 0.65 | 0.62 | 0.06 | 0.54 |
 
 Better than the S&P's daily model, and for a plain reason: a single stock's gap
 is more autocorrelated and more exposed to a sector move than an index average
 is. The peer block is worth little over the whole 2008–2026 sample (±0.006 AUC,
 inside the noise) but clearly earns its place on the last two years, where memory
-dispersion has been the whole story — MU 0.709 with peers against 0.685 without.
+dispersion has been the whole story — MU 0.712 with peers against 0.685 without.
+
+One correction a single name needs and an index does not: Yahoo's daily bars are
+split- but not dividend-adjusted, so on the morning a company goes ex-dividend
+the opening print falls by roughly the dividend and the session would be labelled
+a down gap the market never made. For stock targets and their peers the dividend
+factor in `Adj Close` is applied to both prints of the same session, which leaves
+that session's own returns alone and corrects only the previous-close-to-open
+step. Seagate yields around 3%, so this is four labels a year with a known sign.
+Index targets are left on their published prints.
 
 None of this makes a single-name probability comparable to an index one. Results,
 guidance, analyst actions, index changes and company news move an individual open
@@ -293,7 +303,9 @@ inherits the same timing rules as the model: for markets opening after that
 instrument's close it is *today's* move, for markets opening before it, it is the
 one they will only see tomorrow — which is why a Korean rally reads as a
 different sign in Tokyo than in Frankfurt. The model is linear in log-odds, so a
-move far outside the training range is an extrapolation, not a forecast.
+move far outside the training range is an extrapolation, not a forecast. Only
+`stock` accepts a shock on a single-name peer: no index feature is derived from
+one, so `predict` refuses it rather than printing an unchanged probability.
 
 ### Named scenarios
 

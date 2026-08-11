@@ -3,7 +3,14 @@ import pandas as pd
 import pytest
 
 from gapmodel.cli import build_parser
-from gapmodel.features import _lag_days, as_of, build_features, log_return
+from gapmodel.features import (
+    _lag_days,
+    as_of,
+    build_features,
+    dividend_adjusted,
+    log_return,
+    opening_gap,
+)
 from gapmodel.markets import SECTOR_SYMBOLS, market
 from gapmodel.stocks import (
     STOCKS_BY_SYMBOL,
@@ -127,6 +134,70 @@ def test_the_command_takes_lower_case_and_refuses_unmodelled_names(capsys):
     with pytest.raises(SystemExit):
         build_parser().parse_args(["stock", "TSLA"])
     assert "unknown stock" in capsys.readouterr().err
+
+
+def test_going_ex_dividend_is_not_recorded_as_an_opening_gap():
+    """The one label error a single company has and an index does not."""
+    bars = synthetic_bars(n=10)
+    # Yahoo's factor steps down on the ex-dividend morning and holds thereafter.
+    factor = pd.Series(1.0, index=bars.index)
+    factor.iloc[:5] = 0.99
+    bars = bars.assign(**{"Adj Close": bars["Close"] * factor})
+    ex_date = bars.index[5]
+
+    raw = opening_gap(bars)
+    adjusted = opening_gap(dividend_adjusted(bars))
+    # A 1% dividend paid out of the previous close is not a 1% fall.
+    assert raw[ex_date] == pytest.approx(adjusted[ex_date] + np.log(0.99), abs=1e-12)
+    # Every other session, and every session's own intraday return, is untouched.
+    others = [d for d in bars.index[1:] if d != ex_date]
+    assert raw[others].to_numpy() == pytest.approx(adjusted[others].to_numpy())
+    intraday = dividend_adjusted(bars)
+    assert (intraday["Close"] / intraday["Open"]).to_numpy() == pytest.approx(
+        (bars["Close"] / bars["Open"]).to_numpy()
+    )
+
+
+def test_an_index_is_left_on_its_published_prints(panel):
+    """Only the single names are corrected; the index tables must not move."""
+    dividend_paying = {
+        symbol: bars.assign(**{"Adj Close": bars["Close"] * 0.9}) for symbol, bars in panel.items()
+    }
+    before, labels_before = build_features("^GSPC", panel)
+    after, labels_after = build_features("^GSPC", dividend_paying)
+    assert labels_after.to_numpy() == pytest.approx(labels_before.to_numpy())
+    assert after["own_gap_lag1"].to_numpy() == pytest.approx(before["own_gap_lag1"].to_numpy())
+
+
+def test_a_peers_dividend_is_not_read_as_a_fall_in_demand(panel):
+    factor = pd.Series(1.0, index=panel["000660.KS"].index)
+    factor.iloc[:100] = 0.98
+    hynix = panel["000660.KS"]
+    with_dividend = dict(panel)
+    with_dividend["000660.KS"] = hynix.assign(**{"Adj Close": hynix["Close"] * factor})
+
+    features, _ = build_features("MU", with_dividend)
+    expected = as_of(log_return(with_dividend["000660.KS"]["Adj Close"]), features.index, 0)
+    assert features["peer_000660_ks_return"].to_numpy() == pytest.approx(expected.to_numpy())
+
+
+def test_only_a_single_name_run_accepts_a_shock_on_a_peer(capsys):
+    """An index reads no peer, so a shock on one there would do nothing at all."""
+    args = build_parser().parse_args(["stock", "MU", "--shock", "000660.KS=-4%"])
+    assert args.shock == [("000660.KS", pytest.approx(np.log1p(-0.04)))]
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["predict", "--shock", "MU=+5%"])
+    assert "unknown instrument" in capsys.readouterr().err
+    # Instruments both kinds of model read stay shockable on either command.
+    assert build_parser().parse_args(["predict", "--shock", "CL=F=+3%"]).shock[0][0] == "CL=F"
+    assert build_parser().parse_args(["stock", "--shock", "CL=F=+3%"]).shock[0][0] == "CL=F"
+
+
+def test_the_metrics_behind_a_stock_can_be_reproduced_from_the_command_line():
+    """The per-stock table in the README needs no code editing to rebuild."""
+    args = build_parser().parse_args(["backtest", "--market", "mu", "--reliability"])
+    assert args.market == ["MU"]
+    assert build_parser().parse_args(["backtest", "--market", "^GSPC"]).market == ["^GSPC"]
 
 
 def test_a_peer_can_be_shocked_like_any_other_instrument(panel):
