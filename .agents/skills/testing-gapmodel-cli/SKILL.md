@@ -105,8 +105,8 @@ between "flag ignored" and "flag works, live data unavailable".
 ## Forcing date-driven or calendar-driven code paths
 
 Use a throwaway script under `/tmp` that monkeypatches module attributes in memory — never edit repo
-files. Note that `cli.py` imports some names directly (e.g. `SCHEDULES`), so both the defining module
-and `gapmodel.cli` may need patching for the CLI to see the change.
+files. Note that `cli.py` imports some names directly (e.g. `SCENARIOS` from `gapmodel.scenarios`), so
+both the defining module and `gapmodel.cli` may need patching for the CLI to see the change.
 
 ## Devin Secrets Needed
 
