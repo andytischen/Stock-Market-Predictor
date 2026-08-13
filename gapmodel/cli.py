@@ -49,7 +49,10 @@ from .screener import render_text as render_screen_text
 from .screener import to_frame as screen_to_frame
 from .sectors import build_sector_board
 from .sectors import render_text as render_sector_text
-from .universe import read_universe, us_universe
+from .stocks import forecast_stocks, panel_symbols
+from .stocks import render_text as render_stocks_text
+from .stocks import to_frame as stocks_to_frame
+from .universe import nasdaq_universe, read_universe, us_universe
 
 log = logging.getLogger(__name__)
 
@@ -410,6 +413,24 @@ def _cmd_sectors(args: argparse.Namespace) -> None:
     print(render_sector_text(build_sector_board(panel, forecasts[0])), end="")
 
 
+def _cmd_stocks(args: argparse.Namespace) -> None:
+    symbols = [s.upper() for s in args.symbols] or nasdaq_universe()
+    # The stocks are not part of the default panel — they are targets, never
+    # features — so the indicator panel and the requested names are loaded
+    # together here.
+    panel = load_panel(
+        symbols=panel_symbols(symbols),
+        start=args.start,
+        cache_dir=Path(args.cache),
+        refresh=args.refresh,
+    )
+    picks = forecast_stocks(panel, symbols=symbols, c=args.regularisation)
+    print(render_stocks_text(picks, top=args.top), end="")
+    if args.csv:
+        stocks_to_frame(picks).to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
+
+
 def _cmd_fetch(args: argparse.Namespace) -> None:
     panel = _panel(args)
     for symbol, frame in panel.items():
@@ -616,6 +637,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     export.set_defaults(func=_cmd_export)
+
+    stocks = sub.add_parser(
+        "stocks",
+        help="next-open probability per Nasdaq stock, ranked by demonstrated edge",
+    )
+    stocks.add_argument(
+        "symbols", nargs="*", help="forecast these tickers instead of the Nasdaq universe"
+    )
+    stocks.add_argument(
+        "--top", type=int, help="show only the strongest N ranked names (default: all)"
+    )
+    stocks.add_argument("--csv", help="also write every name, ranked or not, to this path")
+    stocks.set_defaults(func=_cmd_stocks)
 
     sectors = sub.add_parser(
         "sectors", help="split one European index's open call by STOXX 600 sector"

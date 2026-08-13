@@ -136,6 +136,7 @@ def build_features(
     panel: dict[str, pd.DataFrame],
     forecast_row: bool = False,
     hourly: dict[str, pd.Series] | None = None,
+    target: Market | None = None,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """Build the design matrix and the up/down label for one market.
 
@@ -145,8 +146,12 @@ def build_features(
 
     With ``hourly`` the pre-open futures moves are added, which restricts the
     sample to the window those hourly bars cover.
+
+    ``target`` describes the instrument being predicted; it defaults to the
+    indexed market of that symbol and is passed explicitly for a single stock,
+    which is a target without being a registered market.
     """
-    target = market(target_symbol)
+    target = target or market(target_symbol)
     if target_symbol not in panel:
         raise KeyError(f"no price history loaded for {target_symbol}")
 
@@ -258,7 +263,8 @@ def live_feature_row(
     target_symbol: str,
     panel: dict[str, pd.DataFrame],
     hourly: dict[str, pd.Series] | None = None,
+    target: Market | None = None,
 ) -> tuple[pd.DataFrame, pd.Timestamp]:
     """Feature row for the next, not yet observed, opening auction."""
-    frame, _ = build_features(target_symbol, panel, forecast_row=True, hourly=hourly)
+    frame, _ = build_features(target_symbol, panel, forecast_row=True, hourly=hourly, target=target)
     return frame.iloc[[-1]], frame.index[-1]

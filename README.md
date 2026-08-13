@@ -119,6 +119,7 @@ python -m gapmodel predict --shock 'CL=F=-5%' --shock 'JPY=X=+2%'  # shocks comp
 python -m gapmodel backtest --reliability
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
 python -m gapmodel screen             # US stocks: liquid, unusually active, moving
+python -m gapmodel stocks --top 10    # per-stock next-open calls, Nasdaq names
 ```
 
 `predict` prints one row per market with the probability and the out-of-sample
@@ -325,6 +326,54 @@ The workflow in `.github/workflows/publish-snapshot.yml` runs it daily at 06:30
 UTC and publishes the file to GitHub Pages (enable Pages with the "GitHub
 Actions" source in repository settings). The published `snapshot.json` is what
 the app downloads and renders.
+
+## Per-stock opening gaps
+
+`stocks` asks the model's question of one Nasdaq-listed share rather than an
+index: will its opening print land above the previous close? It reuses the whole
+pipeline — the same features, the same walk-forward backtest, the same
+calibration — because a stock is just another target on the Nasdaq cash-session
+clock, reading the same cross-market and cross-asset panel a US index reads.
+
+```bash
+python -m gapmodel stocks                        # the whole Nasdaq universe
+python -m gapmodel stocks AAPL NVDA MSFT         # just these
+python -m gapmodel stocks --top 10 --csv out.csv # strongest ten, all of them to CSV
+```
+
+The stocks are targets and never features. Adding sixty shares to `MARKETS`
+would hand every index sixty new collinear columns and silently change the
+forecasts above, so `stock_market()` builds a target on demand instead and the
+default download panel is untouched.
+
+Two columns matter more than the probability, because a naive ranking flatters
+itself twice over:
+
+- **`base_rate`** — a share's opening gap is not a coin flip to begin with.
+  Twenty years of a compounding growth name leave its unconditional up-rate
+  well above 50% (Nvidia's is 0.57), so the names at the top of a probability
+  sort are partly just the names with the strongest drift. **`edge`** is the
+  probability against that base rate, which is what the model actually claims
+  to add.
+- **`oos_auc`, `oos_brier_skill`, `n_oos`** — a confident probability from a
+  model with no demonstrated skill is noise with a decimal point. A name is
+  ranked only if all three hold: AUC at least `MIN_AUC` (0.55), *positive* Brier
+  skill, and at least `MIN_OOS` (500) out-of-sample sessions. All three are
+  needed. AUC alone would put a recent listing first on a couple of hundred
+  predictions, where 0.72 is within noise of nothing (Arm scores exactly that on
+  193); and AUC is blind to calibration, so a model that orders sessions well
+  while being confidently miscalibrated — a negative Brier skill — would
+  otherwise read as a pick (Robinhood, again exactly that). Names that fail are
+  printed in a separate unranked block with the test they failed, and the
+  ranking orders on the edge *weighted by* the skill behind it, so a bold call
+  from a coin-flip model cannot outrank a modest call from a good one.
+
+The horizon is narrow and worth restating: the target is the overnight move into
+the auction, not a view on the company and not a view on the session after the
+bell. The universe in `universe.py` is a hand-maintained snapshot of today's
+Nasdaq names, which means the backtest metrics carry survivorship bias — the
+names that were delisted or acquired are absent, so a genuinely point-in-time
+universe would read worse.
 
 ## Trend score
 

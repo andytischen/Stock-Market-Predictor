@@ -208,6 +208,35 @@ def last_observed_utc(target_open_utc: float) -> float:
     return max(close - 24.0 * lag_days(close, target_open_utc) for close in closes)
 
 
+# A single US stock trades the Nasdaq cash session, so as a prediction target it
+# sits on exactly the clock the US indices do: the auction at 13:30 UTC (14:30
+# during the weeks the US and Europe disagree about summer time, which the
+# half-hour margin below absorbs) and the closing print at 20:00.
+NASDAQ_OPEN_UTC = 13.5
+NASDAQ_CLOSE_UTC = 20.0
+
+
+def stock_market(symbol: str) -> Market:
+    """One Nasdaq-listed stock described as a prediction target.
+
+    Built on demand rather than listed in ``MARKETS`` on purpose. ``MARKETS`` is
+    also the set of cross-market *features*, so registering sixty stocks there
+    would hand every index sixty new collinear columns and silently change the
+    forecasts this repository already makes. A stock is a target only.
+
+    The region is ``Americas`` so it reads the same indicators a US index does —
+    in particular it skips the European sector trackers, which are a European
+    read-across and dilute the fit elsewhere.
+    """
+    return Market(
+        symbol,
+        symbol,
+        "Americas",
+        open_utc=NASDAQ_OPEN_UTC,
+        close_utc=NASDAQ_CLOSE_UTC,
+    )
+
+
 def market(symbol: str) -> Market:
     try:
         return MARKETS_BY_SYMBOL[symbol]

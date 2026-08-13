@@ -11,7 +11,7 @@ import pandas as pd
 from . import model as model_mod
 from .events import caveats
 from .features import _column_name, build_features, live_feature_row
-from .markets import CURVE_FRONT, CURVE_STRIP, CURVE_WINDOW, MARKETS, market
+from .markets import CURVE_FRONT, CURVE_STRIP, CURVE_WINDOW, MARKETS, Market, market
 
 log = logging.getLogger(__name__)
 
@@ -130,12 +130,14 @@ def forecast_market(
     hourly: dict[str, pd.Series] | None = None,
     min_train: int = model_mod.MIN_TRAIN,
     shocks: dict[str, float] | None = None,
+    target: Market | None = None,
 ) -> Forecast:
-    features, labels = build_features(symbol, panel, forecast_row=True, hourly=hourly)
+    meta = target or market(symbol)
+    features, labels = build_features(symbol, panel, forecast_row=True, hourly=hourly, target=meta)
     backtest = model_mod.walk_forward(features, labels, min_train=min_train, c=c)
 
     pipeline = model_mod.fit(features, labels, c=c)
-    live, session = live_feature_row(symbol, panel, hourly=hourly)
+    live, session = live_feature_row(symbol, panel, hourly=hourly, target=meta)
     calibrate = model_mod.calibrator(backtest)
     probability = float(calibrate(pipeline.predict_proba(live.to_numpy())[:, 1])[0])
 
@@ -152,7 +154,6 @@ def forecast_market(
     standardised = pd.Series(scaler.transform(explained.to_numpy())[0], index=features.columns)
     contributions = (weights * standardised).sort_values(key=abs, ascending=False)
 
-    meta = market(symbol)
     return Forecast(
         caveats=caveats(meta, session),
         symbol=symbol,
