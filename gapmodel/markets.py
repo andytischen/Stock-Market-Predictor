@@ -209,9 +209,11 @@ def last_observed_utc(target_open_utc: float) -> float:
 
 
 # A single US stock trades the Nasdaq cash session, so as a prediction target it
-# sits on exactly the clock the US indices do: the auction at 13:30 UTC (14:30
-# during the weeks the US and Europe disagree about summer time, which the
-# half-hour margin below absorbs) and the closing print at 20:00.
+# sits on exactly the clock the US indices do: the 09:30 ET auction, which is
+# 13:30 UTC under daylight time and 14:30 under standard time (roughly November
+# to March), and the closing print at 20:00. The value below matches every
+# existing US entry; no indicator closes between 13.5 and 14.5, so the winter
+# offset changes no lag decision.
 NASDAQ_OPEN_UTC = 13.5
 NASDAQ_CLOSE_UTC = 20.0
 

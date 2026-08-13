@@ -49,7 +49,9 @@ from .screener import render_text as render_screen_text
 from .screener import to_frame as screen_to_frame
 from .sectors import build_sector_board
 from .sectors import render_text as render_sector_text
+from .stocks import discarded as discarded_stocks
 from .stocks import forecast_stocks, panel_symbols
+from .stocks import rank as rank_stocks
 from .stocks import render_text as render_stocks_text
 from .stocks import to_frame as stocks_to_frame
 from .universe import nasdaq_universe, read_universe, us_universe
@@ -83,6 +85,16 @@ def _positive_float(value: str) -> float:
         number = float(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"{value!r} is not a number") from exc
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    return number
+
+
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a whole number") from exc
     if number <= 0:
         raise argparse.ArgumentTypeError("must be greater than 0")
     return number
@@ -425,9 +437,11 @@ def _cmd_stocks(args: argparse.Namespace) -> None:
         refresh=args.refresh,
     )
     picks = forecast_stocks(panel, symbols=symbols, c=args.regularisation)
-    print(render_stocks_text(picks, top=args.top), end="")
+    print(render_stocks_text(picks, top=args.top, panel=panel), end="")
     if args.csv:
-        stocks_to_frame(picks).to_csv(args.csv, index=False)
+        # Written in the report's order, with the verdict as a column, so that
+        # sorting the file on the raw probability is not the obvious next step.
+        stocks_to_frame(rank_stocks(picks) + discarded_stocks(picks)).to_csv(args.csv, index=False)
         print(f"\nwrote {args.csv}")
 
 
@@ -646,7 +660,9 @@ def build_parser() -> argparse.ArgumentParser:
         "symbols", nargs="*", help="forecast these tickers instead of the Nasdaq universe"
     )
     stocks.add_argument(
-        "--top", type=int, help="show only the strongest N ranked names (default: all)"
+        "--top",
+        type=_positive_int,
+        help="show only the strongest N ranked names (default: all)",
     )
     stocks.add_argument("--csv", help="also write every name, ranked or not, to this path")
     stocks.set_defaults(func=_cmd_stocks)

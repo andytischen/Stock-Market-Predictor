@@ -22,6 +22,7 @@ from gapmodel.stocks import (
     panel_symbols,
     rank,
     render_text,
+    stale_inputs,
     to_frame,
 )
 from gapmodel.universe import NASDAQ, nasdaq_universe
@@ -96,6 +97,13 @@ def test_the_universe_is_a_stable_deduplicated_list():
     # Names listed elsewhere have no business in a Nasdaq universe.
     for elsewhere in ("IBM", "ORCL", "CRM", "JPM", "XOM"):
         assert elsewhere not in universe
+
+
+def test_a_repeated_ticker_is_forecast_once(panel):
+    """Refitting the same name twice would double-count it in the header."""
+    picks = forecast_stocks(panel, symbols=[TICKER, TICKER, TICKER])
+    assert [p.symbol for p in picks] == [TICKER]
+    assert "for 1 Nasdaq names" in render_text(picks)
 
 
 def test_a_stock_run_loads_the_indicators_as_well_as_the_stocks():
@@ -284,6 +292,77 @@ def test_the_cli_exposes_the_stock_forecast():
     assert args.top == 5
     parsed = build_parser().parse_args(["stocks"])
     assert parsed.symbols == []
+
+
+def test_asking_for_no_names_shows_none_rather_than_all_of_them():
+    picks = [pick("GOOD", 0.70, auc=0.62), pick("ALSO", 0.65, auc=0.60)]
+    text = render_text(picks, top=0)
+    assert "GOOD" not in text and "ALSO" not in text
+    # Silence about the request is not a verdict on the model.
+    assert "no demonstrated edge" not in text
+    assert "2 names cleared" in text
+    assert "GOOD" in render_text(picks, top=1)
+
+
+def test_the_cli_rejects_a_top_that_cannot_mean_anything():
+    for bad in ("0", "-3"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["stocks", "--top", bad])
+    assert build_parser().parse_args(["stocks", "--top", "4"]).top == 4
+
+
+def test_release_caveats_reach_the_unranked_table_too():
+    """When nothing is credible the unranked table is the whole output."""
+    noise = pick("NOISE", 0.99, auc=0.51)
+    noise.forecast.caveats = ("US CPI at 12:30 UTC, before this open",)
+    text = render_text([noise])
+    assert "scheduled releases this model cannot see" in text
+    assert "NOISE: US CPI" in text
+
+
+def test_the_csv_carries_the_verdict_but_the_printed_table_does_not():
+    picks = [pick("GOOD", 0.70, auc=0.62), pick("NOISE", 0.99, auc=0.51)]
+    frame = to_frame(picks)
+    assert list(frame["credible"]) == [True, False]
+    # Redundant in print: each block is uniform and its heading says which.
+    assert "credible" not in render_text(picks)
+
+
+def test_the_printed_edge_is_the_difference_of_the_printed_columns():
+    """A reader checking the column by hand must not find it off by a digit."""
+    row = to_frame([pick("X", 0.52214, auc=0.6, base_rate=0.50553)]).iloc[0]
+    assert row["edge"] == round(row["p_open_up"] - row["base_rate"], 4)
+
+
+def test_the_report_discloses_inputs_that_stopped_updating(panel):
+    """A stale macro series is forward-filled, so it has to be called out."""
+    fresh = pd.Timestamp("2026-08-13")
+    panel = {symbol: bars.copy() for symbol, bars in panel.items()}
+    # The stock is current; the S&P and crude stopped a week ago.
+    panel[TICKER].index = pd.date_range(end=fresh, periods=len(panel[TICKER]), freq="B")
+    for stale in ("^GSPC", "CL=F"):
+        panel[stale].index = pd.date_range(
+            end=fresh - pd.Timedelta(days=7), periods=len(panel[stale]), freq="B"
+        )
+    freshest, behind = stale_inputs(panel)
+    assert freshest == fresh
+    assert "^GSPC" in behind and "CL=F" in behind and TICKER not in behind
+
+    text = render_text([pick("GOOD", 0.70, auc=0.62)], panel=panel)
+    assert "stale inputs" in text
+    assert "carried forward" in text
+    assert "^GSPC" in text
+    # Without the panel the report cannot know, so it must not claim otherwise.
+    assert "stale inputs" not in render_text([pick("GOOD", 0.70, auc=0.62)])
+
+
+def test_a_fully_current_panel_raises_no_staleness_note(panel):
+    aligned = pd.date_range(end=pd.Timestamp("2026-08-13"), periods=600, freq="B")
+    current = {symbol: bars.iloc[-600:].set_axis(aligned) for symbol, bars in panel.items()}
+    freshest, behind = stale_inputs(current)
+    assert freshest == aligned[-1]
+    assert behind == []
+    assert "stale inputs" not in render_text([pick("GOOD", 0.70, auc=0.62)], panel=current)
 
 
 def test_probabilities_are_never_a_certainty():

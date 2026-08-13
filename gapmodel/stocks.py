@@ -26,6 +26,15 @@ where 0.72 is within noise of nothing; and AUC is blind to calibration, so a
 model that orders sessions well while being confidently miscalibrated — which
 is what a negative Brier skill says — would otherwise be presented as a pick.
 
+Two wrinkles a single share has that an index does not. Bars are downloaded
+without dividend adjustment, so the opening print on an ex-dividend day drops by
+roughly the dividend and is labelled a down open for a reason that carries no
+information; at about four sessions a year per payer this depresses the measured
+skill rather than inflating it, so it is left uncorrected but not unsaid. And the
+universe is a snapshot of today's listings, so fitting it over history is
+survivorship-biased: the delisted and the acquired are missing, and a genuinely
+point-in-time universe would read worse than this one does.
+
 None of this is a recommendation, and the horizon is worth restating: the
 target is the next opening print against the last close, an overnight move,
 not a view on the company or on the session that follows the bell.
@@ -113,18 +122,27 @@ class StockPick:
         return "up" if self.probability_up >= 0.5 else "down"
 
     def as_row(self) -> dict[str, object]:
+        # Rounded through the same guard the index table uses: no forecast here
+        # is a certainty, so none of them prints as one. The edge is then
+        # rounded from the printed probability rather than the full-precision
+        # one, so that the column a reader checks by hand is the difference of
+        # the two columns either side of it.
+        probability = _display(self.probability_up)
+        base_rate = round(self.base_rate, 4)
         return {
             "symbol": self.symbol,
             "session": self.forecast.session.date().isoformat(),
-            # Rounded through the same guard the index table uses: no forecast
-            # here is a certainty, so none of them prints as one.
-            "p_open_up": _display(self.probability_up),
-            "base_rate": round(self.base_rate, 4),
-            "edge": round(self.edge, 4),
+            "p_open_up": probability,
+            "base_rate": base_rate,
+            "edge": round(probability - base_rate, 4),
             "oos_auc": round(self.auc, 4),
             "oos_accuracy": round(self.forecast.backtest.get("accuracy", float("nan")), 4),
             "oos_brier_skill": round(self.brier_skill, 4),
             "n_oos": self.n_oos,
+            # Carried in the table so the CSV says which rows are evidence and
+            # which are not: a consumer sorting the file on the raw probability
+            # would otherwise walk straight into both traps above.
+            "credible": self.credible,
         }
 
 
@@ -150,9 +168,11 @@ def forecast_stocks(
 
     A young listing cannot supply the walk-forward warm-up and is dropped with
     a warning rather than failing the run, exactly as an unmodellable index is.
+    Repeats are collapsed: the same name twice is one forecast, not two rows and
+    an inflated count.
     """
     picks: list[StockPick] = []
-    for symbol in symbols or nasdaq_universe():
+    for symbol in dict.fromkeys(symbols or nasdaq_universe()):
         try:
             picks.append(
                 StockPick(
@@ -195,6 +215,24 @@ def _why_discarded(pick: StockPick) -> str:
     return ", ".join(reasons)
 
 
+def stale_inputs(panel: dict[str, pd.DataFrame]) -> tuple[pd.Timestamp | None, list[str]]:
+    """The freshest observation in the panel, and which series lag behind it.
+
+    A stock's own bars can be current while the cross-market and cross-asset
+    series feeding it are days old: ``features`` aligns each source by
+    forward-filling to the target session, so a stale series is read as an
+    unchanged one rather than a missing one. The forecast stays internally
+    consistent and free of look-ahead, but it is answering the question given
+    last week's macro, which the report should say out loud rather than imply.
+    """
+    last_bars = {symbol: bars.index.max() for symbol, bars in panel.items() if not bars.empty}
+    if not last_bars:
+        return None, []
+    freshest = max(last_bars.values())
+    behind = sorted(symbol for symbol, last in last_bars.items() if last < freshest)
+    return freshest, behind
+
+
 def panel_symbols(symbols: list[str] | None = None) -> list[str]:
     """Every series a stock run needs: the indicator panel plus the stocks."""
     return list(dict.fromkeys(all_symbols() + (symbols or nasdaq_universe())))
@@ -204,10 +242,23 @@ def to_frame(picks: list[StockPick]) -> pd.DataFrame:
     return pd.DataFrame([p.as_row() for p in picks])
 
 
-def render_text(picks: list[StockPick], top: int | None = None) -> str:
+def _table(picks: list[StockPick]) -> str:
+    """One printed block. The verdict is a column in the CSV, not here: each
+    block is uniform in it, and the heading above already says which is which.
+    """
+    return to_frame(picks).drop(columns=["credible"]).to_string(index=False)
+
+
+def render_text(
+    picks: list[StockPick],
+    top: int | None = None,
+    panel: dict[str, pd.DataFrame] | None = None,
+) -> str:
     """The ranking as a report, with what the numbers do and do not support."""
     ranked = rank(picks)
-    shown = ranked[:top] if top else ranked
+    # `top is not None`, not `if top`: asking for the strongest zero names is a
+    # request for none of them, not a request for all of them.
+    shown = ranked[:top] if top is not None else ranked
     lines: list[str] = []
     sessions = sorted({p.forecast.session.date().isoformat() for p in picks})
     lines.append(
@@ -219,28 +270,47 @@ def render_text(picks: list[StockPick], top: int | None = None) -> str:
             f"Ranked — AUC at least {MIN_AUC:g}, positive Brier skill, "
             f"at least {MIN_OOS} out-of-sample sessions:"
         )
-        lines.append(to_frame(shown).to_string(index=False))
-    else:
+        lines.append(_table(shown))
+    elif not ranked:
         lines.append(
             "No name cleared the credibility tests: on this sample the model has no "
             "demonstrated edge on any single stock, and none of the probabilities "
             "below should be read as a pick."
         )
+    else:
+        # Names did qualify; the caller asked to see none of them. Saying "no
+        # demonstrated edge" here would be a claim about the model, not the request.
+        lines.append(f"{len(ranked)} names cleared the credibility tests; none requested.")
     rest = discarded(picks)
     if rest:
         lines.append("")
         lines.append("No demonstrated skill — probabilities not ranked:")
-        lines.append(to_frame(rest).to_string(index=False))
+        lines.append(_table(rest))
         lines.append("")
         for entry in rest:
             lines.append(f"  {entry.symbol}: {_why_discarded(entry)}")
-    flagged = [p for p in shown if p.forecast.caveats]
+    # Every printed row, not just the ranked ones. All these names share one
+    # market clock, so a release landing before the auction applies to the
+    # unranked table too — which is the whole output when nothing is credible.
+    flagged = [p for p in [*shown, *rest] if p.forecast.caveats]
     if flagged:
         lines.append("")
         lines.append("scheduled releases this model cannot see:")
         for pick in flagged:
             for note in pick.forecast.caveats:
                 lines.append(f"  {pick.symbol}: {note}")
+    if panel is not None:
+        freshest, behind = stale_inputs(panel)
+        if freshest is not None and behind:
+            lines.append("")
+            lines.append(
+                f"stale inputs: {len(behind)} of {len(panel)} series stop before "
+                f"{freshest.date().isoformat()}, the freshest bar in the panel. Their "
+                "last value is carried forward, so these probabilities are the "
+                "model's read of older cross-market and cross-asset data: "
+                f"{', '.join(behind[:8])}"
+                + (f" and {len(behind) - 8} more" if len(behind) > 8 else "")
+            )
     lines.append("")
     lines.append(
         "The target is the opening print against the previous close — an overnight "
