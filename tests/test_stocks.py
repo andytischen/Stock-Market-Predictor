@@ -65,8 +65,12 @@ def test_a_stock_is_a_target_on_wall_streets_clock():
 
 
 def test_an_unmodelled_symbol_is_refused_rather_than_invented():
+    # A well-formed US ticker that is in neither the registry nor the shortlist
+    # universe: looking like a stock is not being one.
     with pytest.raises(KeyError):
-        target_market("TSLA")
+        target_market("BRKB")
+    # In the shortlist universe, so it has a clock, but still not one of the
+    # names carrying a hand-written peer list.
     with pytest.raises(KeyError, match="modelled stocks"):
         stock("TSLA")
 

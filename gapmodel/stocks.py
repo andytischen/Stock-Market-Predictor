@@ -21,8 +21,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .markets import Instrument, Market, market
+from .universe import nasdaq_universe
 
-# Wall Street's clock, shared with the indices listed on it.
+# Wall Street's clock, shared with the indices listed on it. The 09:30 ET
+# auction is 13:30 UTC under daylight time and 14:30 under standard time
+# (roughly November to March); the value below matches every existing US entry,
+# and no indicator closes between 13.5 and 14.5, so the winter offset changes no
+# lag decision.
 US_OPEN_UTC = 13.5
 US_CLOSE_UTC = 20.0
 
@@ -81,6 +86,12 @@ STOCKS_BY_SYMBOL = {s.symbol: s for s in STOCKS}
 
 # Said next to every single-name probability. None of it is a feature, and all
 # of it moves an individual open more than the overnight tape does.
+# The shortlist universe: single listings the repository models without a peer
+# list of their own. Held as a set because every feature build asks whether its
+# target is a company.
+SHORTLISTED = frozenset(nasdaq_universe())
+
+
 BLIND_SPOTS: tuple[str, ...] = (
     "results and guidance, including anything released after the previous bell",
     "analyst actions, index changes and block trades",
@@ -97,14 +108,35 @@ def stock(symbol: str) -> Stock:
 
 
 def is_stock(symbol: str) -> bool:
-    """Whether ``symbol`` is one company rather than an index of them."""
-    return symbol in STOCKS_BY_SYMBOL
+    """Whether ``symbol`` is one company rather than an index of them.
+
+    True beyond the curated registry, because ``shortlist`` forecasts a whole
+    universe of names that have no peer list. What follows from it is the same
+    either way: a company pays dividends and an index does not, so the bars are
+    put on a total-return basis before a gap is taken from them.
+
+    Membership, not spelling. A symbol that merely looks like a US ticker is not
+    one of these, so nothing unmodelled is quietly given Wall Street's clock.
+    """
+    return symbol in STOCKS_BY_SYMBOL or symbol in SHORTLISTED
 
 
 def target_market(symbol: str) -> Market:
-    """How to align features for ``symbol``, whether it is an index or a stock."""
+    """How to align features for ``symbol``, whether it is an index or a stock.
+
+    A shortlisted name is described on demand rather than registered in
+    ``MARKETS``, which is also the set of cross-market *features*: sixty stocks
+    there would hand every index sixty collinear columns and silently change the
+    forecasts this repository already makes. A stock is a target only. The region
+    is ``Americas`` so it reads what a US index reads — in particular it skips
+    the European sector trackers, which would dilute the fit.
+    """
     known = STOCKS_BY_SYMBOL.get(symbol)
-    return known.market if known else market(symbol)
+    if known is not None:
+        return known.market
+    if symbol in SHORTLISTED:
+        return Market(symbol, symbol, "Americas", open_utc=US_OPEN_UTC, close_utc=US_CLOSE_UTC)
+    return market(symbol)
 
 
 def peers_of(symbol: str) -> tuple[Instrument, ...]:

@@ -49,8 +49,21 @@ from .screener import render_text as render_screen_text
 from .screener import to_frame as screen_to_frame
 from .sectors import build_sector_board
 from .sectors import render_text as render_sector_text
-from .stocks import BLIND_SPOTS, STOCKS, STOCKS_BY_SYMBOL, is_stock, stock_symbols
-from .universe import read_universe, us_universe
+from .shortlist import discarded as discarded_shortlist
+from .shortlist import forecast_universe
+from .shortlist import rank as rank_shortlist
+from .shortlist import render_text as render_shortlist_text
+from .shortlist import to_frame as shortlist_to_frame
+from .stocks import (
+    BLIND_SPOTS,
+    SHORTLISTED,
+    STOCKS,
+    STOCKS_BY_SYMBOL,
+    is_stock,
+    peers_of,
+    stock_symbols,
+)
+from .universe import nasdaq_universe, read_universe, us_universe
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +83,22 @@ def _stock_symbol(value: str) -> str:
     if symbol not in STOCKS_BY_SYMBOL:
         known = ", ".join(STOCKS_BY_SYMBOL)
         raise argparse.ArgumentTypeError(f"unknown stock {value!r}; choose from {known}")
+    return symbol
+
+
+def _shortlisted_symbol(value: str) -> str:
+    """A name the shortlist models.
+
+    Refused up front rather than warned about per name: a ticker outside the
+    universe has no session clock here, and a typo that merely downloaded
+    whatever Yahoo returned would be ranked beside the rest as if it belonged.
+    """
+    symbol = value.upper()
+    if symbol not in SHORTLISTED:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} is not in the modelled Nasdaq universe; add it to NASDAQ "
+            "in gapmodel/universe.py to forecast it"
+        )
     return symbol
 
 
@@ -116,6 +145,16 @@ def _positive_float(value: str) -> float:
         number = float(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"{value!r} is not a number") from exc
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    return number
+
+
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a whole number") from exc
     if number <= 0:
         raise argparse.ArgumentTypeError("must be greater than 0")
     return number
@@ -499,6 +538,45 @@ def _cmd_sectors(args: argparse.Namespace) -> None:
     print(render_sector_text(build_sector_board(panel, forecasts[0])), end="")
 
 
+def _shortlist_equities(symbols: list[str]) -> list[str]:
+    """The names to download for a shortlist run: the targets and any peers.
+
+    A curated name keeps its peers here so that a name common to both commands is
+    read from the same features either way. Without them ``shortlist MU`` would
+    quietly print a different probability from ``stock MU``, having silently
+    dropped the columns that make it the better forecast.
+    """
+    peers = [peer.symbol for symbol in symbols for peer in peers_of(symbol)]
+    return list(dict.fromkeys(symbols + peers))
+
+
+def _cmd_shortlist(args: argparse.Namespace) -> None:
+    """Rank the universe by how much edge each name's own record supports."""
+    symbols = args.symbols or nasdaq_universe()
+    # The names are not part of the default panel — they are targets, never
+    # features — so they are loaded on top of it, and only the equity legs are
+    # asked for ``Adj Close``: a company's dividend would otherwise be read as an
+    # opening gap, which means nothing to an index.
+    panel = _panel(args)
+    panel.update(
+        load_panel(
+            symbols=_shortlist_equities(symbols),
+            start=args.start,
+            cache_dir=Path(args.cache),
+            refresh=args.refresh,
+            require=("Adj Close",),
+        )
+    )
+    picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
+    print(render_shortlist_text(picks, top=args.top, panel=panel), end="")
+    if args.csv:
+        # Written in the report's order, with the verdict as a column, so that
+        # sorting the file on the raw probability is not the obvious next step.
+        frame = shortlist_to_frame(rank_shortlist(picks) + discarded_shortlist(picks))
+        frame.to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
+
+
 def _cmd_fetch(args: argparse.Namespace) -> None:
     panel = _panel(args)
     for symbol, frame in panel.items():
@@ -734,6 +812,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     export.set_defaults(func=_cmd_export)
+
+    shortlist = sub.add_parser(
+        "shortlist",
+        help="next-open probability across the Nasdaq universe, ranked by demonstrated edge",
+    )
+    shortlist.add_argument(
+        "symbols",
+        nargs="*",
+        type=_shortlisted_symbol,
+        help="forecast these tickers instead of the whole Nasdaq universe",
+    )
+    shortlist.add_argument(
+        "--top",
+        type=_positive_int,
+        help="show only the strongest N ranked names (default: all)",
+    )
+    shortlist.add_argument("--csv", help="also write every name, ranked or not, to this path")
+    shortlist.set_defaults(func=_cmd_shortlist)
 
     sectors = sub.add_parser(
         "sectors", help="split one European index's open call by STOXX 600 sector"
