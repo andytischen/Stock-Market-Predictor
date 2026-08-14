@@ -121,7 +121,7 @@ def to_frame(scores: list[TrendScore]) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "symbol": [s.symbol for s in scores],
-            "last": [round(s.last, 2) for s in scores],
+            "last": [round(s.last, 1) for s in scores],
             "score": [round(s.score, 2) for s in scores],
             "asof": [s.asof.date().isoformat() for s in scores],
         }
