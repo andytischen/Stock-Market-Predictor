@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from gapmodel.cli import build_parser
+from gapmodel.cli import _shortlist_equities, build_parser
 from gapmodel.features import _lag_days, build_features
 from gapmodel.markets import MARKETS, MARKETS_BY_SYMBOL, all_symbols, market
 from gapmodel.predict import Forecast
@@ -297,6 +297,20 @@ def test_the_cli_exposes_the_shortlist_and_normalises_its_tickers():
     assert args.top == 5
     parsed = build_parser().parse_args(["shortlist"])
     assert parsed.symbols == []
+
+
+def test_a_name_in_both_commands_is_read_from_the_same_features():
+    """`shortlist MU` and `stock MU` must not print different probabilities.
+
+    The peers are what make the curated forecast better; downloading them only
+    for one command would make the answer depend on which one asked.
+    """
+    equities = _shortlist_equities(["AAPL", "MU"])
+    assert equities[:2] == ["AAPL", "MU"]
+    assert {"005930.KS", "000660.KS", "SMH"} <= set(equities)
+    # A name with no peers adds nothing, and nothing repeats.
+    assert _shortlist_equities(["AAPL"]) == ["AAPL"]
+    assert equities == list(dict.fromkeys(equities))
 
 
 def test_the_cli_refuses_a_ticker_the_shortlist_does_not_model():

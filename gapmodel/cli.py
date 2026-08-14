@@ -60,6 +60,7 @@ from .stocks import (
     STOCKS,
     STOCKS_BY_SYMBOL,
     is_stock,
+    peers_of,
     stock_symbols,
 )
 from .universe import nasdaq_universe, read_universe, us_universe
@@ -537,19 +538,29 @@ def _cmd_sectors(args: argparse.Namespace) -> None:
     print(render_sector_text(build_sector_board(panel, forecasts[0])), end="")
 
 
-def _cmd_shortlist(args: argparse.Namespace) -> None:
-    """Rank the universe. Unlike ``stock`` there are no peers to download, so
-    the panel is the indicator set plus the names themselves.
+def _shortlist_equities(symbols: list[str]) -> list[str]:
+    """The names to download for a shortlist run: the targets and any peers.
+
+    A curated name keeps its peers here so that a name common to both commands is
+    read from the same features either way. Without them ``shortlist MU`` would
+    quietly print a different probability from ``stock MU``, having silently
+    dropped the columns that make it the better forecast.
     """
+    peers = [peer.symbol for symbol in symbols for peer in peers_of(symbol)]
+    return list(dict.fromkeys(symbols + peers))
+
+
+def _cmd_shortlist(args: argparse.Namespace) -> None:
+    """Rank the universe by how much edge each name's own record supports."""
     symbols = args.symbols or nasdaq_universe()
     # The names are not part of the default panel — they are targets, never
-    # features — so they are loaded on top of it, and only they are asked for
-    # ``Adj Close``: a company's dividend would otherwise be read as an opening
-    # gap, which means nothing to an index.
+    # features — so they are loaded on top of it, and only the equity legs are
+    # asked for ``Adj Close``: a company's dividend would otherwise be read as an
+    # opening gap, which means nothing to an index.
     panel = _panel(args)
     panel.update(
         load_panel(
-            symbols=symbols,
+            symbols=_shortlist_equities(symbols),
             start=args.start,
             cache_dir=Path(args.cache),
             refresh=args.refresh,
