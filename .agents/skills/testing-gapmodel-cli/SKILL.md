@@ -1,6 +1,6 @@
 ---
 name: testing-gapmodel-cli
-description: How to runtime-test the gapmodel CLI (predict / stocks / screen / sectors) end to end - venv, cached price data, expected runtimes, and the checks that actually catch look-ahead and ranking bugs.
+description: How to runtime-test the gapmodel CLI (predict / screener / sectors / stocks) end to end - venv, cached price data, expected runtimes, and the checks that actually catch look-ahead and ranking bugs.
 ---
 
 # Testing the gapmodel CLI
@@ -8,14 +8,25 @@ description: How to runtime-test the gapmodel CLI (predict / stocks / screen / s
 Terminal-only project: a Python library + `python -m gapmodel` CLI. There is no web UI or
 server, so do **not** start a browser or a screen recording — collect stdout as text evidence.
 
+Subcommands on `main`: `markets, fetch, score, screener, predict, backtest, asia, dashboard,
+export, sectors`. The `stocks` sections below (and the `gapmodel.stocks` symbols they name) arrive
+with [#64](https://github.com/andytischen/Stock-Market-Predictor/pull/64) and do not resolve until
+it lands — everything else applies to `main` as it stands. If `python -m gapmodel stocks` errors
+with an invalid-choice message, that PR is simply not merged yet.
+
 ## Environment
 
 - `source ~/.venvs/gapmodel/bin/activate` (the blueprint creates it; system python3 has no deps).
-- Add `-W ignore` to every `python -m gapmodel ...` invocation: sklearn emits noisy
-  `FutureWarning: 'penalty' was deprecated` lines that otherwise swamp the output.
-- Yahoo Finance bars are cached in `~/.cache/gapmodel/<SYMBOL>.csv`. Runs hit the network only
-  for symbols missing from the cache (a garbage ticker therefore produces yfinance `ERROR`
-  lines before the CLI's own `error:` message — that is expected, not a traceback).
+- Add `-W ignore` to every `python -m gapmodel ...` invocation: under **scikit-learn 1.9.0**
+  the `penalty="l2"` in `model.py` emits a `FutureWarning: 'penalty' was deprecated` per fit,
+  which swamps the output. Re-check whether this is still needed if sklearn is upgraded.
+- Yahoo Finance bars are cached in `~/.cache/gapmodel/`, under a **sanitised** filename:
+  `_cache_path` maps `^` to `idx_`, and `/` and `=` to `_`. So `^GSPC` is `idx_GSPC.csv` and
+  `CL=F` is `CL_F.csv`, while plain tickers are `AAPL.csv`. Scripting a staleness check against
+  a literal `<SYMBOL>.csv` raises a missing-file error for every index and future.
+- Runs hit the network only for symbols missing from the cache (a garbage ticker therefore
+  produces yfinance `ERROR` lines before the CLI's own `error:` message — expected, not a
+  traceback).
 - `python -m pytest tests -q` takes ~1 min; `ruff check . && ruff format --check .` is instant.
 
 ## Runtime budget (walk-forward backtest per name, single-threaded per symbol)
@@ -29,9 +40,10 @@ server, so do **not** start a browser or a screen recording — collect stdout a
 
 Parse the CSV (`--csv PATH`) with pandas rather than eyeballing the table:
 
-1. **Look-ahead**: forecast `session` must be strictly later than the last `Date` in
-   `~/.cache/gapmodel/<SYM>.csv`. `features.next_session_date` only skips weekends, so the
-   expected value is "next weekday after the last cached bar" (holidays are ignored).
+1. **Look-ahead**: forecast `session` must be strictly later than the last `Date` in that
+   symbol's cache file (sanitised name — see above). `features.next_session_date` only skips
+   weekends, so the expected value is "next weekday after the last cached bar" (holidays are
+   ignored).
 2. **Internal arithmetic**: `edge == round(p_open_up - base_rate, 4)` *exactly*, in the printed
    table and the CSV alike — the reported edge is derived from the two reported columns either
    side of it, so a reader checking it by hand cannot find a discrepancy. (It did not always
@@ -72,11 +84,26 @@ into the venv and render the captured log to a PNG (monospace on a dark backgrou
 comment has an image; label it clearly as rendered CLI output. Pillow is for evidence only —
 do not add it to the project's dependencies.
 
-## Pre-existing CI failure, not yours
+## When CI fails a test that passes locally, suspect the merge, not the environment
 
-`tests/test_score.py::test_to_frame_sorts_and_rounds` fails in GitHub Actions
-(`assert np.float64(5.6) == 5.56`) and fails identically on `main`. It does **not** reproduce
-locally, even in a venv pinned to CI's exact stack (Python 3.12, numpy 2.5.2, pandas 3.0.5,
-pytest 9.1.1, `pip install -e .`). Expect `214 passed, 1 failed` on CI against a green local
-run, and do not "fix" `score.py` to chase it. The `check` workflow is not in the repo (only
-`publish-snapshot.yml` is), so its setup cannot be inspected from the checkout.
+CI is `.github/workflows/ci.yml` (job `check`: Python 3.12, `pip install -e . ruff pytest`, then
+`ruff check`, `ruff format --check`, `pytest`). It triggers on `pull_request`, so **GitHub checks
+out the merge of your branch with `main`, not your branch.** A test can therefore fail on CI
+while passing on every local run, because the code under test only exists in that merge.
+
+Not hypothetical: `tests/test_score.py::test_to_frame_sorts_and_rounds` failed
+(`assert np.float64(5.6) == 5.56`) on a branch whose own `score.py` was correct. `main` had
+momentarily carried `round(s.last, 1)` — committed deliberately in 5488bf7 as a smoke test for
+CI automation, fixed again in #63 — and the PR was being tested against it. Time was lost
+pinning numpy, pandas and pytest to CI's exact versions hunting a rounding difference that was
+never there.
+
+So when local is green and CI is red:
+
+1. `git fetch origin` **first**. A stale `origin/main` hides this, and makes "the same failure
+   is on `main`" look like proof that the failure is pre-existing and none of your business.
+2. Reproduce against the merge, not the branch: `git merge origin/main` (or check out
+   `refs/pull/<N>/merge`) and re-run the suite.
+3. Only then suspect the environment.
+
+Merging current `main` is usually the whole fix.

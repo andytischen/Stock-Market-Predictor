@@ -465,4 +465,8 @@ The tests pin the behaviour that matters most: the gap definition, the session
 ordering rules, that features never read the future, and that the backtest is
 strictly out of sample.
 
+For runtime testing of the CLI against real price data — cache layout, how long a
+walk-forward run takes, and the checks that actually catch look-ahead and ranking
+bugs — see [`.agents/skills/testing-gapmodel-cli`](.agents/skills/testing-gapmodel-cli/SKILL.md).
+
 Not investment advice.
