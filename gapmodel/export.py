@@ -16,8 +16,8 @@ import pandas as pd
 
 from .dashboard import OilReading
 from .events import SCHEDULES, unmaintained_on
-from .markets import market
 from .predict import Forecast, _display
+from .stocks import target_market
 
 _COVERAGE = {schedule.name: schedule for schedule in SCHEDULES}
 
@@ -28,7 +28,7 @@ def _session_open_utc(symbol: str, session: pd.Timestamp) -> str:
     ``open_utc`` is hours from midnight UTC of the session date and may be
     negative for a session that starts the previous calendar day (Sydney).
     """
-    open_utc = market(symbol).open_utc
+    open_utc = target_market(symbol).open_utc
     moment = session.normalize() + pd.Timedelta(hours=open_utc)
     return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
