@@ -1,6 +1,6 @@
 ---
 name: testing-gapmodel-cli
-description: How to runtime-test the gapmodel CLI (predict / screener / sectors / stocks) end to end - venv, cached price data, expected runtimes, and the checks that actually catch look-ahead and ranking bugs.
+description: How to runtime-test the gapmodel CLI (predict / screen / sectors / stock / shortlist) end to end - venv, cached price data, expected runtimes, and the checks that actually catch look-ahead and ranking bugs.
 ---
 
 # Testing the gapmodel CLI
@@ -8,11 +8,23 @@ description: How to runtime-test the gapmodel CLI (predict / screener / sectors 
 Terminal-only project: a Python library + `python -m gapmodel` CLI. There is no web UI or
 server, so do **not** start a browser or a screen recording — collect stdout as text evidence.
 
-Subcommands on `main`: `markets, fetch, score, screener, predict, backtest, asia, dashboard,
-export, sectors`. The `stocks` sections below (and the `gapmodel.stocks` symbols they name) arrive
-with [#64](https://github.com/andytischen/Stock-Market-Predictor/pull/64) and do not resolve until
-it lands — everything else applies to `main` as it stands. If `python -m gapmodel stocks` errors
-with an invalid-choice message, that PR is simply not merged yet.
+Subcommands on `main`: `markets, fetch, score, screen, predict, backtest, asia, dashboard,
+export, sectors, stock, shortlist`. The screener is invoked as `screen` even though the parser
+variable is named `screener`.
+
+The two single-stock commands are easy to confuse, and testing one proves nothing about the other:
+
+- `stock SYM` — the curated registry in `gapmodel/stocks.py` (`MU`, `WDC`, `STX`), which adds
+  `peer_*` columns from the Asian memory names that trade the same demand overnight.
+- `shortlist [SYM ...]` — the broad ranking in `gapmodel/shortlist.py` over the ~66-name universe
+  in `gapmodel/universe.py`.
+
+They overlap on the curated names, so assert they **agree**: `shortlist SYM` must print the same
+`p_open_up` and OOS metrics as `stock SYM` for every name in `stocks.STOCKS_BY_SYMBOL`, which holds
+only because `cli._shortlist_equities()` downloads the peers of curated names too. A mismatch here
+is the regression this check exists for (`shortlist MU` once printed 0.6331 against `stock MU`'s
+0.6881, having silently dropped the peer columns). Every curated name is also in the universe, so
+there is no name that one command models and the other refuses.
 
 ## Environment
 
@@ -27,14 +39,15 @@ with an invalid-choice message, that PR is simply not merged yet.
 - Runs hit the network only for symbols missing from the cache (a garbage ticker therefore
   produces yfinance `ERROR` lines before the CLI's own `error:` message — expected, not a
   traceback).
-- `python -m pytest tests -q` takes ~1 min; `ruff check . && ruff format --check .` is instant.
+- `python -m pytest tests -q` takes ~1 min (237 tests); `ruff check . && ruff format --check .`
+  is instant.
 
 ## Runtime budget (walk-forward backtest per name, single-threaded per symbol)
 
-- ~1.3 min per stock for `python -W ignore -m gapmodel stocks SYM ...`.
-- The full 65-name Nasdaq universe run is ~17 min. Start it in the background *first*
-  (`nohup ... > /tmp/log 2>&1 &`) and do targeted runs while it works; several runs in
-  parallel are fine on this box.
+- ~1.3 min per stock for `python -W ignore -m gapmodel shortlist SYM ...`.
+- The full universe run is ~11 min alone and ~23 min alongside six other forecast jobs: the
+  dominant cost is CPU contention on this box, not the number of names. Start it in the
+  background *first* (`nohup ... > /tmp/log 2>&1 &`) and do targeted runs while it works.
 
 ## Checks that actually catch bugs (do these, not just "it printed a table")
 
@@ -51,7 +64,7 @@ Parse the CSV (`--csv PATH`) with pandas rather than eyeballing the table:
    `predict._display`, which clamps to [1e-4, 1-1e-4] and rounds to 4dp, so 17 of 65 names were
    off by 1 in the last digit. Assert equality, not a 1e-4 tolerance, or the regression returns.)
    The unrounded `StockPick.edge` property still drives the ranking.
-3. **Credibility filter** (`stocks.StockPick.credible`): recompute
+3. **Credibility filter** (`shortlist.StockPick.credible`): recompute
    `auc >= 0.55 and brier_skill > 0 and n_oos >= 500` from the CSV and assert the ranked block
    is exactly that set, the unranked block is exactly its complement, the two do not overlap,
    and each `SYM: reason` line names precisely the failed test(s). Also probe the boundaries in
@@ -70,12 +83,19 @@ Parse the CSV (`--csv PATH`) with pandas rather than eyeballing the table:
 The cached **index** series (`^GSPC`, `^IXIC`, European indices, `^VIX`, `^TNX`, ...) are often
 several days staler than the individual stock series. `features.as_of` forward-fills, so a
 stock forecast dated e.g. 2026-08-14 can be built from cross-market returns whose last real
-observation is 2026-08-04. `stocks` now discloses this itself in a `stale inputs:` footer via
-`stocks.stale_inputs()` (typically "42 of 63 series stop before ..."); check the footer is
-present and that its count matches `df.dropna(subset=["Close"]).index[-1]` per symbol, rather
-than re-filing it as a new finding. There is no look-ahead either way. `--refresh` is the
-workaround if the network allows it; the `predict`/`export` paths have the same exposure with
-no such footer.
+observation is 2026-08-04. `shortlist` discloses this itself in a `stale inputs:` footer via
+`shortlist.stale_inputs(panel, session)`, so check the footer rather than re-filing it as a
+finding. There is no look-ahead either way; `--refresh` is the workaround if the network allows
+it, and the `predict`/`export` paths have the same exposure with no such footer.
+
+Verify the footer by building a lag histogram against the **forecast session** and asserting the
+flagged set is exactly `{series : (session - last bar).days > STALE_DAYS}` (5). Expect a US series
+that has not opened yet (lag 1) and a partial same-session Asian peer bar (lag 0) to be *absent*:
+the count deliberately does not key off the freshest bar in the panel, which counted 129 of 134
+series stale because Seoul was open, and swung between 42, 67 and 129 depending on which peers a
+run happened to load. A count that moves with the peer set again is a regression — only the
+denominator should. The live cache holds nothing lagging 3–8 days, so probe the threshold itself
+with a synthetic dict of `pd.DataFrame`s at chosen lags rather than assuming it.
 
 ## Rendering console evidence for a PR comment
 
