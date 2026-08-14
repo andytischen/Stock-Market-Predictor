@@ -16,7 +16,14 @@ from gapmodel.shortlist import (
     stale_inputs,
     to_frame,
 )
-from gapmodel.stocks import US_CLOSE_UTC, US_OPEN_UTC, is_stock, peers_of, target_market
+from gapmodel.stocks import (
+    STOCKS_BY_SYMBOL,
+    US_CLOSE_UTC,
+    US_OPEN_UTC,
+    is_stock,
+    peers_of,
+    target_market,
+)
 from gapmodel.universe import NASDAQ, nasdaq_universe
 from tests.test_features import synthetic_bars
 
@@ -359,18 +366,21 @@ def test_the_printed_edge_is_the_difference_of_the_printed_columns():
     assert row["edge"] == round(row["p_open_up"] - row["base_rate"], 4)
 
 
+SESSION = pd.Timestamp("2026-08-13")
+
+
+def _ending(bars: pd.DataFrame, last: pd.Timestamp) -> pd.DataFrame:
+    return bars.set_axis(pd.date_range(end=last, periods=len(bars), freq="B"))
+
+
 def test_the_report_discloses_inputs_that_stopped_updating(panel):
     """A stale macro series is forward-filled, so it has to be called out."""
-    fresh = pd.Timestamp("2026-08-13")
-    panel = {symbol: bars.copy() for symbol, bars in panel.items()}
+    panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}
     # The stock is current; the S&P and crude stopped a week ago.
-    panel[TICKER].index = pd.date_range(end=fresh, periods=len(panel[TICKER]), freq="B")
     for stale in ("^GSPC", "CL=F"):
-        panel[stale].index = pd.date_range(
-            end=fresh - pd.Timedelta(days=7), periods=len(panel[stale]), freq="B"
-        )
-    freshest, behind = stale_inputs(panel)
-    assert freshest == fresh
+        panel[stale] = _ending(panel[stale], SESSION - pd.Timedelta(days=7))
+    counted, behind = stale_inputs(panel, SESSION)
+    assert counted == len(panel)
     assert "^GSPC" in behind and "CL=F" in behind and TICKER not in behind
 
     text = render_text([pick("GOOD", 0.70, auc=0.62)], panel=panel)
@@ -381,19 +391,46 @@ def test_the_report_discloses_inputs_that_stopped_updating(panel):
     assert "stale inputs" not in render_text([pick("GOOD", 0.70, auc=0.62)])
 
 
-def test_a_fully_current_panel_raises_no_staleness_note(panel):
-    aligned = pd.date_range(end=pd.Timestamp("2026-08-13"), periods=600, freq="B")
-    current = {symbol: bars.iloc[-600:].set_axis(aligned) for symbol, bars in panel.items()}
-    freshest, behind = stale_inputs(current)
-    assert freshest == aligned[-1]
+def test_the_worst_lag_is_named_first(panel):
+    """Eight names are printed; they should be the eight furthest behind."""
+    panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}
+    panel["^GSPC"] = _ending(panel["^GSPC"], SESSION - pd.Timedelta(days=30))
+    panel["CL=F"] = _ending(panel["CL=F"], SESSION - pd.Timedelta(days=8))
+    _, behind = stale_inputs(panel, SESSION)
+    assert behind[:2] == ["^GSPC", "CL=F"]
+
+
+def test_a_panel_current_for_the_session_raises_no_staleness_note(panel):
+    """Wall Street is not stale because Seoul was open.
+
+    A US series that has not opened yet ends on the previous session, and a peer
+    downloaded mid-session in Asia carries a partial bar for the session itself.
+    Both are current, so the older reading of the two must not become the
+    yardstick that condemns the rest of the panel.
+    """
+    panel = {
+        symbol: _ending(bars, SESSION - pd.Timedelta(days=1)) for symbol, bars in panel.items()
+    }
+    panel["^N225"] = _ending(panel["^N225"], SESSION)
+    counted, behind = stale_inputs(panel, SESSION)
+    assert counted == len(panel)
     assert behind == []
-    assert "stale inputs" not in render_text([pick("GOOD", 0.70, auc=0.62)], panel=current)
+    assert "stale inputs" not in render_text([pick("GOOD", 0.70, auc=0.62)], panel=panel)
 
 
 def test_probabilities_are_never_a_certainty():
     """A stock forecast inherits the index model's refusal to print 0 or 1."""
     assert to_frame([pick("X", 1.0, auc=0.6)]).iloc[0]["p_open_up"] == 0.9999
     assert to_frame([pick("X", 0.0, auc=0.6)]).iloc[0]["p_open_up"] == 0.0001
+
+
+def test_every_curated_stock_can_also_be_shortlisted():
+    """The two commands must not disagree about what a modelled name is.
+
+    A curated name absent here is accepted by ``stock`` and refused by
+    ``shortlist``, so the parity between them cannot even be checked.
+    """
+    assert set(STOCKS_BY_SYMBOL) <= set(nasdaq_universe())
 
 
 def test_the_universe_covers_a_useful_slice_of_the_nasdaq():

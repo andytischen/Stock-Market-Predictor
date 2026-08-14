@@ -211,8 +211,15 @@ def _why_discarded(pick: StockPick) -> str:
     return ", ".join(reasons)
 
 
-def stale_inputs(panel: dict[str, pd.DataFrame]) -> tuple[pd.Timestamp | None, list[str]]:
-    """The freshest observation in the panel, and which series lag behind it.
+# Calendar days a series may sit behind the session being forecast before it is
+# called stale. A series that traded on the previous session is one day behind,
+# and a long weekend or a holiday stretches that to four; five is the first lag
+# that cannot be explained by the calendar.
+STALE_DAYS = 5
+
+
+def stale_inputs(panel: dict[str, pd.DataFrame], session: pd.Timestamp) -> tuple[int, list[str]]:
+    """How many series lag ``session`` by more than the calendar can explain.
 
     A stock's own bars can be current while the cross-market and cross-asset
     series feeding it are days old: ``features`` aligns each source by
@@ -220,13 +227,25 @@ def stale_inputs(panel: dict[str, pd.DataFrame]) -> tuple[pd.Timestamp | None, l
     unchanged one rather than a missing one. The forecast stays internally
     consistent and free of look-ahead, but it is answering the question given
     last week's macro, which the report should say out loud rather than imply.
+
+    Measured against the session being forecast, deliberately, and not against
+    the freshest bar in the panel. Panels are mixed: a US series that has not
+    opened yet today is *current* while ending yesterday, and an Asian peer
+    downloaded mid-session carries a partial bar for today. Anchoring on the
+    maximum would call all of Wall Street stale because Seoul was open, and the
+    count would swing on which peers a given run happened to load rather than on
+    anything about the data.
     """
-    last_bars = {symbol: bars.index.max() for symbol, bars in panel.items() if not bars.empty}
-    if not last_bars:
-        return None, []
-    freshest = max(last_bars.values())
-    behind = sorted(symbol for symbol, last in last_bars.items() if last < freshest)
-    return freshest, behind
+    counted = 0
+    behind = []
+    for symbol, bars in panel.items():
+        if bars.empty:
+            continue
+        lag = (session.normalize() - bars.index.max().normalize()).days
+        counted += 1
+        if lag > STALE_DAYS:
+            behind.append((lag, symbol))
+    return counted, [symbol for _, symbol in sorted(behind, key=lambda e: (-e[0], e[1]))]
 
 
 def to_frame(picks: list[StockPick]) -> pd.DataFrame:
@@ -290,16 +309,17 @@ def render_text(
         for pick in flagged:
             for note in pick.forecast.caveats:
                 lines.append(f"  {pick.symbol}: {note}")
-    if panel is not None:
-        freshest, behind = stale_inputs(panel)
-        if freshest is not None and behind:
+    if panel is not None and picks:
+        session = max(p.forecast.session for p in picks)
+        counted, behind = stale_inputs(panel, session)
+        if behind:
             lines.append("")
             lines.append(
-                f"stale inputs: {len(behind)} of {len(panel)} series stop before "
-                f"{freshest.date().isoformat()}, the freshest bar in the panel. Their "
-                "last value is carried forward, so these probabilities are the "
-                "model's read of older cross-market and cross-asset data: "
-                f"{', '.join(behind[:8])}"
+                f"stale inputs: {len(behind)} of {counted} series have no bar within "
+                f"{STALE_DAYS} days of {session.date().isoformat()}, a gap the calendar "
+                "does not explain. Their last value is carried forward, so these "
+                "probabilities are the model's read of older cross-market and "
+                f"cross-asset data: {', '.join(behind[:8])}"
                 + (f" and {len(behind) - 8} more" if len(behind) > 8 else "")
             )
     lines.append("")

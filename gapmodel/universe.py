@@ -81,7 +81,7 @@ NASDAQ: tuple[str, ...] = (
     "AAL", "AFRM", "APP", "ARM", "COIN", "CRWD", "DDOG", "DKNG", "ENPH",
     "ETSY", "FSLR", "HOOD", "LCID", "LULU", "LYFT", "MARA", "MRNA", "MSTR",
     "OKTA", "ON", "PANW", "PLTR", "PLUG", "RIOT", "RIVN", "ROKU", "SMCI",
-    "SOFI", "TTD", "UAL", "WDC", "ZM", "ZS",
+    "SOFI", "STX", "TTD", "UAL", "WDC", "ZM", "ZS",
 )
 # fmt: on
 
