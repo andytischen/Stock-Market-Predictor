@@ -11,7 +11,8 @@ import pandas as pd
 from . import model as model_mod
 from .events import caveats
 from .features import _column_name, build_features, live_feature_row
-from .markets import CURVE_FRONT, CURVE_STRIP, CURVE_WINDOW, MARKETS, Market, market
+from .markets import CURVE_FRONT, CURVE_STRIP, CURVE_WINDOW, MARKETS
+from .stocks import target_market
 
 log = logging.getLogger(__name__)
 
@@ -68,23 +69,31 @@ def shocked_row(live: pd.DataFrame, shocks: dict[str, float]) -> pd.DataFrame:
 
     A shock is applied to every feature derived from that symbol's latest bar:
     the one-day and five-day returns (a move today is also part of the week),
-    the VIX level, and the volatility-normalised shock feature. Symbols the
-    target does not use (its own symbol, above all) are silently absent from
-    its feature set and simply have no effect on it.
+    the VIX level, and the volatility-normalised shock feature.
+
+    A symbol this target reads nothing from — its own symbol, above all, which
+    no model may use to predict itself — has no column to bump. That is said out
+    loud rather than printed as a probability that did not move, which would read
+    as "the move does not matter" instead of "the move is not modelled".
     """
     bumped = live.copy()
     for symbol, move in shocks.items():
         name = _column_name(symbol)
+        touched = False
         for column in (
             f"mkt_{name}_return",
             f"mkt_{name}_return_5",
             f"ind_{name}_return",
             f"ind_{name}_return_5",
+            f"peer_{name}_return",
+            f"peer_{name}_return_5",
         ):
             if column in bumped:
                 bumped[column] += move
+                touched = True
         if symbol == "^VIX" and "ind_vix_level" in bumped:
             bumped["ind_vix_level"] *= np.exp(move)
+            touched = True
         # A volatility-normalised shock feature has to move with its return.
         # The volatility itself is measured up to the previous bar, so a move
         # today leaves the denominator alone.
@@ -92,6 +101,7 @@ def shocked_row(live: pd.DataFrame, shocks: dict[str, float]) -> pd.DataFrame:
         if f"ind_{name}_shock" in bumped and vol:
             sigma = bumped[vol[0]]
             bumped[f"ind_{name}_shock"] += move / sigma.where(sigma > 0)
+            touched = True
         # The curve features are differences between the two oil funds, so a
         # move in either leg tilts them, in opposite directions.
         sign = 1.0 if symbol == CURVE_FRONT else -1.0 if symbol == CURVE_STRIP else 0.0
@@ -99,6 +109,12 @@ def shocked_row(live: pd.DataFrame, shocks: dict[str, float]) -> pd.DataFrame:
             for column in ("ind_oil_curve_return", f"ind_oil_curve_slope_{CURVE_WINDOW}"):
                 if column in bumped:
                     bumped[column] += sign * move
+                    touched = True
+        if not touched:
+            log.warning(
+                "%s is not a feature of this target: its move is unmodelled, not harmless",
+                symbol,
+            )
     return bumped
 
 
@@ -130,14 +146,12 @@ def forecast_market(
     hourly: dict[str, pd.Series] | None = None,
     min_train: int = model_mod.MIN_TRAIN,
     shocks: dict[str, float] | None = None,
-    target: Market | None = None,
 ) -> Forecast:
-    meta = target or market(symbol)
-    features, labels = build_features(symbol, panel, forecast_row=True, hourly=hourly, target=meta)
+    features, labels = build_features(symbol, panel, forecast_row=True, hourly=hourly)
     backtest = model_mod.walk_forward(features, labels, min_train=min_train, c=c)
 
     pipeline = model_mod.fit(features, labels, c=c)
-    live, session = live_feature_row(symbol, panel, hourly=hourly, target=meta)
+    live, session = live_feature_row(symbol, panel, hourly=hourly)
     calibrate = model_mod.calibrator(backtest)
     probability = float(calibrate(pipeline.predict_proba(live.to_numpy())[:, 1])[0])
 
@@ -154,6 +168,7 @@ def forecast_market(
     standardised = pd.Series(scaler.transform(explained.to_numpy())[0], index=features.columns)
     contributions = (weights * standardised).sort_values(key=abs, ascending=False)
 
+    meta = target_market(symbol)
     return Forecast(
         caveats=caveats(meta, session),
         symbol=symbol,

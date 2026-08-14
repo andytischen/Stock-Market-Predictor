@@ -22,8 +22,8 @@ from .markets import (
     SECTOR_SYMBOLS,
     Market,
     lag_days,
-    market,
 )
+from .stocks import is_stock, peers_of, target_market
 
 MIN_HISTORY = 60
 OIL_VOL_WINDOW = 20
@@ -45,6 +45,35 @@ def log_return(close: pd.Series, periods: int = 1) -> pd.Series:
 def opening_gap(bars: pd.DataFrame) -> pd.Series:
     """Log return from the previous close to today's opening print."""
     return np.log(bars["Open"] / bars["Close"].shift(1))
+
+
+def dividend_adjusted(bars: pd.DataFrame) -> pd.DataFrame:
+    """Bars on a total-return basis, so going ex-dividend is not a down gap.
+
+    Yahoo's daily bars are split-adjusted but not dividend-adjusted, so a single
+    company's opening print falls by roughly the dividend on the morning it goes
+    ex and the label for that session records a gap the market never made. It is
+    a handful of sessions a year per name, but the sign is always the same one.
+    ``Adj Close`` carries the dividend factor; applying it to both prints of the
+    same session leaves that session's own returns untouched and corrects only
+    the previous-close-to-open step. An index pays nothing, so it is left alone,
+    and a cache written before the column was collected simply is not corrected.
+
+    The factor is cumulative and rises towards 1, so a gap in it is carried both
+    ways: filling leading rows with 1.0 instead of the first factor published
+    would put a made-up gap of the whole accumulated discount at the boundary.
+    """
+    if "Adj Close" not in bars:
+        return bars
+    factor = bars["Adj Close"] / bars["Close"].where(bars["Close"] > 0)
+    factor = factor.replace([np.inf, -np.inf], np.nan).ffill().bfill().fillna(1.0)
+    return bars.assign(Open=bars["Open"] * factor, Close=bars["Close"] * factor)
+
+
+def total_return_close(bars: pd.DataFrame) -> pd.Series:
+    """Closing series to take returns from: dividend-adjusted where published."""
+    column = "Adj Close" if "Adj Close" in bars else "Close"
+    return bars[column].dropna()
 
 
 def as_of(source: pd.Series, dates: pd.DatetimeIndex, lag_days: int) -> pd.Series:
@@ -95,6 +124,31 @@ def curve_features(
     }
 
 
+def peer_features(
+    target_symbol: str, panel: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, target: Market
+) -> dict[str, pd.Series]:
+    """What the companies trading the same end demand did, daily and weekly.
+
+    Only single stocks have peers; an index is the average of its own. The lag
+    is the ordinary one, which is the point: Seoul and Tokyo close before New
+    York opens, so their sessions are same-day information for a US chipmaker,
+    while the US legs are read a session late like every other Wall Street bar.
+
+    Peers are single companies too, so their returns are taken from the
+    dividend-adjusted close: an ex-dividend date is not a fall in demand.
+    """
+    built: dict[str, pd.Series] = {}
+    for peer in peers_of(target_symbol):
+        if peer.symbol not in panel:
+            continue
+        close = total_return_close(panel[peer.symbol])
+        lag = _lag_days(peer.close_utc, target)
+        name = _column_name(peer.symbol)
+        built[f"peer_{name}_return"] = as_of(log_return(close), dates, lag)
+        built[f"peer_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
+    return built
+
+
 def policy_features(
     panel: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, target: Market
 ) -> dict[str, pd.Series]:
@@ -136,7 +190,6 @@ def build_features(
     panel: dict[str, pd.DataFrame],
     forecast_row: bool = False,
     hourly: dict[str, pd.Series] | None = None,
-    target: Market | None = None,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """Build the design matrix and the up/down label for one market.
 
@@ -146,12 +199,8 @@ def build_features(
 
     With ``hourly`` the pre-open futures moves are added, which restricts the
     sample to the window those hourly bars cover.
-
-    ``target`` describes the instrument being predicted; it defaults to the
-    indexed market of that symbol and is passed explicitly for a single stock,
-    which is a target without being a registered market.
     """
-    target = target or market(target_symbol)
+    target = target_market(target_symbol)
     if target_symbol not in panel:
         raise KeyError(f"no price history loaded for {target_symbol}")
 
@@ -160,6 +209,8 @@ def build_features(
         raise KeyError(f"no opening prices loaded for {gap_symbol}")
 
     bars = panel[gap_symbol].dropna(subset=["Open", "Close"])
+    if is_stock(target_symbol):
+        bars = dividend_adjusted(bars)
     if len(bars) < MIN_HISTORY:
         raise ValueError(f"{gap_symbol}: only {len(bars)} usable rows")
     if forecast_row:
@@ -222,6 +273,7 @@ def build_features(
         elif indicator.symbol in SECTOR_SYMBOLS:
             features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
 
+    features.update(peer_features(target_symbol, panel, dates, target))
     features.update(curve_features(panel, dates, target))
     features.update(policy_features(panel, dates, target))
 
@@ -263,8 +315,7 @@ def live_feature_row(
     target_symbol: str,
     panel: dict[str, pd.DataFrame],
     hourly: dict[str, pd.Series] | None = None,
-    target: Market | None = None,
 ) -> tuple[pd.DataFrame, pd.Timestamp]:
     """Feature row for the next, not yet observed, opening auction."""
-    frame, _ = build_features(target_symbol, panel, forecast_row=True, hourly=hourly, target=target)
+    frame, _ = build_features(target_symbol, panel, forecast_row=True, hourly=hourly)
     return frame.iloc[[-1]], frame.index[-1]
