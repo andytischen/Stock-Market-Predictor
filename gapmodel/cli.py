@@ -49,6 +49,7 @@ from .screener import render_text as render_screen_text
 from .screener import to_frame as screen_to_frame
 from .sectors import build_sector_board
 from .sectors import render_text as render_sector_text
+from .stocks import BLIND_SPOTS, STOCKS, STOCKS_BY_SYMBOL, is_stock, stock_symbols
 from .universe import read_universe, us_universe
 
 log = logging.getLogger(__name__)
@@ -64,8 +65,24 @@ def _market_symbol(value: str) -> str:
     return value
 
 
-def _shock(value: str) -> tuple[str, float]:
-    known = set(MARKETS_BY_SYMBOL) | {i.symbol for i in INDICATORS} | {CURVE_FRONT, CURVE_STRIP}
+def _stock_symbol(value: str) -> str:
+    symbol = value.upper()
+    if symbol not in STOCKS_BY_SYMBOL:
+        known = ", ".join(STOCKS_BY_SYMBOL)
+        raise argparse.ArgumentTypeError(f"unknown stock {value!r}; choose from {known}")
+    return symbol
+
+
+def _target_symbol(value: str) -> str:
+    """An index or a modelled single stock: anything with a model behind it."""
+    symbol = value if value in MARKETS_BY_SYMBOL else value.upper()
+    if symbol in MARKETS_BY_SYMBOL or symbol in STOCKS_BY_SYMBOL:
+        return symbol
+    known = ", ".join(list(MARKETS_BY_SYMBOL) + list(STOCKS_BY_SYMBOL))
+    raise argparse.ArgumentTypeError(f"unknown market {value!r}; choose from {known}")
+
+
+def _parse_shock(value: str, known: set[str]) -> tuple[str, float]:
     try:
         symbol, move = parse_shock(value)
     except ValueError as exc:
@@ -73,6 +90,25 @@ def _shock(value: str) -> tuple[str, float]:
     if symbol not in known:
         raise argparse.ArgumentTypeError(f"unknown instrument {symbol!r}")
     return symbol, move
+
+
+def _index_instruments() -> set[str]:
+    return set(MARKETS_BY_SYMBOL) | {i.symbol for i in INDICATORS} | {CURVE_FRONT, CURVE_STRIP}
+
+
+def _shock(value: str) -> tuple[str, float]:
+    """A move in something an index model actually reads.
+
+    The single-name peers are deliberately not accepted here: no index feature
+    is derived from them, so the shock would be applied to nothing and print an
+    unchanged probability, which reads as "no effect" rather than "not modelled".
+    """
+    return _parse_shock(value, _index_instruments())
+
+
+def _stock_shock(value: str) -> tuple[str, float]:
+    """A move in anything a single-name model reads, peers included."""
+    return _parse_shock(value, _index_instruments() | set(stock_symbols()))
 
 
 def _positive_float(value: str) -> float:
@@ -108,6 +144,26 @@ def _panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     return load_panel(start=args.start, cache_dir=Path(args.cache), refresh=args.refresh)
 
 
+def _stock_panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
+    """The index panel plus the single names and their peers.
+
+    Only the equity legs are asked for ``Adj Close``: they are the ones whose
+    dividends would otherwise be read as opening gaps. Requiring it of the whole
+    panel would re-download every index for a column that means nothing to them.
+    """
+    panel = _panel(args)
+    panel.update(
+        load_panel(
+            symbols=stock_symbols(),
+            start=args.start,
+            cache_dir=Path(args.cache),
+            refresh=args.refresh,
+            require=("Adj Close",),
+        )
+    )
+    return panel
+
+
 def _hourly(args: argparse.Namespace) -> dict[str, pd.Series] | None:
     """The hourly futures panel, or None when it was not asked for or is missing.
 
@@ -134,6 +190,10 @@ def _cmd_markets(_: argparse.Namespace) -> None:
     print(f"  {curve:<12} crude curve: front month against the 12-month strip")
     policy = f"{FUNDS_FUTURE}/{BILL_YIELD}"
     print(f"  {policy:<12} priced policy rate and the tightening priced 3 months out")
+    print("\nSingle stocks (gapmodel stock):")
+    for s in STOCKS:
+        peers = ", ".join(p.symbol for p in s.peers if p.symbol != s.symbol)
+        print(f"  {s.symbol:<12} {s.name:<24} {s.theme}\n  {'':<12} peers: {peers}")
     print("\nScenarios (predict --scenario):")
     for s in SCENARIOS.values():
         legs = ", ".join(f"{sym} {move:+.1%}" for sym, move in s.moves.items())
@@ -145,6 +205,7 @@ def _forecast(
     args: argparse.Namespace,
     hourly: dict[str, pd.Series] | None,
     shocks: dict[str, float] | None = None,
+    symbols: list[str] | None = None,
 ) -> list[Forecast]:
     """Forecast every requested market, dropping the pre-open features if need be.
 
@@ -153,10 +214,11 @@ def _forecast(
     run is repeated on the daily features alone and the loss of sharpness is
     reported.
     """
+    wanted = symbols if symbols is not None else args.market
     try:
         return forecast_all(
             panel,
-            symbols=args.market,
+            symbols=wanted,
             c=args.regularisation,
             hourly=hourly,
             min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
@@ -168,7 +230,7 @@ def _forecast(
         log.warning("no pre-open futures bars: falling back to the daily model")
         return forecast_all(
             panel,
-            symbols=args.market,
+            symbols=wanted,
             c=args.regularisation,
             min_train=MIN_TRAIN,
             shocks=shocks,
@@ -210,6 +272,31 @@ def _print_caveats(forecasts: list[Forecast]) -> None:
             print(f"  {forecast.name}: {note}")
 
 
+def _cmd_stock(args: argparse.Namespace) -> None:
+    """Next-open probabilities for the modelled single stocks.
+
+    The peer series live outside the index panel, so the download is widened
+    rather than reusing whatever ``predict`` happens to need.
+    """
+    symbols = args.symbols or [s.symbol for s in STOCKS]
+    panel = _stock_panel(args)
+    forecasts = _forecast(panel, args, _hourly(args), dict(args.shock or []), symbols=symbols)
+    frame = to_frame(forecasts).sort_values("p_open_up", ascending=False)
+    print(frame.to_string(index=False))
+    _print_caveats(forecasts)
+    print("\nnot in the model, and larger than the overnight tape for one company:")
+    for note in BLIND_SPOTS:
+        print(f"  {note}")
+    if args.explain:
+        for f in forecasts:
+            print(f"\n{f.name} — top drivers (log-odds contribution):")
+            for feature, value in f.drivers.items():
+                print(f"  {feature:<28} {value:+.3f}")
+    if args.csv:
+        frame.to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
+
+
 def _cmd_export(args: argparse.Namespace) -> None:
     panel = _panel(args)
     hourly = _hourly(args)
@@ -247,12 +334,14 @@ def _since_timestamp(args: argparse.Namespace) -> pd.Timestamp | None:
 
 
 def _cmd_backtest(args: argparse.Namespace) -> None:
-    panel = _panel(args)
+    wanted = args.market or [m.symbol for m in MARKETS]
+    # A single name needs its peers loaded, and nothing else does.
+    panel = _stock_panel(args) if any(is_stock(s) for s in wanted) else _panel(args)
     hourly = _hourly(args)
     since = _since_timestamp(args)
     rows: list[dict] = []
     window_rows: list[dict] = []
-    for symbol in args.market or [m.symbol for m in MARKETS]:
+    for symbol in wanted:
         try:
             features, labels = build_features(symbol, panel, hourly=hourly)
             result = walk_forward(
@@ -550,9 +639,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     predict.set_defaults(func=_cmd_predict)
 
+    stock = sub.add_parser(
+        "stock",
+        help="probability that one company's next open is up",
+    )
+    stock.add_argument(
+        "symbols",
+        nargs="*",
+        type=_stock_symbol,
+        help=f"modelled stocks (default all): {', '.join(STOCKS_BY_SYMBOL)}",
+    )
+    stock.add_argument("--explain", action="store_true", help="show top drivers")
+    stock.add_argument("--csv", help="also write the table to this path")
+    stock.add_argument(
+        "--shock",
+        action="append",
+        type=_stock_shock,
+        metavar="SYMBOL=MOVE",
+        help="re-run under a hypothetical move, e.g. --shock '000660.KS=+3%%'",
+    )
+    stock.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
+    stock.set_defaults(func=_cmd_stock)
+
     backtest = sub.add_parser("backtest", help="walk-forward out-of-sample metrics")
     backtest.add_argument(
-        "--market", action="append", type=_market_symbol, help="restrict to a symbol"
+        "--market",
+        action="append",
+        type=_target_symbol,
+        help="restrict to a symbol; a modelled single stock is accepted too",
     )
     backtest.add_argument("--reliability", action="store_true", help="calibration table")
     backtest.add_argument(
