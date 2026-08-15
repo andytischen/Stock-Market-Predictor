@@ -110,6 +110,14 @@ def write_log(log_frame: pd.DataFrame, path: Path) -> None:
     ordered.to_csv(path, index=False, float_format="%.10g")
 
 
+def _gap_symbol(symbol: str) -> str:
+    """The symbol a market's opening gap is labelled on, or the market itself."""
+    try:
+        return target_market(symbol).gap_symbol
+    except (KeyError, ValueError):
+        return symbol
+
+
 def opening_bars(panel: dict[str, pd.DataFrame] | None, symbol: str) -> pd.DataFrame | None:
     """The bars a market's opening auction is read from, as the model reads them.
 
@@ -122,11 +130,7 @@ def opening_bars(panel: dict[str, pd.DataFrame] | None, symbol: str) -> pd.DataF
     """
     if not panel:
         return None
-    try:
-        gap_symbol = target_market(symbol).gap_symbol
-    except (KeyError, ValueError):
-        gap_symbol = symbol
-    bars = panel.get(gap_symbol)
+    bars = panel.get(_gap_symbol(symbol))
     if bars is None:
         return None
     bars = bars.dropna(subset=["Open", "Close"])
@@ -142,17 +146,18 @@ def _already_printed(panel: dict[str, pd.DataFrame] | None, symbol: str, session
     only ever answer no. The row that matters is exactly the one the filter
     drops: a session whose auction has printed but whose close has not, which
     pushes the forecast onto a morning that has already happened.
+
+    An opening print is what makes a session past, not a row in the file. This
+    source also publishes a bar for a session before its auction, so a row whose
+    ``Open`` is still missing is a morning yet to come and stays a real forecast.
     """
     if not panel:
         return False
-    try:
-        gap_symbol = target_market(symbol).gap_symbol
-    except (KeyError, ValueError):
-        gap_symbol = symbol
-    bars = panel.get(gap_symbol)
+    bars = panel.get(_gap_symbol(symbol))
     if bars is None or bars.empty:
         return False
-    return bool(pd.Timestamp(session) in bars.index)
+    printed = bars.dropna(subset=["Open"])
+    return bool(pd.Timestamp(session) in printed.index)
 
 
 def record(
@@ -293,13 +298,14 @@ class Skill:
     def decayed(self) -> bool:
         """Live record no better than always predicting the market's own drift.
 
-        A market that opened the same way on every settled session is never
-        flagged: its drift is a perfect 100% by construction, so any forecast
-        looks decayed against it, and with no variance to explain there is no
-        skill to have lost.
+        A market that opened the same way on every settled session is judged on
+        direction alone: its drift is a perfect 100% by construction, so no
+        forecast can clear it and there is no variance for a Brier score to
+        explain, but a model calling the wrong side of a one-way market is still
+        a model that has stopped reading it. The bar there is a coin flip.
         """
         if not np.isfinite(self.brier_skill):
-            return False
+            return self.hit_rate <= 0.5
         return self.brier_skill <= 0.0 or self.hit_rate < self.drift_rate
 
 
@@ -325,21 +331,34 @@ def _skill(symbol: str, rows: pd.DataFrame) -> Skill:
     )
 
 
+def resolved_minimum(window: int, min_settled: int | None = None) -> int:
+    """The minimum a window that short can actually hold.
+
+    A caller who narrows the window without naming a minimum wants a shorter
+    read, not an error about a default it never passed, so the default is capped
+    at the window. A minimum that *was* named and cannot fit is a contradiction
+    and is refused by ``skills``.
+    """
+    return min(MIN_SETTLED, window) if min_settled is None else min_settled
+
+
 def skills(
-    log_frame: pd.DataFrame, window: int = DEFAULT_WINDOW, min_settled: int = MIN_SETTLED
+    log_frame: pd.DataFrame, window: int = DEFAULT_WINDOW, min_settled: int | None = None
 ) -> list[Skill]:
     """Live record per market over its most recent ``window`` settled sessions.
 
     Markets with fewer than ``min_settled`` settled sessions are left out
-    entirely rather than reported with a number nobody should read.
+    entirely rather than reported with a number nobody should read; left unsaid,
+    the minimum is whatever the window can hold (see ``resolved_minimum``).
 
-    ``min_settled`` above ``window`` is refused rather than honoured: it asks
-    for more sessions than the window can hold, so every market would be
-    dropped however long its history, and the report would blame missing
-    history for a threshold that cannot be met.
+    An explicit ``min_settled`` above ``window`` is refused rather than honoured:
+    it asks for more sessions than the window can hold, so every market would be
+    dropped however long its history, and the report would blame missing history
+    for a threshold that cannot be met.
     """
     if window < 1:
         raise ValueError(f"window must be at least 1, got {window}")
+    min_settled = resolved_minimum(window, min_settled)
     if min_settled > window:
         raise ValueError(
             f"min_settled ({min_settled}) cannot exceed window ({window}): "
@@ -384,9 +403,10 @@ def render_text(
     log_frame: pd.DataFrame,
     measured: list[Skill],
     window: int,
-    min_settled: int = MIN_SETTLED,
+    min_settled: int | None = None,
 ) -> str:
     """The journal's state and the live record, as the CLI prints it."""
+    min_settled = resolved_minimum(window, min_settled)
     counts = log_frame["status"].value_counts()
     unscorable = sum(int(counts.get(status, 0)) for status in UNSCORABLE)
     lines = [
@@ -407,9 +427,13 @@ def render_text(
         lines.append("")
         lines.append("below their own drift — the model is not adding a read here:")
         for skill in losing:
+            # No Brier skill is quoted for a one-way market: there is no
+            # variance to explain, so the number would be nan.
+            skill_text = (
+                f", Brier skill {skill.brier_skill:+.3f}" if np.isfinite(skill.brier_skill) else ""
+            )
             lines.append(
                 f"  {skill.market} ({skill.symbol}): hit {skill.hit_rate:.0%} against a "
-                f"{skill.drift_rate:.0%} drift, Brier skill {skill.brier_skill:+.3f} "
-                f"over {skill.settled} sessions"
+                f"{skill.drift_rate:.0%} drift{skill_text} over {skill.settled} sessions"
             )
     return "\n".join(lines)

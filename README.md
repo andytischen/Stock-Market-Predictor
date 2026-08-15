@@ -642,14 +642,17 @@ drift leans — 70% in a market that opened up only 30% of the time, where the
 up-rate alone would be a bar the model clears by knowing nothing. A market that
 fails to is called out by name, and `--fail-on-decay` turns that into a non-zero
 exit so a scheduled run can raise it. A market that opened the same way on
-every session in the window is left alone: its drift is a perfect 100% by
-construction, and with no variance to explain there is no skill to have lost.
+every session in the window is judged on direction alone: its drift is a perfect
+100% by construction, so nothing can clear it and there is no variance for a
+Brier score to explain, but a model calling the wrong side of a one-way market
+every morning is still called out.
 
-Nothing is reported for a market with fewer than `--min-settled` (20) settled
-sessions: the sampling error on a hit rate over a handful of opens is wider than
-any decay worth alerting on. A minimum above `--window` is refused rather than
-honoured — it asks for more sessions than the window can hold, so every market
-would go unreported however long its history.
+Nothing is reported for a market with fewer than `--min-settled` (20, or the
+window if it is shorter) settled sessions: the sampling error on a hit rate over
+a handful of opens is wider than any decay worth alerting on. Naming a minimum
+above `--window` is refused rather than honoured — it asks for more sessions than
+the window can hold, so every market would go unreported however long its
+history.
 
 ## Trend score
 

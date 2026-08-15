@@ -24,6 +24,7 @@ from .journal import (
     decayed,
     read_log,
     record,
+    resolved_minimum,
     settle,
     skills,
     write_log,
@@ -797,12 +798,15 @@ def _cmd_journal(args: argparse.Namespace) -> None:
     """
     # Refused before the forecasts are fitted rather than after: the pair asks
     # for more settled sessions than the window can hold, so the run would
-    # spend its half hour and then report nothing for every market.
-    if args.min_settled > args.window:
+    # spend its half hour and then report nothing for every market. Only a
+    # minimum the caller actually named is a contradiction -- a shorter window
+    # on its own just narrows the default.
+    if args.min_settled is not None and args.min_settled > args.window:
         raise SystemExit(
             f"error: --min-settled {args.min_settled} exceeds --window {args.window}: "
             "no market could be reported"
         )
+    min_settled = resolved_minimum(args.window, args.min_settled)
     path = Path(args.log)
     journal = read_log(path)
     panel = _panel(args)
@@ -814,8 +818,8 @@ def _cmd_journal(args: argparse.Namespace) -> None:
     print(f"settled {filled} session(s) against realised opens, retired {retired} unscorable")
     write_log(journal, path)
     print(f"wrote {path}\n")
-    measured = skills(journal, window=args.window, min_settled=args.min_settled)
-    print(render_journal_text(journal, measured, args.window, args.min_settled))
+    measured = skills(journal, window=args.window, min_settled=min_settled)
+    print(render_journal_text(journal, measured, args.window, min_settled))
     if args.csv:
         journal.to_csv(args.csv, index=False)
         print(f"\nwrote {args.csv}")
@@ -1156,8 +1160,10 @@ def build_parser() -> argparse.ArgumentParser:
     journal.add_argument(
         "--min-settled",
         type=_positive_int,
-        default=MIN_SETTLED,
-        help=f"settled sessions before a market's record is reported (default {MIN_SETTLED})",
+        help=(
+            f"settled sessions before a market's record is reported "
+            f"(default {MIN_SETTLED}, or the window if it is shorter)"
+        ),
     )
     journal.add_argument(
         "--settle-only",
