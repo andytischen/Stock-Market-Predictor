@@ -28,6 +28,8 @@ from gapmodel.universe import NASDAQ, nasdaq_universe
 from tests.test_features import synthetic_bars
 
 TICKER = "AAPL"
+# A shortlisted name carrying no hand-written peer complex of its own.
+PEERLESS = "TSLA"
 
 
 @pytest.fixture
@@ -112,8 +114,8 @@ def test_a_shortlisted_name_is_a_single_company_without_a_peer_list():
     is not labelled a down open. What the universe does not get is peers: those
     are hand-written per complex, and only the curated names carry them.
     """
-    assert is_stock(TICKER)
-    assert peers_of(TICKER) == ()
+    assert is_stock(PEERLESS)
+    assert peers_of(PEERLESS) == ()
     assert peers_of("MU"), "a curated name keeps its overnight peers"
     # An index is not a company; a foreign listing is not on Wall Street's
     # clock; and a ticker that is merely well-formed is not modelled at all.
@@ -316,7 +318,7 @@ def test_a_name_in_both_commands_is_read_from_the_same_features():
     assert equities[:2] == ["AAPL", "MU"]
     assert {"005930.KS", "000660.KS", "SMH"} <= set(equities)
     # A name with no peers adds nothing, and nothing repeats.
-    assert _shortlist_equities(["AAPL"]) == ["AAPL"]
+    assert _shortlist_equities([PEERLESS]) == [PEERLESS]
     assert equities == list(dict.fromkeys(equities))
 
 
