@@ -84,14 +84,14 @@ STOCKS: tuple[Stock, ...] = (
 
 STOCKS_BY_SYMBOL = {s.symbol: s for s in STOCKS}
 
-# Said next to every single-name probability. None of it is a feature, and all
-# of it moves an individual open more than the overnight tape does.
 # The shortlist universe: single listings the repository models without a peer
 # list of their own. Held as a set because every feature build asks whether its
 # target is a company.
 SHORTLISTED = frozenset(nasdaq_universe())
 
 
+# Said next to every single-name probability. None of it is a feature, and all
+# of it moves an individual open more than the overnight tape does.
 BLIND_SPOTS: tuple[str, ...] = (
     "results and guidance, including anything released after the previous bell",
     "analyst actions, index changes and block trades",
