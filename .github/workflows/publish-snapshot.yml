@@ -1,0 +1,88 @@
+name: Publish forecast snapshot
+
+# Runs the gap model and publishes a JSON snapshot to GitHub Pages for the
+# mobile app to download. Prices come from Yahoo Finance at run time.
+
+on:
+  schedule:
+    # 06:30 UTC daily (a few minutes before Europe's cash open).
+    - cron: "30 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two publishes at once; let the newest win.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      pages_enabled: ${{ steps.pages.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e .
+
+      - name: Build snapshot
+        # Twelve days, not the default five: Shanghai and Hong Kong close for
+        # eight to ten calendar days at Chinese New Year and the October Golden
+        # Week, and this job has nobody to pass a flag when they do. Wide enough
+        # to publish through a scheduled closure, narrow enough that a feed that
+        # actually stopped still fails the publish rather than shipping a
+        # forward-filled snapshot to the app.
+        run: |
+          mkdir -p site
+          python -m gapmodel --max-stale-days 12 export --out site/snapshot.json
+          # A tiny index so the Pages root is not a 404.
+          cp site/snapshot.json site/latest.json
+
+      - name: Detect Pages configuration
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          status="$(curl -sS -o /tmp/pages.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/pages")"
+          if [ "$status" = "200" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          elif [ "$status" = "404" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "GitHub Pages is not enabled for $REPO; skipping deployment." >> "$GITHUB_STEP_SUMMARY"
+          else
+            cat /tmp/pages.json
+            exit 1
+          fi
+
+      - if: steps.pages.outputs.enabled == 'true'
+        uses: actions/configure-pages@v5
+
+      - if: steps.pages.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.pages_enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

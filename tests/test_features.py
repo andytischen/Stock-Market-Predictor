@@ -2,9 +2,25 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gapmodel.features import _lag_days, as_of, build_features, opening_gap
-from gapmodel.markets import INDICATORS, MARKETS, all_symbols, market
+from gapmodel.features import (
+    _column_name,
+    _lag_days,
+    as_of,
+    build_features,
+    feature_symbols,
+    opening_gap,
+)
+from gapmodel.markets import INDICATORS, MARKETS, SECTOR_SYMBOLS, all_symbols, market
 from gapmodel.model import walk_forward
+
+
+def test_the_dow_is_modelled_alongside_the_other_wall_street_indices():
+    dow = market("^DJI")
+    assert dow.region == "Americas"
+    # It opens and closes with the S&P, so the two read the same indicator lags.
+    spx = market("^GSPC")
+    assert (dow.open_utc, dow.close_utc) == (spx.open_utc, spx.close_utc)
+    assert "^DJI" in all_symbols()
 
 
 def synthetic_bars(n: int = 900, seed: int = 0) -> pd.DataFrame:
@@ -27,7 +43,21 @@ def synthetic_bars(n: int = 900, seed: int = 0) -> pd.DataFrame:
 def panel() -> dict[str, pd.DataFrame]:
     return {
         symbol: synthetic_bars(seed=seed)
-        for seed, symbol in enumerate(["^GSPC", "^N225", "^FTSE", "^VIX", "ES=F", "CL=F"])
+        for seed, symbol in enumerate(
+            [
+                "^GSPC",
+                "^N225",
+                "^FTSE",
+                "^GDAXI",
+                "^VIX",
+                "ES=F",
+                "CL=F",
+                "JPY=X",
+                "KRW=X",
+                "EXH8.DE",
+                "EXV3.DE",
+            ]
+        )
     }
 
 
@@ -86,6 +116,62 @@ def test_oil_carries_shock_features(panel):
     assert (features["ind_cl_f_vol_20"] > 0).all()
 
 
+def test_sectors_carry_a_weekly_return_but_no_shock(panel):
+    features, _ = build_features("^GDAXI", panel)
+    assert {"ind_exh8_de_return", "ind_exh8_de_return_5"} <= set(features.columns)
+    assert not any(col.startswith("ind_exh8_de_vol") for col in features.columns)
+    assert "ind_exh8_de_shock" not in features.columns
+    # Xetra closes after every tracked market opens, so it is always read late.
+    retail = next(i for i in INDICATORS if i.symbol == "EXH8.DE")
+    assert all(_lag_days(retail.close_utc, market(m.symbol)) == 1 for m in MARKETS)
+
+
+def test_sector_features_reach_european_markets_only(panel):
+    european, _ = build_features("^GDAXI", panel)
+    overseas, _ = build_features("^GSPC", panel)
+    sectors = {f"ind_{_column_name(s)}_return" for s in SECTOR_SYMBOLS}
+    assert sectors & set(european.columns)
+    assert not sectors & set(overseas.columns)
+
+
+@pytest.mark.parametrize("target", ["^GSPC", "^GDAXI"])
+def test_the_named_inputs_are_the_ones_the_model_reads(panel, target):
+    """What the staleness guard is entitled to refuse a run over.
+
+    Both directions matter: a series left out must make no difference to the
+    design matrix, and a series named must make one, or the guard is judging a
+    run on a feed it never reads.
+    """
+    named = feature_symbols(target)
+    whole, _ = build_features(target, panel)
+    restricted, _ = build_features(target, {s: b for s, b in panel.items() if s in named})
+    pd.testing.assert_frame_equal(whole, restricted)
+    for symbol in (set(panel) & named) - {target}:
+        without, _ = build_features(target, {s: b for s, b in panel.items() if s != symbol})
+        assert set(without.columns) < set(whole.columns), f"{symbol} is named but unread"
+
+
+def test_a_sector_tracker_is_an_input_in_europe_and_not_elsewhere():
+    """The asymmetry `build_features` applies, in the form a guard can check."""
+    assert "EXH8.DE" in feature_symbols("^GDAXI")
+    assert "EXH8.DE" not in feature_symbols("^GSPC")
+    # A single name is given Wall Street's clock and reads what a US index does.
+    assert "EXH8.DE" not in feature_symbols("MU")
+
+
+def test_an_opening_stand_in_is_an_input_to_its_own_index_only():
+    """`ISF.L` is read as the FTSE's opening auction, and by nothing else."""
+    assert market("^FTSE").gap_symbol == "ISF.L"
+    assert "ISF.L" in feature_symbols("^FTSE")
+    assert "ISF.L" not in feature_symbols("^GSPC")
+
+
+def test_a_peer_is_an_input_to_the_names_it_leads(panel):
+    """A memory name reads Samsung's session; an index does not."""
+    assert "005930.KS" in feature_symbols("MU")
+    assert "005930.KS" not in feature_symbols("^GSPC")
+
+
 def test_oil_shock_is_the_move_scaled_by_known_volatility(panel):
     close = panel["CL=F"]["Close"]
     returns = np.log(close / close.shift(1))
@@ -97,6 +183,43 @@ def test_oil_shock_is_the_move_scaled_by_known_volatility(panel):
     calendar = pd.date_range(shock.index.min(), shock.index.max())
     expected = shock.reindex(calendar).ffill().reindex(features.index - pd.Timedelta(days=1))
     assert features["ind_cl_f_shock"].to_numpy() == pytest.approx(expected.to_numpy())
+
+
+def test_fx_carries_shock_features(panel):
+    features, _ = build_features("^GSPC", panel)
+    # USD/JPY is in the panel; expect the same shock set as oil.
+    assert {
+        "ind_jpy_x_return",
+        "ind_jpy_x_return_5",
+        "ind_jpy_x_vol_20",
+        "ind_jpy_x_shock",
+    } <= set(features.columns)
+    assert (features["ind_jpy_x_vol_20"] > 0).all()
+
+
+def test_fx_shock_is_the_move_scaled_by_known_volatility(panel):
+    close = panel["JPY=X"]["Close"]
+    returns = np.log(close / close.shift(1))
+    vol = returns.rolling(20).std().shift(1)
+    features, _ = build_features("^GSPC", panel)
+    # Wall Street opens at 13:30 UTC, before JPY=X's 21:00 close -> yesterday's bar.
+    shock = returns / vol
+    calendar = pd.date_range(shock.index.min(), shock.index.max())
+    expected = shock.reindex(calendar).ffill().reindex(features.index - pd.Timedelta(days=1))
+    assert features["ind_jpy_x_shock"].to_numpy() == pytest.approx(expected.to_numpy())
+
+
+def test_krw_carries_shock_features(panel):
+    features, _ = build_features("^GSPC", panel)
+    # USD/KRW closes at 06:30 UTC (Seoul close), before the US open at 13:30 UTC,
+    # so it is a same-day indicator for European and US markets.
+    assert {
+        "ind_krw_x_return",
+        "ind_krw_x_return_5",
+        "ind_krw_x_vol_20",
+        "ind_krw_x_shock",
+    } <= set(features.columns)
+    assert (features["ind_krw_x_vol_20"] > 0).all()
 
 
 def test_forecast_row_is_unlabelled_and_last(panel):

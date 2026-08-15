@@ -2,39 +2,31 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import webbrowser
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
-import webbrowser
 
 import pandas as pd
 
 from .dashboard import build_dashboard, render_html
 from .markets import MARKETS, REGIONS
-from .model import MIN_TRAIN
+from .model import INTRADAY_MIN_TRAIN, MIN_TRAIN
 from .predict import forecast_all
+from .utctime import as_of, parse_utc_time
 
-# Keep warm-up aligned with the CLI's intraday mode.
-INTRADAY_MIN_TRAIN = 200
-
-
-def parse_utc_time(value: str | None) -> float | None:
-    """Return HH:MM UTC as hours from midnight."""
-    if value is None or value == "":
-        return None
-    try:
-        moment = pd.Timestamp(value)
-    except ValueError as exc:
-        raise ValueError(f"{value!r} is not a time of day (use HH:MM)") from exc
-    return moment.hour + moment.minute / 60
+# Bind addresses that mean "every interface": not reachable as a URL host.
+_WILDCARD_HOSTS = {"", "0.0.0.0", "::", "[::]"}
 
 
-def _as_of(hours: float | None) -> pd.Timestamp | None:
-    if hours is None:
-        return None
-    now = pd.Timestamp.utcnow().tz_localize(None)
-    return now.normalize() + pd.Timedelta(hours=hours)
+def browser_url(host: str, port: int) -> str:
+    """The address a local browser can actually open for this bind address."""
+    if host in _WILDCARD_HOSTS:
+        host = "127.0.0.1"
+    elif ":" in host:
+        host = f"[{host}]"
+    return f"http://{host}:{port}/"
 
 
 def dashboard_document(
@@ -52,7 +44,7 @@ def dashboard_document(
         hourly=hourly,
         min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
     )
-    board = build_dashboard(panel, forecasts, as_of=_as_of(hour), region=region)
+    board = build_dashboard(panel, forecasts, as_of=as_of(hour), region=region)
     return render_html(board)
 
 
@@ -60,10 +52,11 @@ def _index_html(default_region: str, default_at: float | None) -> str:
     time_value = ""
     if default_at is not None:
         h = int(default_at)
-        m = int(round((default_at - h) * 60))
+        m = round((default_at - h) * 60)
         time_value = f"{h:02d}:{m:02d}"
     options = "".join(
-        f'<option value="{r}"{" selected" if r == default_region else ""}>{r}</option>'
+        f'<option value="{escape(r, quote=True)}"'
+        f"{' selected' if r == default_region else ''}>{escape(r)}</option>"
         for r in REGIONS
     )
     query = urlencode({"region": default_region, **({"at": time_value} if time_value else {})})
@@ -73,7 +66,9 @@ def _index_html(default_region: str, default_at: float | None) -> str:
 <title>Gapmodel dashboard</title>
 <style>
  body {{ font: 14px/1.5 system-ui, sans-serif; margin: 1rem; color: #222; }}
- .controls {{ display: flex; gap: .75rem; align-items: end; flex-wrap: wrap; margin-bottom: .75rem; }}
+ .controls {{
+   display: flex; gap: .75rem; align-items: end; flex-wrap: wrap; margin-bottom: .75rem;
+ }}
  label {{ display: grid; gap: .25rem; }}
  iframe {{ width: 100%; height: 85vh; border: 1px solid #ddd; }}
 </style>
@@ -100,9 +95,11 @@ def _handler(
     regularisation: float,
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:
             parsed = urlparse(self.path)
-            query = parse_qs(parsed.query)
+            # Blank values are kept: an emptied time field means "now", which is
+            # not the same as never having asked for a time at all.
+            query = parse_qs(parsed.query, keep_blank_values=True)
 
             if parsed.path == "/":
                 self._reply(200, _index_html(default_region, default_at))
@@ -111,23 +108,30 @@ def _handler(
                 self._reply(404, "<h1>Not found</h1>")
                 return
 
-            region = query.get("region", [default_region])[0]
+            region = query.get("region", [""])[0] or default_region
             if region not in REGIONS:
-                self._reply(400, f"<h1>Unknown region: {region}</h1>")
+                self._reply(400, f"<h1>Unknown region: {escape(region)}</h1>")
                 return
 
-            at_raw = query.get("at", [None])[0]
-            try:
-                at = parse_utc_time(at_raw)
-            except ValueError as exc:
-                self._reply(400, f"<h1>{exc}</h1>")
-                return
-            at = default_at if at is None else at
+            # An "at" that was submitted empty means "now"; only an absent one
+            # falls back to the time the server was started with.
+            if "at" not in query:
+                at = default_at
+            else:
+                at_raw = query["at"][0]
+                if at_raw.strip() == "":
+                    at = None
+                else:
+                    try:
+                        at = parse_utc_time(at_raw)
+                    except ValueError as exc:
+                        self._reply(400, f"<h1>{escape(str(exc))}</h1>")
+                        return
 
             try:
                 html = dashboard_document(panel, hourly, region, at, regularisation)
             except (RuntimeError, ValueError, KeyError, OSError) as exc:
-                self._reply(500, f"<h1>error: {exc}</h1>")
+                self._reply(500, f"<h1>error: {escape(str(exc))}</h1>")
                 return
             self._reply(200, html)
 
@@ -157,13 +161,14 @@ def serve_dashboard(
     launch_browser: bool,
 ) -> None:
     server = ThreadingHTTPServer((host, port), _handler(panel, hourly, region, at, regularisation))
-    address = f"http://{host}:{server.server_port}/"
+    address = browser_url(host, server.server_port)
     print(f"serving dashboard at {address} (Ctrl+C to stop)")
     if launch_browser:
         webbrowser.open(address)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print(f"\nstopped at {datetime.utcnow():%Y-%m-%d %H:%M:%S} UTC")
+        stopped = pd.Timestamp.now("UTC").tz_localize(None)
+        print(f"\nstopped at {stopped:%Y-%m-%d %H:%M:%S} UTC")
     finally:
         server.server_close()

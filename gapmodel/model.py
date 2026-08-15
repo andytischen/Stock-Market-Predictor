@@ -12,6 +12,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 MIN_TRAIN = 500
+# The hourly window is short, so the intraday variant needs a smaller warm-up.
+INTRADAY_MIN_TRAIN = 200
 REFIT_EVERY = 21
 
 
@@ -22,9 +24,7 @@ def make_pipeline(c: float = 0.1) -> Pipeline:
             ("scale", StandardScaler()),
             (
                 "clf",
-                LogisticRegression(
-                    C=c, penalty="l2", solver="lbfgs", max_iter=2000, class_weight=None
-                ),
+                LogisticRegression(C=c, solver="lbfgs", max_iter=2000, class_weight=None),
             ),
         ]
     )
