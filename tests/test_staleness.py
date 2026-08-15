@@ -3,8 +3,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from gapmodel.cli import _forecast_inputs, _shared_inputs, build_parser
-from gapmodel.markets import all_symbols
+from gapmodel import cli
+from gapmodel.cli import _forecast_inputs, _shared_inputs, build_parser, main
 from gapmodel.staleness import (
     STALE_DAYS,
     StaleInputs,
@@ -180,6 +180,31 @@ def test_an_empty_series_is_neither_counted_nor_flagged():
     guard({"GONE": pd.DataFrame()}, SESSION)
 
 
+def test_a_series_that_never_arrived_is_named_rather_than_hidden(caplog, capsys):
+    """A count of the series that arrived reads as reassurance about the rest.
+
+    It cannot be given a lag — it has no last bar to be behind one — so it is
+    named separately instead, and on the log, where `export`'s JSON is not.
+    """
+    with caplog.at_level("WARNING"):
+        guard({"AAPL": bars(SESSION), "GONE": pd.DataFrame()}, SESSION)
+    assert "GONE" in caplog.text and "no bars at all" in caplog.text
+    assert capsys.readouterr().out == ""
+
+
+def test_the_series_that_never_arrived_are_named_in_a_fixed_order(caplog):
+    """Only eight are named, so which eight cannot depend on the download order.
+
+    The stale list is truncated worst-first, which the absent list has no
+    equivalent of — none of them has a lag — so it is sorted instead, rather than
+    naming whichever eight the panel happens to hold first.
+    """
+    absent = {symbol: pd.DataFrame() for symbol in "JIHGFEDCBA"}
+    with caplog.at_level("WARNING"):
+        guard({"AAPL": bars(SESSION), **absent}, SESSION)
+    assert "A, B, C, D, E, F, G, H and 2 more" in caplog.text
+
+
 def test_lag_is_measured_in_whole_days_from_any_time_of_day():
     """An intraday timestamp is a bar for that date, not a fraction of a lag."""
     intraday = {"AAPL": bars(SESSION - pd.Timedelta(days=9))}
@@ -209,21 +234,22 @@ def test_every_forecasting_command_is_guarded(command):
     assert args.allow_stale is False
 
 
-@pytest.mark.parametrize("command", ["dashboard", "sectors"])
-def test_a_board_refuses_a_dead_cache_like_the_forecast_it_prints(monkeypatch, command):
-    """Both fit a model and print a probability for the next open.
+@pytest.mark.parametrize(
+    "command", ["predict", "stock", "shortlist", "export", "dashboard", "sectors"]
+)
+def test_no_command_offers_a_probability_from_a_dead_panel(command, monkeypatch, capsys):
+    """Whichever command a reader reaches for, the same cache gives the same answer.
 
-    Left unguarded they answered from a cache the neighbouring commands refuse,
-    which reads to anyone comparing the two as a cache that is fine.
+    ``dashboard`` and ``sectors`` print a probability for the next open exactly as
+    ``predict`` does, so one refusing while another prints from the same dead feed
+    would tell a reader that the data is fine as long as they ask differently.
     """
-    from gapmodel import cli
-
-    dead = {symbol: bars(today() - pd.Timedelta(days=30)) for symbol in all_symbols()}
-    monkeypatch.setattr(cli, "_panel", lambda args: dead)
-    monkeypatch.setattr(cli, "forecast_all", lambda *a, **k: pytest.fail("fitted on a dead panel"))
-    args = build_parser().parse_args([command])
-    with pytest.raises(StaleInputs):
-        args.func(args)
+    monkeypatch.setattr(cli, "load_panel", lambda **kwargs: panel(**{"^GSPC": 40, "CL=F": 40}))
+    with pytest.raises(SystemExit) as raised:
+        main([command])
+    assert "no bar within 5 days" in str(raised.value)
+    # Refused before anything was fitted, so there is no half-report on stdout.
+    assert capsys.readouterr().out == ""
 
 
 def test_the_tolerance_must_be_a_positive_number_of_days():

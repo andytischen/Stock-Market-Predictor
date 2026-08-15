@@ -104,6 +104,20 @@ def test_scorecard_rejects_an_empty_window_before_fitting_anything(capsys):
     assert "must be greater than 0" in capsys.readouterr().err
 
 
+def test_journal_and_scorecard_are_separate_commands():
+    # Both score the model's calls, but scorecard reads the walk-forward's own
+    # predictions and journal reads what was written down before each open.
+    parser = build_parser()
+    live = parser.parse_args(
+        ["journal", "--market", "^FTSE", "--window", "90", "--min-settled", "5", "--settle-only"]
+    )
+    assert live.func is not parser.parse_args(["scorecard"]).func
+    assert live.market == ["^FTSE"]
+    assert (live.window, live.min_settled) == (90, 5)
+    assert live.settle_only and not live.fail_on_decay
+    assert live.log.endswith("forecast-log.csv")
+
+
 def test_shock_parsing_accepts_percentages_and_fractions():
     from gapmodel.predict import parse_shock
 
@@ -355,14 +369,14 @@ def test_a_total_hourly_outage_still_yields_a_daily_forecast(monkeypatch, tmp_pa
     assert cli._hourly(args) is None
 
 
-def _stub_forecast(name: str, caveats: tuple[str, ...]):
+def _stub_forecast(name: str, caveats: tuple[str, ...], session: str = "2026-09-04"):
     from gapmodel.predict import Forecast
 
     return Forecast(
         symbol="^GSPC",
         name=name,
         region="Americas",
-        session=pd.Timestamp("2026-09-04"),
+        session=pd.Timestamp(session),
         probability_up=0.6,
         backtest={},
         contributions=pd.Series(dtype=float),
@@ -384,3 +398,29 @@ def test_an_uneventful_run_prints_no_caveat_section(capsys):
 
     cli._print_caveats([_stub_forecast("S&P 500", ())])
     assert capsys.readouterr().out == ""
+
+
+def test_a_session_past_a_calendar_is_told_the_calendar_ran_out(capsys):
+    """Only the FOMC table reaches 2027, so the rest must say they were unread."""
+    from gapmodel import cli
+
+    cli._print_caveats([_stub_forecast("S&P 500", (), session="2027-09-15")])
+    out = capsys.readouterr().out
+    assert "not checked for 2027-09-15" in out
+    assert "US CPI: table ends 2026-12-31" in out
+    assert "FOMC decision" not in out
+
+
+def test_a_run_spanning_the_year_end_warns_about_the_session_that_needs_it(capsys):
+    """Tokyo's next session can be past the tables while New York's is not."""
+    from gapmodel import cli
+
+    cli._print_caveats(
+        [
+            _stub_forecast("S&P 500", (), session="2026-12-31"),
+            _stub_forecast("Nikkei 225", (), session="2027-01-04"),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "not checked for 2027-01-04" in out
+    assert "2026-12-31 —" not in out

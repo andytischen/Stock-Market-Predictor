@@ -101,10 +101,27 @@ second Friday in May and a Thursday before Independence Day in July. Times are
 converted from New York's clock for the date in question, so a 14:00 ET statement
 reads 18:00 UTC in September and 19:00 UTC in December.
 
-The cost of not guessing is that the tables end: **past `CALENDAR_END` the
-absence of a warning means nothing was checked, not that nothing is scheduled.**
-Refreshing them is a yearly job, and each `Schedule` carries the page it came
-from.
+The cost of not guessing is that the tables end, and they do not end together:
+the Committee announces its next year each September, so decisions are known
+through 2027, while the BLS and BEA pages carry only the coming twelve months and
+stop at the end of 2026. Each `Schedule` records how far it is maintained in
+`covers_until`, and **past that point the absence of a warning means nothing was
+checked, not that nothing is scheduled** — so `predict` names the series that
+have run out rather than letting the silence pass for a quiet day:
+
+```
+not checked for 2027-09-15 — these calendars end earlier:
+  US payrolls: table ends 2026-12-31 (bls.gov/schedule/news_release/empsit.htm)
+  US CPI: table ends 2026-12-31 (bls.gov/schedule/news_release/cpi.htm)
+  US PCE inflation: table ends 2026-12-31 (bea.gov/news/schedule)
+```
+
+`export` carries the same thing per market as `unchecked_releases`, so a snapshot
+consumer reading an empty `caveats` is not left to guess which of the two it
+means.
+
+Refreshing them is a yearly job: extend `dates` from the page each `Schedule`
+names and move its `covers_until` to match.
 
 ## Install
 
@@ -128,6 +145,8 @@ python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian 
 python -m gapmodel screen             # US stocks: liquid, unusually active, moving
 python -m gapmodel shortlist --top 10 # rank the US universe by demonstrated edge
 python -m gapmodel shortlist --gainers 10  # only the ten biggest movers of the latest session
+python -m gapmodel journal            # write today's calls down, and score the settled ones
+python -m gapmodel social-arb         # calls that disagree with the markets they move with
 ```
 
 `predict` prints one row per market with the probability and the out-of-sample
@@ -251,8 +270,9 @@ the daily model with a warning instead of returning nothing.
 
 ### Single stocks
 
-`stock` forecasts one company's opening auction with the same machinery, and the
-memory and storage complex is what it is pointed at first:
+`stock` forecasts one company's opening auction with the same machinery, pointed
+at three complexes: memory and storage (MU, WDC, STX), AI accelerators (NVDA,
+AMD, AVGO) and consumer hardware (AAPL):
 
 ```bash
 python -m gapmodel stock                 # every modelled stock
@@ -270,11 +290,22 @@ traded the overnight memory story hours before New York opens, and their bars ar
 other storage names) close with Wall Street and are read a session late, as every
 other American bar is.
 
+Each complex carries its own peer list: the accelerator names read TSMC, SK
+Hynix, Samsung, Tokyo Electron and Advantest, and Apple reads its assemblers and
+component makers — Hon Hai, Largan, TSMC, Murata and LG Innotek — all of which
+price the same handset and datacentre demand before the New York auction. Both
+complexes carry US legs too (NVDA, AMD, AVGO and SMH; QCOM and SWKS for Apple),
+read a session late like every other American bar.
+
 | Stock | AUC | Accuracy | Brier skill | Base rate |
 | --- | --- | --- | --- | --- |
 | Micron (MU) | 0.69 | 0.65 | 0.10 | 0.57 |
 | Western Digital (WDC) | 0.66 | 0.62 | 0.07 | 0.53 |
 | Seagate (STX) | 0.65 | 0.62 | 0.06 | 0.54 |
+| Nvidia (NVDA) | 0.67 | 0.64 | 0.08 | 0.57 |
+| AMD | 0.67 | 0.64 | 0.06 | 0.57 |
+| Broadcom (AVGO) | 0.64 | 0.62 | 0.05 | 0.56 |
+| Apple (AAPL) | 0.64 | 0.61 | 0.05 | 0.55 |
 
 Better than the S&P's daily model, and for a plain reason: a single stock's gap
 is more autocorrelated and more exposed to a sector move than an index average
@@ -338,12 +369,10 @@ repeat the previous close), which is part of why it scores lowest.
 A feed can also simply stop. Features are aligned by forward-filling, so a
 series that stopped updating is read as one that did not move — right for a
 holiday, wrong for a dead feed, and indistinguishable from inside the model.
-Every command that forecasts the next open — `predict`, `stock`, `shortlist`,
-`export`, `dashboard` and `sectors` — therefore refuses to run when an input has
-no bar within `--max-stale-days` (5) of today, naming the worst offenders and
-their lags. (`scorecard` and `backtest` are not among them: their probabilities
-are historical, dated by the session each row scores, and a cache that stops
-early shortens the record rather than misdating it.)
+Every command that offers a probability for the next open — `predict`, `stock`,
+`shortlist`, `export`, `dashboard` and `sectors` — therefore refuses to run when
+an input has no bar within `--max-stale-days` (5) of today, naming the worst
+offenders and their lags:
 
 ```
 error: 40 of 61 input series have no bar within 5 days of 2026-08-15:
@@ -353,6 +382,11 @@ ASML.AS (11d), EXH8.DE (11d), ISF.L (11d), ^FTSE (11d) and 36 more.
 They refuse rather than dropping the dead columns: the model was fitted over a
 history in which those columns were live, so dropping them at inference time
 would answer a different question from the one the printed metrics describe.
+
+`scorecard` and `backtest` are deliberately outside the guard: their
+probabilities are historical and dated by the session each row scores, so a
+cache that stops early shortens the record rather than misdating it.
+
 `--refresh` re-downloads, `--max-stale-days N` widens the tolerance, and
 `--allow-stale` forecasts anyway, warning on stderr instead of failing — so a
 snapshot piped from `export` stays valid JSON either way.
@@ -381,6 +415,13 @@ last bar, so a month-old cache has nothing lagging *within* it and the named
 list comes back empty. `shortlist` therefore says how far the forecast session
 itself sits behind today, so the reader knows the probabilities describe the
 market as it stood then.
+
+A series that arrived with no bars at all has no lag to measure, so it is named
+on stderr separately rather than counted among the series the refusal judges: a
+download that returned nothing is a different failure with a different remedy.
+
+`backtest` is not guarded, and deliberately: it scores history, where the bars
+in question are the data rather than forward-filled stand-ins for missing data.
 
 The tolerance is measured in calendar days against today, which cannot tell a
 dead feed from a closed exchange: a week-long national holiday (Golden Week,
@@ -566,6 +607,62 @@ listings, which means the backtest metrics carry survivorship bias — the names
 that were delisted or acquired are absent, so a genuinely point-in-time universe
 would read worse.
 
+## Forecast journal and live skill
+
+`scorecard` above measures the walk-forward record over its last sessions, which
+is still the model scoring itself on history it was handed whole. `journal`
+measures it against sessions that had not happened when the probability was
+written down — the number a reader of a live forecast can actually act on.
+
+```bash
+python -m gapmodel journal                       # record today, settle what printed, score
+python -m gapmodel journal --settle-only         # score the journal without forecasting
+python -m gapmodel journal --window 120 --fail-on-decay
+```
+
+Each run appends its forecasts to `docs/forecast-log.csv`, one row per market
+and session, then fills in the realised open for the rows whose auction has
+since printed. A session already in the journal is never re-forecast and never
+overwritten, so a probability cannot be improved after the fact and a run
+repeated twice in a morning does not get two attempts at the same open.
+
+Scoring follows the label the model is fitted on — an opening print above the
+previous close, read from the same symbol the model labels on, so the markets
+whose index open Yahoo repeats are settled on their tracker (`ISF.L` for the
+FTSE, `STW.AX` for the ASX) rather than graded on a price the project already
+rejects. Sessions that cannot carry a label are retired rather than counted: an
+open that merely repeats the previous close (`stale`) and a session the market
+never held (`no-session`, a holiday the journal did not know about).
+
+A third status covers the row that looks like a forecast but is not one. The
+session a model forecasts is the one after the last session it has *complete*
+features for, so a market still missing an indicator for yesterday is forecast
+for an auction that has already printed. Nothing is leaked — every feature is
+lagged either way — but it is not a call anybody could have acted on, so it is
+journalled as `late` and left out of the live record.
+
+```
+forecast journal: 320 rows  settled 288  pending 16  unscorable 16
+
+live record over the last 60 settled sessions per market:
+ market symbol  settled  hit_rate  base_rate  brier  brier_skill  mean_p       from         to
+S&P 500  ^GSPC       30      0.50       0.60 0.2666      -0.1109  0.5637 2026-07-06 2026-08-14
+
+below their own drift — the model is not adding a read here:
+  S&P 500 (^GSPC): hit 50% against a 60% drift, Brier skill -0.111 over 30 sessions
+```
+
+Skill is measured against each market's own drift over the same sessions, not
+against a coin flip: predicting "up" every morning in a market that opens up 60%
+of the time is drift, not a read, and a Brier score has to clear that constant
+forecast before it says anything. The accuracy to beat is whichever side the
+drift leans — 70% in a market that opened up only 30% of the time, where the
+up-rate alone would be a bar the model clears by knowing nothing. A market that
+fails to is called out by name, and `--fail-on-decay` turns that into a non-zero
+exit so a scheduled run can raise it. Nothing is reported for a market
+with fewer than 20 settled sessions: the sampling error on a hit rate over a
+handful of opens is wider than any decay worth alerting on.
+
 ## Trend score
 
 `score` ranks an arbitrary list of tickers by a single price-derived number: the
@@ -714,6 +811,39 @@ same screen after the close; `--asof` screens a completed session. Unlike the
 model panel, the screen is *about* the latest session, so a cached series whose
 last bar predates the session being screened is re-downloaded even without
 `--refresh` — yesterday's cache would otherwise silently re-screen yesterday.
+
+## Social arbitrage
+
+`social-arb` asks a different question from the rest of the commands: not how
+confident the model is, but where its confidence is unsupported by the markets
+this one normally moves with. Every index's probability is compared with the
+weighted average of what its correlated peers imply, and the table is ranked by
+the size of the gap.
+
+```bash
+python -m gapmodel social-arb                       # ranked by |divergence|
+python -m gapmodel social-arb --window 120 --csv out.csv
+```
+
+```
+     market   symbol   region  p_model  p_consensus  divergence       top_peer  top_peer_corr  top_peer_prob
+ Nikkei 225    ^N225     Asia   0.8123       0.5604      0.2519          KOSPI          0.712         0.5901
+        DAX   ^GDAXI   Europe   0.4102       0.5688     -0.1586  EURO STOXX 50          0.884         0.5713
+```
+
+The weight a peer carries is the absolute strength of its historical return
+correlation, measured over the last `--window` sessions of the calendar the
+markets share. The sign is kept separate from the weight: a peer that moves *against*
+this market has its probability mirrored (`1 - p`) before it is averaged, so an
+inverse peer calling itself up is read as this market being called down, and
+`top_peer_corr` prints negative to say so. A market with no peer clearing the
+correlation floor has nothing to diverge from and is left out of the table, with
+the dropped names given in a warning.
+
+A divergence is a disagreement, not a verdict: the peers have no more claim to be
+right than the fitted model does. What it is useful for is finding the calls
+worth a second look — a market the model likes while everything it co-moves with
+is being called down is either the model's best idea or its worst.
 
 ## Project tracker
 

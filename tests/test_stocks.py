@@ -124,6 +124,17 @@ def test_a_missing_peer_costs_the_feature_and_not_the_run(panel):
     assert features.notna().all().all()
 
 
+def test_every_complex_reads_asian_peers_on_the_session_it_forecasts():
+    """A peer list only earns its place if some of it closes before the bell."""
+    for symbol in STOCKS_BY_SYMBOL:
+        target = target_market(symbol)
+        peers = peers_of(symbol)
+        assert symbol not in {p.symbol for p in peers}
+        same_session = [p for p in peers if _lag_days(p.close_utc, target) == 0]
+        assert same_session, f"{symbol}: no peer closes before its open"
+        assert all(p.close_utc < target.open_utc for p in same_session)
+
+
 def test_the_download_list_covers_every_peer_exactly_once():
     symbols = stock_symbols()
     assert len(symbols) == len(set(symbols))

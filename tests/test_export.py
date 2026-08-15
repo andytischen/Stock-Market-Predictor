@@ -11,7 +11,7 @@ from gapmodel.markets import MARKETS_BY_SYMBOL
 from gapmodel.predict import Forecast
 
 
-def forecast(symbol, probability, shocked=None):
+def forecast(symbol, probability, shocked=None, session="2026-08-04"):
     meta = MARKETS_BY_SYMBOL[symbol]
     contributions = pd.Series(
         {"ind_cl_f_shock": 0.21, "mkt_gspc_return": -0.08, "ind_vix_level": 0.05}
@@ -20,7 +20,7 @@ def forecast(symbol, probability, shocked=None):
         symbol=symbol,
         name=meta.name,
         region=meta.region,
-        session=pd.Timestamp("2026-08-04"),
+        session=pd.Timestamp(session),
         probability_up=probability,
         backtest={"auc": 0.68, "brier_skill": 0.12, "accuracy": 0.66, "base_rate": 0.55},
         contributions=contributions,
@@ -90,6 +90,19 @@ def test_summary_prefers_the_headline_indices():
 def test_summary_falls_back_to_top_probabilities():
     line = summarise([forecast("^N225", 0.8), forecast("^HSI", 0.3)], [])
     assert line.startswith("Nikkei 225 80%")
+
+
+def test_a_session_past_a_calendar_says_so_in_the_snapshot():
+    """An empty ``caveats`` must not read as "nothing scheduled" to the app."""
+    covered = build_snapshot([forecast("^GSPC", 0.54)], [])["markets"][0]
+    assert "unchecked_releases" not in covered
+
+    entry = build_snapshot([forecast("^GSPC", 0.54, session="2027-09-15")], [])["markets"][0]
+    assert entry["unchecked_releases"] == [
+        {"series": "US payrolls", "table_ends": "2026-12-31"},
+        {"series": "US CPI", "table_ends": "2026-12-31"},
+        {"series": "US PCE inflation", "table_ends": "2026-12-31"},
+    ]
 
 
 def test_snapshot_serialises_to_valid_json():

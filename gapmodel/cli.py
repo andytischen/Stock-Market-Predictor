@@ -14,9 +14,24 @@ from .asia import ACTIVITY_WINDOW, REGRESSION_WINDOW, build_asia_dashboard
 from .asia_report import render_asia_html, render_asia_text
 from .dashboard import build_dashboard, oil_readings, render_html, render_text
 from .data import DEFAULT_CACHE, load_panel
+from .events import SCHEDULES, unmaintained_on
 from .export import build_snapshot, dumps
 from .features import build_features, feature_symbols
 from .intraday import load_hourly_panel
+from .journal import (
+    DEFAULT_LOG,
+    MIN_SETTLED,
+    decayed,
+    read_log,
+    record,
+    settle,
+    skills,
+    write_log,
+)
+from .journal import DEFAULT_WINDOW as JOURNAL_WINDOW
+from .journal import (
+    render_text as render_journal_text,
+)
 from .markets import (
     BILL_YIELD,
     CURVE_FRONT,
@@ -59,6 +74,8 @@ from .shortlist import discarded as discarded_shortlist
 from .shortlist import rank as rank_shortlist
 from .shortlist import render_text as render_shortlist_text
 from .shortlist import to_frame as shortlist_to_frame
+from .social_arb import CORRELATION_WINDOW, build_social_arb
+from .social_arb import to_frame as social_arb_to_frame
 from .staleness import STALE_DAYS, fresh_targets, guard, today
 from .stocks import (
     BLIND_SPOTS,
@@ -395,12 +412,34 @@ def _cmd_predict(args: argparse.Namespace) -> None:
 def _print_caveats(forecasts: list[Forecast]) -> None:
     """Warn where a scheduled release makes a probability less than it looks."""
     flagged = [f for f in forecasts if f.caveats]
-    if not flagged:
-        return
-    print("\nscheduled releases this model cannot see:")
-    for forecast in flagged:
-        for note in forecast.caveats:
-            print(f"  {forecast.name}: {note}")
+    if flagged:
+        print("\nscheduled releases this model cannot see:")
+        for forecast in flagged:
+            for note in forecast.caveats:
+                print(f"  {forecast.name}: {note}")
+    _print_unmaintained(forecasts)
+
+
+def _print_unmaintained(forecasts: list[Forecast]) -> None:
+    """Say when a quiet session is merely an unread calendar.
+
+    The release tables are copied from the agencies' pages and run out at
+    different dates. Once a session is past one of them, the lack of a warning
+    for that series carries no information, and saying so is the only way the
+    silence stays honest.
+
+    One run can forecast more than one date — Tokyo's next session is the
+    following day while New York is still on today — so each date is checked on
+    its own rather than through the earliest of them.
+    """
+    for session in sorted({f.session for f in forecasts}):
+        stale = unmaintained_on(session)
+        if not stale:
+            continue
+        print(f"\nnot checked for {session.date()} — these calendars end earlier:")
+        for schedule in SCHEDULES:
+            if schedule.name in stale:
+                print(f"  {schedule.name}: table ends {schedule.covers_until} ({schedule.source})")
 
 
 def _cmd_stock(args: argparse.Namespace) -> None:
@@ -545,6 +584,18 @@ def _cmd_asia(args: argparse.Namespace) -> None:
         print(f"wrote {args.out}")
     if args.out is None or args.text:
         print(render_asia_text(board))
+
+
+def _cmd_social_arb(args: argparse.Namespace) -> None:
+    panel = _panel(args)
+    symbols = _fresh_enough(panel, args, [m.symbol for m in MARKETS])
+    forecasts = forecast_all(panel, symbols=symbols, c=args.regularisation, min_train=MIN_TRAIN)
+    signals = build_social_arb(panel, forecasts, window=args.window)
+    frame = social_arb_to_frame(signals)
+    print(frame.to_string(index=False))
+    if args.csv:
+        frame.to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
 
 
 def _cmd_dashboard(args: argparse.Namespace) -> None:
@@ -756,6 +807,33 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
         frame = shortlist_to_frame(rank_shortlist(picks) + discarded_shortlist(picks))
         frame.to_csv(args.csv, index=False)
         print(f"\nwrote {args.csv}")
+
+
+def _cmd_journal(args: argparse.Namespace) -> None:
+    """Journal today's forecasts, settle the ones that have printed, and score them.
+
+    Recording and settling are one command on purpose: the forecast has to be
+    written down before the auction it describes, and the only run that is
+    certain to happen every morning is the one that makes the forecast.
+    """
+    path = Path(args.log)
+    journal = read_log(path)
+    panel = _panel(args)
+    if not args.settle_only:
+        forecasts = _forecast(panel, args, _hourly(args))
+        journal, added = record(journal, forecasts, panel)
+        print(f"recorded {len(added)} of {len(forecasts)} forecasts")
+    journal, filled, retired = settle(journal, panel)
+    print(f"settled {filled} session(s) against realised opens, retired {retired} unscorable")
+    write_log(journal, path)
+    print(f"wrote {path}\n")
+    measured = skills(journal, window=args.window, min_settled=args.min_settled)
+    print(render_journal_text(journal, measured, args.window, args.min_settled))
+    if args.csv:
+        journal.to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
+    if args.fail_on_decay and decayed(measured):
+        raise SystemExit(1)
 
 
 def _cmd_fetch(args: argparse.Namespace) -> None:
@@ -1071,6 +1149,59 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sectors.add_argument("--market", type=_market_symbol, default="^STOXX50E")
     sectors.set_defaults(func=_cmd_sectors)
+
+    journal = sub.add_parser(
+        "journal",
+        help="journal today's forecasts and score the ones whose opens have printed",
+    )
+    journal.add_argument(
+        "--market", action="append", type=_market_symbol, help="restrict to a symbol"
+    )
+    journal.add_argument(
+        "--log", default=str(DEFAULT_LOG), help=f"journal CSV (default {DEFAULT_LOG})"
+    )
+    journal.add_argument(
+        "--window",
+        type=_positive_int,
+        default=JOURNAL_WINDOW,
+        help=f"settled sessions per market to score (default {JOURNAL_WINDOW})",
+    )
+    journal.add_argument(
+        "--min-settled",
+        type=_positive_int,
+        default=MIN_SETTLED,
+        help=f"settled sessions before a market's record is reported (default {MIN_SETTLED})",
+    )
+    journal.add_argument(
+        "--settle-only",
+        action="store_true",
+        help="score what is already journalled without forecasting today",
+    )
+    journal.add_argument(
+        "--fail-on-decay",
+        action="store_true",
+        help="exit non-zero when a market's live record is below its own drift",
+    )
+    journal.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
+    journal.add_argument("--csv", help="also write a copy of the journal to this path")
+    journal.set_defaults(func=_cmd_journal)
+
+    social_arb = sub.add_parser(
+        "social-arb",
+        help="markets where the model probability diverges from what correlated peers imply",
+    )
+    social_arb.add_argument(
+        "--window",
+        type=_positive_int,
+        default=CORRELATION_WINDOW,
+        help="sessions used for the peer correlation matrix (default: %(default)s)",
+    )
+    social_arb.add_argument("--csv", help="also write the table to this path")
+    social_arb.set_defaults(func=_cmd_social_arb)
 
     return parser
 
