@@ -202,7 +202,10 @@ def _model_inputs(
     """
     if not targets:
         return dict(panel)
-    read = set().union(*(feature_symbols(symbol) for symbol in targets))
+    # Which series arrived decides the paired blocks: a curve or policy leg whose
+    # partner failed to download builds no feature, so its silence is nobody's.
+    carried = {symbol for symbol, bars in panel.items() if not bars.empty}
+    read = set().union(*(feature_symbols(symbol, carried) for symbol in targets))
     return {symbol: bars for symbol, bars in panel.items() if symbol in read}
 
 
@@ -548,6 +551,10 @@ def _cmd_dashboard(args: argparse.Namespace) -> None:
     panel = _panel(args)
     hourly = _hourly(args)
     symbols = [m.symbol for m in MARKETS if m.region == args.region]
+    # A board is read for the probabilities on it, so it is held to the same
+    # freshness as `predict`: one command refusing a dead cache while another
+    # prints a number from it tells the reader the cache is fine.
+    symbols = _fresh_enough(panel, args, symbols)
     forecasts = forecast_all(
         panel,
         symbols=symbols,
@@ -677,7 +684,8 @@ def _cmd_screen(args: argparse.Namespace) -> None:
 
 def _cmd_sectors(args: argparse.Namespace) -> None:
     panel = _panel(args)
-    forecasts = forecast_all(panel, symbols=[args.market], c=args.regularisation)
+    symbols = _fresh_enough(panel, args, [args.market])
+    forecasts = forecast_all(panel, symbols=symbols, c=args.regularisation)
     print(render_sector_text(build_sector_board(panel, forecasts[0])), end="")
 
 
@@ -738,6 +746,7 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
             panel=_forecast_inputs(panel, symbols),
             max_stale_days=args.max_stale_days,
             selection=selection,
+            as_of=today(),
         ),
         end="",
     )

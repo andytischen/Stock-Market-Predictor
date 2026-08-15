@@ -338,8 +338,9 @@ repeat the previous close), which is part of why it scores lowest.
 A feed can also simply stop. Features are aligned by forward-filling, so a
 series that stopped updating is read as one that did not move — right for a
 holiday, wrong for a dead feed, and indistinguishable from inside the model.
-`predict`, `stock`, `shortlist` and `export` therefore refuse to run when an
-input has no bar within `--max-stale-days` (5) of today, naming the worst
+Every command that fits a model and prints a probability — `predict`, `stock`,
+`shortlist`, `export`, `dashboard` and `sectors` — therefore refuses to run when
+an input has no bar within `--max-stale-days` (5) of today, naming the worst
 offenders and their lags:
 
 ```
@@ -365,7 +366,19 @@ download happened to fetch. One panel serves every command and every model reads
 a subset of it: the STOXX 600 sector trackers are features of the European
 indices only, and a tracker standing in for an opening auction is read only by
 its own index. A quiet `EXH8.DE` fails `predict --market ^GDAXI` and is beside
-the point for `stock MU`, which never opens it.
+the point for `stock MU`, which never opens it. A block built from two legs is
+read from both or from neither — the crude curve is a `USO`/`USL` spread and the
+policy signal a `ZQ=F`/`^IRX` premium — so when one leg fails to download the
+survivor is a series no feature was derived from, and it cannot fail the run
+alone.
+
+`--allow-stale` shifts the burden to disclosure, and a panel that stopped
+entirely needs a different sentence from one series lagging the rest: lags are
+measured against the session being forecast, which is dated from the panel's own
+last bar, so a month-old cache has nothing lagging *within* it and the named
+list comes back empty. `shortlist` therefore says how far the forecast session
+itself sits behind today, so the reader knows the probabilities describe the
+market as it stood then.
 
 The tolerance is measured in calendar days against today, which cannot tell a
 dead feed from a closed exchange: a week-long national holiday (Golden Week,

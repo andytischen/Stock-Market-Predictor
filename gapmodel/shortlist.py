@@ -331,12 +331,19 @@ def render_text(
     panel: dict[str, pd.DataFrame] | None = None,
     max_stale_days: int = STALE_DAYS,
     selection: str | None = None,
+    as_of: pd.Timestamp | None = None,
 ) -> str:
     """The ranking as a report, with what the numbers do and do not support.
 
     ``selection`` says how the names in front of the reader were chosen, when it
     was not simply "all of them": a table of ten movers read as a whole universe
     would look like a market where every name had just risen.
+
+    ``as_of`` is the day the report is being read on, and is what catches a panel
+    that is uniformly old. The stale-input footer measures each series against the
+    session being forecast, which is dated from the panel's own last bar, so a
+    cache that stopped a month ago has nothing lagging within itself and says
+    nothing — the one run where the reader most needs telling.
     """
     ranked = rank(picks)
     # `top is not None`, not `if top`: asking for the strongest zero names is a
@@ -396,6 +403,20 @@ def render_text(
                 "probabilities are the model's read of older cross-market and "
                 f"cross-asset data: {', '.join(behind[:8])}"
                 + (f" and {len(behind) - 8} more" if len(behind) > 8 else "")
+            )
+    # Not conditional on the panel: this is a fact about the forecast itself, and
+    # the only disclosure a uniformly old cache produces.
+    if picks and as_of is not None:
+        session = max(p.forecast.session for p in picks)
+        lag = int((as_of.normalize() - session.normalize()).days)
+        if lag > max_stale_days:
+            lines.append("")
+            lines.append(
+                "stale run: the session forecast above follows the panel's last bar and "
+                f"is {lag} days before {as_of.date().isoformat()}. The whole panel stops "
+                "there, so no series is behind the others and none is named above: these "
+                "probabilities are the model's read of the market as it stood then, not "
+                "this morning."
             )
     lines.append("")
     lines.append(
