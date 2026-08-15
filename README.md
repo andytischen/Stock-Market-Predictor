@@ -365,7 +365,7 @@ download happened to fetch. One panel serves every command and every model reads
 a subset of it: the STOXX 600 sector trackers are features of the European
 indices only, and a tracker standing in for an opening auction is read only by
 its own index. A quiet `EXH8.DE` fails `predict --market ^GDAXI` and is beside
-the point for `stock AAPL`, which never opens it.
+the point for `stock MU`, which never opens it.
 
 The tolerance is measured in calendar days against today, which cannot tell a
 dead feed from a closed exchange: a week-long national holiday (Golden Week,
