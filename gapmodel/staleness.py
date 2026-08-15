@@ -139,7 +139,21 @@ def fresh_targets(
     """
     measured = lags({s: panel[s] for s in symbols if s in panel}, session)
     stale = behind(measured, max_days)
-    if not stale or allow:
+    if not stale:
+        return list(symbols)
+    if allow:
+        # Said even here, and for the same reason the guard says it: ``stock``
+        # prints no staleness footer, so this is the only place a reader learns
+        # that the name in front of them stopped trading weeks ago.
+        log.warning(
+            "forecasting %d of %d requested names whose own history stops more than %d "
+            "days before %s (--allow-stale): %s",
+            len(stale),
+            len(symbols),
+            max_days,
+            session.date().isoformat(),
+            describe(measured, stale),
+        )
         return list(symbols)
     log.warning(
         "skipping %d of %d requested names whose own history stops more than %d days before %s: %s",

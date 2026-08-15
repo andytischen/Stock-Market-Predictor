@@ -397,8 +397,12 @@ def test_the_footer_reports_the_tolerance_the_run_was_given(panel):
     panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}
     panel["^GSPC"] = _ending(panel["^GSPC"], SESSION - pd.Timedelta(days=7))
     picks = [pick("GOOD", 0.70, auc=0.62)]
-    assert "within 30 days" not in render_text(picks, panel=panel)
+    # A seven-day lag is stale at the default and current at thirty.
+    assert "within 5 days" in render_text(picks, panel=panel)
     assert "stale inputs" not in render_text(picks, panel=panel, max_stale_days=30)
+    # And the wording follows the threshold, not just the filtering.
+    panel["CL=F"] = _ending(panel["CL=F"], SESSION - pd.Timedelta(days=40))
+    assert "within 30 days" in render_text(picks, panel=panel, max_stale_days=30)
 
 
 def test_the_worst_lag_is_named_first(panel):

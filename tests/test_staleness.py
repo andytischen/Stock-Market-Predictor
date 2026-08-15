@@ -81,8 +81,12 @@ def test_a_run_whose_every_target_is_dead_fails_rather_than_forecasting_nothing(
     assert "every requested name" in str(raised.value)
 
 
-def test_targets_are_kept_when_the_stale_read_is_the_deliberate_one():
-    assert fresh_targets(panel(AAPL=30), ["AAPL"], SESSION, allow=True) == ["AAPL"]
+def test_targets_are_kept_when_the_stale_read_is_the_deliberate_one(caplog):
+    """Kept, and still named: `stock` prints no footer, so this is the only place
+    a reader learns the name in front of them stopped trading."""
+    with caplog.at_level("WARNING"):
+        assert fresh_targets(panel(AAPL=30), ["AAPL"], SESSION, allow=True) == ["AAPL"]
+    assert "AAPL (30d)" in caplog.text and "--allow-stale" in caplog.text
 
 
 def test_a_target_is_guarded_for_itself_and_a_peer_for_everyone():
