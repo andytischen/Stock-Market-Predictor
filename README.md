@@ -252,8 +252,9 @@ the daily model with a warning instead of returning nothing.
 
 ### Single stocks
 
-`stock` forecasts one company's opening auction with the same machinery, and the
-memory and storage complex is what it is pointed at first:
+`stock` forecasts one company's opening auction with the same machinery, pointed
+at three complexes: memory and storage (MU, WDC, STX), AI accelerators (NVDA,
+AMD, AVGO) and consumer hardware (AAPL):
 
 ```bash
 python -m gapmodel stock                 # every modelled stock
@@ -271,11 +272,22 @@ traded the overnight memory story hours before New York opens, and their bars ar
 other storage names) close with Wall Street and are read a session late, as every
 other American bar is.
 
+Each complex carries its own peer list: the accelerator names read TSMC, SK
+Hynix, Samsung, Tokyo Electron and Advantest, and Apple reads its assemblers and
+component makers — Hon Hai, Largan, TSMC, Murata and LG Innotek — all of which
+price the same handset and datacentre demand before the New York auction. Both
+complexes carry US legs too (NVDA, AMD, AVGO and SMH; QCOM and SWKS for Apple),
+read a session late like every other American bar.
+
 | Stock | AUC | Accuracy | Brier skill | Base rate |
 | --- | --- | --- | --- | --- |
 | Micron (MU) | 0.69 | 0.65 | 0.10 | 0.57 |
 | Western Digital (WDC) | 0.66 | 0.62 | 0.07 | 0.53 |
 | Seagate (STX) | 0.65 | 0.62 | 0.06 | 0.54 |
+| Nvidia (NVDA) | 0.67 | 0.64 | 0.08 | 0.57 |
+| AMD | 0.67 | 0.64 | 0.06 | 0.57 |
+| Broadcom (AVGO) | 0.64 | 0.62 | 0.05 | 0.56 |
+| Apple (AAPL) | 0.64 | 0.61 | 0.05 | 0.55 |
 
 Better than the S&P's daily model, and for a plain reason: a single stock's gap
 is more autocorrelated and more exposed to a sector move than an index average

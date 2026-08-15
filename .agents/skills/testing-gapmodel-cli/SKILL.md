@@ -14,8 +14,9 @@ variable is named `screener`.
 
 The two single-stock commands are easy to confuse, and testing one proves nothing about the other:
 
-- `stock SYM` — the curated registry in `gapmodel/stocks.py` (`MU`, `WDC`, `STX`), which adds
-  `peer_*` columns from the Asian memory names that trade the same demand overnight.
+- `stock SYM` — the curated registry in `gapmodel/stocks.py`: memory and storage (`MU`, `WDC`,
+  `STX`), AI accelerators (`NVDA`, `AMD`, `AVGO`) and consumer hardware (`AAPL`). Each complex
+  adds `peer_*` columns from the Asian names that trade the same demand overnight.
 - `shortlist [SYM ...]` — the broad ranking in `gapmodel/shortlist.py` over the ~158-name US
   universe `modelled_universe()` in `gapmodel/universe.py` (`NASDAQ + LARGE_CAP + MID_CAP`, both
   venues). `nasdaq_universe()` is the 66-name venue slice and is no longer what `shortlist` runs.
@@ -82,7 +83,8 @@ Parse the CSV (`--csv PATH`) with pandas rather than eyeballing the table:
    written in report order (credible first) with a `credible` boolean column. That column is
    deliberately absent from the printed tables. `--top 0`/negatives are rejected by the parser.
 6. Good tickers for exercising the filter: `ARM` (too few OOS sessions), `HOOD`/`COIN`
-   (negative Brier skill), `AAPL`/`NVDA` (credible).
+   (negative Brier skill), `AAPL`/`NVDA` (credible — but both are curated, so they also
+   exercise the shortlist/`stock` parity check above; `TSLA` is a credible name with no peers).
 
 ## Faking a stale or missing series without harming the warm cache
 
