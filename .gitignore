@@ -3,5 +3,8 @@ __pycache__/
 .venv/
 *.csv
 !tests/**/*.csv
+# The forecast journal is the record of what was predicted before each open;
+# it is only evidence if it is versioned.
+!docs/forecast-log.csv
 .cache/
 *.egg-info/

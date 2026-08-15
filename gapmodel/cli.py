@@ -16,6 +16,20 @@ from .data import DEFAULT_CACHE, load_panel
 from .export import build_snapshot, dumps
 from .features import build_features
 from .intraday import load_hourly_panel
+from .journal import (
+    DEFAULT_LOG,
+    MIN_SETTLED,
+    decayed,
+    read_log,
+    record,
+    settle,
+    skills,
+    write_log,
+)
+from .journal import DEFAULT_WINDOW as JOURNAL_WINDOW
+from .journal import (
+    render_text as render_journal_text,
+)
 from .markets import (
     BILL_YIELD,
     CURVE_FRONT,
@@ -577,6 +591,33 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
         print(f"\nwrote {args.csv}")
 
 
+def _cmd_scorecard(args: argparse.Namespace) -> None:
+    """Journal today's forecasts, settle the ones that have printed, and score them.
+
+    Recording and settling are one command on purpose: the forecast has to be
+    written down before the auction it describes, and the only run that is
+    certain to happen every morning is the one that makes the forecast.
+    """
+    path = Path(args.log)
+    journal = read_log(path)
+    panel = _panel(args)
+    if not args.settle_only:
+        forecasts = _forecast(panel, args, _hourly(args))
+        journal, added = record(journal, forecasts, panel)
+        print(f"recorded {len(added)} of {len(forecasts)} forecasts")
+    journal, filled = settle(journal, panel)
+    print(f"settled {filled} session(s) against realised opens")
+    write_log(journal, path)
+    print(f"wrote {path}\n")
+    measured = skills(journal, window=args.window, min_settled=args.min_settled)
+    print(render_journal_text(journal, measured, args.window))
+    if args.csv:
+        journal.to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
+    if args.fail_on_decay and decayed(measured):
+        raise SystemExit(1)
+
+
 def _cmd_fetch(args: argparse.Namespace) -> None:
     panel = _panel(args)
     for symbol, frame in panel.items():
@@ -836,6 +877,46 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sectors.add_argument("--market", type=_market_symbol, default="^STOXX50E")
     sectors.set_defaults(func=_cmd_sectors)
+
+    scorecard = sub.add_parser(
+        "scorecard",
+        help="journal today's forecasts and score the ones whose opens have printed",
+    )
+    scorecard.add_argument(
+        "--market", action="append", type=_market_symbol, help="restrict to a symbol"
+    )
+    scorecard.add_argument(
+        "--log", default=str(DEFAULT_LOG), help=f"journal CSV (default {DEFAULT_LOG})"
+    )
+    scorecard.add_argument(
+        "--window",
+        type=_positive_int,
+        default=JOURNAL_WINDOW,
+        help=f"settled sessions per market to score (default {JOURNAL_WINDOW})",
+    )
+    scorecard.add_argument(
+        "--min-settled",
+        type=_positive_int,
+        default=MIN_SETTLED,
+        help=f"settled sessions before a market's record is reported (default {MIN_SETTLED})",
+    )
+    scorecard.add_argument(
+        "--settle-only",
+        action="store_true",
+        help="score what is already journalled without forecasting today",
+    )
+    scorecard.add_argument(
+        "--fail-on-decay",
+        action="store_true",
+        help="exit non-zero when a market's live record is below its base rate",
+    )
+    scorecard.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
+    scorecard.add_argument("--csv", help="also write a copy of the journal to this path")
+    scorecard.set_defaults(func=_cmd_scorecard)
 
     return parser
 

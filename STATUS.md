@@ -1,6 +1,6 @@
-# Stock-Market-Predictor — status update 2026-08-01
+# Stock-Market-Predictor — status update 2026-08-15
 
-Progress: 8/19 tasks complete (42%).
+Progress: 10/19 tasks complete (53%).
 2 task(s) blocked.
 
 ## Completed
@@ -15,6 +15,10 @@ Progress: 8/19 tasks complete (42%).
   - 2026-08-01: Merged in #6.
 - **Project tracker (pm) for status updates and resource requests** (#5)
   - 2026-08-01: Merged in #7.
+- **Track live forecasts against realised opens to measure real-world skill** (#12)
+  - 2026-08-15: gapmodel scorecard journals each forecast to docs/forecast-log.csv and settles it against the realised open.
+- **Alert when a market's out-of-sample skill decays below its base rate** (#13)
+  - 2026-08-15: Flags a market whose live hit rate falls under its own base rate; --fail-on-decay exits non-zero for the daily run.
 - **Oil-versus-Asia dashboard (gapmodel dashboard)** (#14)
   - 2026-08-01: Merged in #9; crude readings, session state and the oil log-odds behind each open call.
 - **Status deck generated from the board (pm deck)** (#15)
@@ -41,8 +45,6 @@ Progress: 8/19 tasks complete (42%).
 - **Add Middle East and Indian indices (TASI, TA-35, NIFTY 50)** (#10)
   - 2026-08-01: CSI 300 (000300.SS) and Tadawul (^TASI.SR) print only in patches on Yahoo; the dashboard falls back to the Shanghai Composite for China.
 - **Confidence intervals on the reported probabilities** (#11)
-- **Track live forecasts against realised opens to measure real-world skill** (#12)
-- **Alert when a market's out-of-sample skill decays below its base rate** (#13)
 - **Participation and leverage data for the Asian dashboard** (#17) — devin
 - **Licensed index weights and free float for constituent attribution** (#18) — devin
 - **Timestamped news and sentiment feed as a dashboard variable** (#19)
@@ -50,7 +52,6 @@ Progress: 8/19 tasks complete (42%).
 ## Resources needed
 
 - **A machine that can sit on a multi-hour hyperparameter search** — needed for #9
-- **A small database or object store for the daily forecast log** — needed for #12
 - **Exchange margin balance and short-interest statistics (TSE, KRX, SSE, HKEX)** — needed for #17
 - **Index provider licence (Nikkei, KRX, CSI, HSI, SGX) for live weights** — needed for #18
 - **Intraday futures history vendor (Databento or similar)** — needed for #7

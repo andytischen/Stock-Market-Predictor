@@ -1,0 +1,330 @@
+"""A forecast journal: what was predicted, what happened, and what that is worth.
+
+The walk-forward backtest measures the model against history it has already
+seen the shape of. This module measures it against sessions that had not
+happened when the probability was written down, which is the only number a
+reader of a live forecast can act on.
+
+The mechanics are deliberately dull. Every run appends the forecasts it made to
+a CSV, one row per market and session, and then settles the rows whose opening
+auction has since printed. A row is written once: a session already in the
+journal is never re-forecast and never overwritten, so a probability cannot be
+quietly improved after the fact, and a run that is repeated twice in a morning
+does not get two attempts at the same open.
+
+Scoring follows the label the model is fitted on -- an opening print above the
+previous close, with the gaps that merely repeat the previous close left
+unlabelled rather than counted as flat. A session the market never held (a
+holiday the journal did not know about) is retired the same way: unscorable, and
+visible as such, because silently dropping either would flatter the hit rate.
+
+One class of row is refused a score before it is even settled. The session a
+model forecasts is the one after the last session it has *complete* features
+for, so a market missing an indicator for yesterday is forecast for an auction
+that has already printed. Nothing is leaked -- the features are lagged either
+way -- but it is not a forecast anybody could have acted on, so it is journalled
+as ``late`` and left out of the live record instead of scored beside the rest.
+
+Skill is reported against each market's own realised up-rate over the same
+sessions, not against a coin flip. Predicting "up" every morning in a market
+that opens up 54% of the time is not skill, and a Brier score has to clear that
+constant forecast before it says anything. A market whose live record fails to
+is called out by ``decayed`` -- which is the point of keeping the journal at
+all, and needs enough settled sessions behind it to mean anything.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from .features import STALE_GAP_TOLERANCE
+from .predict import Forecast
+
+log = logging.getLogger(__name__)
+
+DEFAULT_LOG = Path("docs") / "forecast-log.csv"
+# Settled sessions per market to read the live record over. A quarter of
+# trading is short enough to notice a regime change and long enough that a
+# hit rate is not one bad week.
+DEFAULT_WINDOW = 60
+# Below this many settled sessions no live metric is reported: the sampling
+# error on a hit rate over a handful of opens is wider than any decay worth
+# alerting on.
+MIN_SETTLED = 20
+
+PENDING = "pending"
+SETTLED = "settled"
+STALE = "stale"
+NO_SESSION = "no-session"
+LATE = "late"
+UNSCORABLE = (STALE, NO_SESSION, LATE)
+
+COLUMNS = (
+    "recorded",
+    "session",
+    "symbol",
+    "market",
+    "region",
+    "p_open_up",
+    "oos_base_rate",
+    "oos_brier_skill",
+    "prev_close",
+    "open",
+    "gap",
+    "outcome",
+    "status",
+)
+
+
+def empty_log() -> pd.DataFrame:
+    return pd.DataFrame({column: pd.Series(dtype="object") for column in COLUMNS})
+
+
+def read_log(path: Path) -> pd.DataFrame:
+    """The journal at ``path``, or an empty one when it does not exist yet.
+
+    A journal missing columns added after it was first written is widened
+    rather than refused, so an old file keeps its history.
+    """
+    if not path.exists():
+        return empty_log()
+    frame = pd.read_csv(path, dtype={"session": str, "recorded": str, "symbol": str})
+    for column in COLUMNS:
+        if column not in frame:
+            frame[column] = np.nan
+    return frame[list(COLUMNS)]
+
+
+def write_log(log_frame: pd.DataFrame, path: Path) -> None:
+    """Write the journal sorted by session then market, so diffs stay readable."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ordered = log_frame.sort_values(["session", "symbol"], kind="stable")
+    ordered.to_csv(path, index=False, float_format="%.6g")
+
+
+def _already_printed(panel: dict[str, pd.DataFrame] | None, symbol: str, session: str) -> bool:
+    """Whether the panel already holds a bar for the session being forecast."""
+    bars = (panel or {}).get(symbol)
+    if bars is None or bars.empty:
+        return False
+    return bool(pd.Timestamp(session) in bars.index)
+
+
+def record(
+    log_frame: pd.DataFrame,
+    forecasts: list[Forecast],
+    panel: dict[str, pd.DataFrame] | None = None,
+    recorded: pd.Timestamp | None = None,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Append the forecasts for sessions the journal has not seen before.
+
+    Returns the journal and the symbols that were added; a market whose session
+    is already recorded is left exactly as it was. A forecast for a session that
+    has already printed in ``panel`` is kept as ``late`` and never scored.
+    """
+    stamp = (recorded or pd.Timestamp.now("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+    known = set(zip(log_frame["symbol"], log_frame["session"], strict=True))
+    rows: list[dict[str, object]] = []
+    for forecast in forecasts:
+        session = forecast.session.date().isoformat()
+        if (forecast.symbol, session) in known:
+            log.info(
+                "%s already forecast for %s: keeping the first entry", forecast.symbol, session
+            )
+            continue
+        rows.append(
+            {
+                "recorded": stamp,
+                "session": session,
+                "symbol": forecast.symbol,
+                "market": forecast.name,
+                "region": forecast.region,
+                "p_open_up": round(forecast.probability_up, 4),
+                "oos_base_rate": round(forecast.backtest.get("base_rate", float("nan")), 4),
+                "oos_brier_skill": round(forecast.backtest.get("brier_skill", float("nan")), 4),
+                "prev_close": np.nan,
+                "open": np.nan,
+                "gap": np.nan,
+                "outcome": np.nan,
+                "status": LATE if _already_printed(panel, forecast.symbol, session) else PENDING,
+            }
+        )
+    if not rows:
+        return log_frame, []
+    added = pd.DataFrame(rows, columns=list(COLUMNS))
+    return pd.concat([log_frame, added], ignore_index=True), [str(r["symbol"]) for r in rows]
+
+
+def _settle_row(bars: pd.DataFrame, session: pd.Timestamp) -> dict[str, object] | None:
+    """Outcome of one recorded session, or None while it is still in the future.
+
+    The previous close is the last bar before the session, which is the same
+    step the model's label is built from. A session absent from a panel that has
+    already moved past it was never held, and is retired unscorable rather than
+    waited on forever.
+    """
+    if bars.empty or bars.index.max() < session:
+        return None
+    if session not in bars.index:
+        return {"status": NO_SESSION}
+    earlier = bars.loc[bars.index < session]
+    if earlier.empty:
+        return {"status": NO_SESSION}
+    opening = float(bars.loc[session, "Open"])
+    previous = float(earlier["Close"].iloc[-1])
+    if not (opening > 0 and previous > 0):
+        return {"status": NO_SESSION}
+    gap = float(np.log(opening / previous))
+    if abs(gap) <= STALE_GAP_TOLERANCE:
+        # The source repeated the previous close instead of publishing an
+        # auction print: the same sessions the model refuses to be fitted on.
+        return {"status": STALE, "prev_close": previous, "open": opening, "gap": gap}
+    return {
+        "status": SETTLED,
+        "prev_close": previous,
+        "open": opening,
+        "gap": round(gap, 6),
+        "outcome": float(gap > 0),
+    }
+
+
+def settle(log_frame: pd.DataFrame, panel: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, int]:
+    """Fill in the realised open for every pending row whose session has printed."""
+    updated = log_frame.copy()
+    filled = 0
+    for index in updated.index[updated["status"] == PENDING]:
+        symbol = str(updated.at[index, "symbol"])
+        bars = panel.get(symbol)
+        if bars is None:
+            log.warning("%s is not in the panel: leaving its rows pending", symbol)
+            continue
+        outcome = _settle_row(bars, pd.Timestamp(updated.at[index, "session"]))
+        if outcome is None:
+            continue
+        for column, value in outcome.items():
+            updated.at[index, column] = value
+        filled += 1
+    return updated, filled
+
+
+@dataclass(frozen=True)
+class Skill:
+    """One market's live record over the settled sessions in the journal."""
+
+    symbol: str
+    market: str
+    settled: int
+    hit_rate: float
+    base_rate: float
+    brier: float
+    brier_skill: float
+    mean_probability: float
+    first: str
+    last: str
+
+    @property
+    def decayed(self) -> bool:
+        """Live record no better than always predicting the market's own drift."""
+        return self.brier_skill <= 0.0 or self.hit_rate < self.base_rate
+
+
+def _skill(symbol: str, rows: pd.DataFrame) -> Skill:
+    probabilities = rows["p_open_up"].astype(float).to_numpy()
+    outcomes = rows["outcome"].astype(float).to_numpy()
+    base_rate = float(outcomes.mean())
+    brier = float(np.mean((probabilities - outcomes) ** 2))
+    reference = float(np.mean((base_rate - outcomes) ** 2))
+    return Skill(
+        symbol=symbol,
+        market=str(rows["market"].iloc[-1]),
+        settled=len(rows),
+        hit_rate=float(np.mean((probabilities > 0.5) == (outcomes > 0.5))),
+        base_rate=base_rate,
+        brier=brier,
+        # A market that opened up (or down) on every settled session has no
+        # variance for a forecast to explain, so no skill can be measured.
+        brier_skill=float("nan") if reference == 0 else 1.0 - brier / reference,
+        mean_probability=float(probabilities.mean()),
+        first=str(rows["session"].iloc[0]),
+        last=str(rows["session"].iloc[-1]),
+    )
+
+
+def skills(
+    log_frame: pd.DataFrame, window: int = DEFAULT_WINDOW, min_settled: int = MIN_SETTLED
+) -> list[Skill]:
+    """Live record per market over its most recent ``window`` settled sessions.
+
+    Markets with fewer than ``min_settled`` settled sessions are left out
+    entirely rather than reported with a number nobody should read.
+    """
+    if window < 1:
+        raise ValueError(f"window must be at least 1, got {window}")
+    settled_rows = log_frame.loc[log_frame["status"] == SETTLED]
+    if settled_rows.empty:
+        return []
+    measured: list[Skill] = []
+    for symbol, rows in settled_rows.groupby("symbol", sort=False):
+        recent = rows.sort_values("session", kind="stable").tail(window)
+        if len(recent) < min_settled:
+            continue
+        measured.append(_skill(str(symbol), recent))
+    measured.sort(key=lambda s: (np.isnan(s.brier_skill), -s.brier_skill))
+    return measured
+
+
+def decayed(measured: list[Skill]) -> list[Skill]:
+    """The markets whose live record has fallen to or below their own drift."""
+    return [skill for skill in measured if skill.decayed]
+
+
+def to_frame(measured: list[Skill]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "market": [s.market for s in measured],
+            "symbol": [s.symbol for s in measured],
+            "settled": [s.settled for s in measured],
+            "hit_rate": [round(s.hit_rate, 4) for s in measured],
+            "base_rate": [round(s.base_rate, 4) for s in measured],
+            "brier": [round(s.brier, 4) for s in measured],
+            "brier_skill": [round(s.brier_skill, 4) for s in measured],
+            "mean_p": [round(s.mean_probability, 4) for s in measured],
+            "from": [s.first for s in measured],
+            "to": [s.last for s in measured],
+        }
+    )
+
+
+def render_text(log_frame: pd.DataFrame, measured: list[Skill], window: int) -> str:
+    """The journal's state and the live record, as the CLI prints it."""
+    counts = log_frame["status"].value_counts()
+    unscorable = sum(int(counts.get(status, 0)) for status in UNSCORABLE)
+    lines = [
+        f"forecast journal: {len(log_frame)} rows  "
+        f"settled {int(counts.get(SETTLED, 0))}  pending {int(counts.get(PENDING, 0))}  "
+        f"unscorable {unscorable}",
+        "",
+    ]
+    if not measured:
+        lines.append(
+            f"no market has {MIN_SETTLED} settled sessions yet: live skill is not reported."
+        )
+        return "\n".join(lines)
+    lines.append(f"live record over the last {window} settled sessions per market:")
+    lines.append(to_frame(measured).to_string(index=False))
+    losing = decayed(measured)
+    if losing:
+        lines.append("")
+        lines.append("below their own base rate — the model is not adding a read here:")
+        for skill in losing:
+            lines.append(
+                f"  {skill.market} ({skill.symbol}): hit {skill.hit_rate:.0%} against a "
+                f"{skill.base_rate:.0%} base rate, Brier skill {skill.brier_skill:+.3f} "
+                f"over {skill.settled} sessions"
+            )
+    return "\n".join(lines)
