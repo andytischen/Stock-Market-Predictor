@@ -31,8 +31,9 @@ from .model import MIN_TRAIN, walk_forward
 from .predict import Forecast, forecast_all, parse_shock, to_frame
 from .regions import dashboard_symbols
 from .scenarios import SCENARIOS, scenario
-from .score import DEFAULT_WINDOW, score_symbols
+from .score import DEFAULT_WINDOW, relative_scores, render_reference, score_symbols
 from .score import to_frame as score_to_frame
+from .score import to_relative_frame as score_to_relative_frame
 from .scorecard import RECENT_WINDOW, build_scorecard, calls_frame
 from .scorecard import append_log as append_scorecard_log
 from .scorecard import render_text as render_scorecard_text
@@ -551,6 +552,16 @@ def _as_of(hours: float | None) -> pd.Timestamp | None:
     return now.normalize() + pd.Timedelta(hours=hours)
 
 
+def _score_universe(args: argparse.Namespace) -> list[str]:
+    """The comparison list for ``--relative``: a file if given, else the US list."""
+    if args.universe:
+        try:
+            return read_universe(Path(args.universe))
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"error: --universe {args.universe}: {exc}") from exc
+    return us_universe()
+
+
 def _cmd_score(args: argparse.Namespace) -> None:
     symbols = [s.upper() for s in args.symbols]
     asof: pd.Timestamp | None = None
@@ -559,16 +570,37 @@ def _cmd_score(args: argparse.Namespace) -> None:
             asof = pd.Timestamp(args.asof).tz_localize(None)
         except (ValueError, TypeError) as exc:
             raise SystemExit(f"error: --asof {args.asof!r} is not a valid date: {exc}") from exc
-    scores = score_symbols(
-        symbols,
-        window=args.window,
-        asof=asof,
-        start=args.start,
-        cache_dir=Path(args.cache),
-        refresh=args.refresh,
-    )
-    frame = score_to_frame(scores)
+    # Refused rather than quietly ignored: a caller who names a comparison list
+    # plainly wants the comparison.
+    if args.universe and not args.relative:
+        raise SystemExit("error: --universe applies to --relative; pass --relative too")
+    footer = ""
+    if args.relative:
+        scores, reference = relative_scores(
+            symbols,
+            _score_universe(args),
+            window=args.window,
+            asof=asof,
+            start=args.start,
+            cache_dir=Path(args.cache),
+            refresh=args.refresh,
+        )
+        frame = score_to_relative_frame(scores)
+        footer = render_reference(reference)
+    else:
+        frame = score_to_frame(
+            score_symbols(
+                symbols,
+                window=args.window,
+                asof=asof,
+                start=args.start,
+                cache_dir=Path(args.cache),
+                refresh=args.refresh,
+            )
+        )
     print(frame.to_string(index=False))
+    if footer:
+        print(f"\n{footer}")
     if args.csv:
         frame.to_csv(args.csv, index=False)
         print(f"\nwrote {args.csv}")
@@ -745,6 +777,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     score.add_argument(
         "--asof", metavar="DATE", help="score as of this date (ISO) instead of latest"
+    )
+    score.add_argument(
+        "--relative",
+        action="store_true",
+        help="normalise each score across a comparison universe, so 0 is an average stock today",
+    )
+    score.add_argument(
+        "--universe",
+        metavar="FILE",
+        help="comparison universe for --relative, one ticker per line (default: the US list)",
     )
     score.add_argument("--csv", help="also write the table to this path")
     score.set_defaults(func=_cmd_score)

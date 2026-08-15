@@ -245,6 +245,65 @@ def test_screen_rejects_an_unreadable_universe_file(tmp_path):
     assert "error:" in str(exit_info.value)
 
 
+def test_score_rejects_a_comparison_universe_without_relative(tmp_path):
+    path = tmp_path / "u.txt"
+    path.write_text("AAPL\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exit_info:
+        main(["score", "IVZ", "--universe", str(path)])
+    assert "--universe applies to --relative" in str(exit_info.value)
+
+
+def test_score_rejects_an_unreadable_comparison_universe(tmp_path):
+    with pytest.raises(SystemExit) as exit_info:
+        main(["score", "IVZ", "--relative", "--universe", str(tmp_path / "missing.txt")])
+    assert "error:" in str(exit_info.value)
+
+
+def test_score_relative_compares_against_the_us_universe_by_default(monkeypatch, capsys):
+    from gapmodel import cli
+    from gapmodel.score import Reference, RelativeScore
+    from gapmodel.universe import us_universe
+
+    seen = {}
+
+    def fake_relative(symbols, universe, **kwargs):
+        seen["symbols"] = symbols
+        seen["universe"] = universe
+        scored = [RelativeScore("IVZ", 2.59, 1.4, 92.0, 32.55, pd.Timestamp("2026-08-14"), 200)]
+        return scored, Reference(pd.Timestamp("2026-08-14"), 150, 1.2, 0.98, stale=("KHC",))
+
+    monkeypatch.setattr(cli, "relative_scores", fake_relative)
+    main(["score", "ivz", "--relative"])
+
+    assert seen["symbols"] == ["IVZ"]
+    assert seen["universe"] == us_universe()
+    out = capsys.readouterr().out
+    assert "IVZ" in out and "1.4" in out
+    assert "universe: 150 names as of 2026-08-14" in out
+    assert "KHC" in out
+
+
+def test_score_without_relative_prints_the_raw_table(monkeypatch, capsys):
+    from gapmodel import cli
+    from gapmodel.score import TrendScore
+
+    def fake_relative(*_args, **_kwargs):
+        raise AssertionError("relative_scores must not run without --relative")
+
+    monkeypatch.setattr(cli, "relative_scores", fake_relative)
+    monkeypatch.setattr(
+        cli,
+        "score_symbols",
+        lambda symbols, **kwargs: [TrendScore("IVZ", 2.59, 32.55, pd.Timestamp("2026-08-14"), 200)],
+    )
+    main(["score", "IVZ"])
+
+    out = capsys.readouterr().out
+    assert "IVZ" in out
+    assert "universe:" not in out
+    assert "relative" not in out
+
+
 def test_intraday_falls_back_to_the_daily_model_when_futures_bars_are_missing(monkeypatch):
     """A stale futures feed should cost sharpness, not the whole forecast."""
     import argparse

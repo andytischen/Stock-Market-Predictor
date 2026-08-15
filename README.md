@@ -576,6 +576,51 @@ instead. Either way this is an *approximation of the ranking*, not a reproductio
 of the column: the real one is driven by inputs a daily price bar does not
 contain.
 
+### Relative to a universe
+
+The score above is *absolute* — where a stock sits in its own history — so in a
+broadly rising market nearly every name reads positive and a watchlist bunches
+up well above zero (the 32-name list above averaged +1.49 on 2026-08-14, with
+only two names below zero). `--relative` restates it as a cross-section: the
+comparison universe is scored on the same session, and each ticker is reported
+as its standardised position within that distribution plus `pct`, the share of
+the universe scoring no higher (a name in the universe counts itself, so the
+weakest member of 157 reads 1 rather than 0).
+
+```bash
+python -m gapmodel score IVZ JPM CLX --relative              # vs the built-in US list
+python -m gapmodel score IVZ JPM --relative --universe my.txt
+```
+
+```
+symbol   last  relative  pct  score       asof
+   IVZ  32.55      1.67   97   2.59 2026-08-14
+   JPM 362.84      1.64   96   2.56 2026-08-14
+   CLX 105.70     -0.41   37   0.23 2026-08-14
+
+universe: 157 names as of 2026-08-14, raw score mean +0.69 sd 1.14
+```
+
+`relative` is 0 for an average stock *today* whatever the market has done, which
+makes it comparable across dates and is the shape the ThinkorSwim column has.
+The footer states what was compared against, and names whose data stops before
+the session are listed as stale rather than silently dragging the mean. The
+session is the newest close the universe actually reached at or before `--asof`,
+not `--asof` itself, so asking as of a weekend prices the cross-section on the
+Friday rather than declaring every name stale. The
+comparison universe defaults to `us_universe()`; a symbol being scored need not
+belong to it, and does not join the distribution it is measured against — asking
+about a stock must not move its own benchmark, so a non-member with fresher data
+can be dated *after* the cross-section, and the footer names it when it is.
+
+What this does **not** do is agree with that column any better. Re-centring is an
+affine transform of the same number, so the correlation is unchanged by
+construction (r = +0.475 on the sample date either way). It fixes the shape of
+the output, not its content: on the watchlist above, `relative` averages +0.70
+with sd 0.90 against the column's -0.27 and sd 1.77 — closer, but still tilted
+positive, because that watchlist really was stronger than the universe. Getting
+closer than this needs different inputs, not a different yardstick.
+
 ## Stock screener
 
 The model calls the *index*. `screen` is the layer below it on the US side: of
