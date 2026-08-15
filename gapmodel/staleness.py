@@ -17,7 +17,12 @@ given run happened to load rather than on anything about the data.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Sequence
+
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 # Calendar days a series may sit behind the session before it is called stale.
 # A series that traded on the previous session is one day behind, and a long
@@ -51,27 +56,30 @@ def lags(panel: dict[str, pd.DataFrame], session: pd.Timestamp) -> dict[str, int
     }
 
 
+def behind(measured: dict[str, int], max_days: int = STALE_DAYS) -> list[str]:
+    """The measured series lagging by more than ``max_days``, worst first.
+
+    Worst first, so the eight names a report has room for are the eight that
+    matter rather than whichever eight sort first alphabetically.
+    """
+    stale = [(lag, symbol) for symbol, lag in measured.items() if lag > max_days]
+    return [symbol for _, symbol in sorted(stale, key=lambda e: (-e[0], e[1]))]
+
+
 def stale_inputs(
     panel: dict[str, pd.DataFrame],
     session: pd.Timestamp,
     max_days: int = STALE_DAYS,
 ) -> tuple[int, list[str]]:
-    """The series counted, and those lagging ``session`` by more than ``max_days``.
-
-    Worst first, so the eight names a report has room for are the eight that
-    matter rather than whichever eight sort first alphabetically.
-    """
-    behind = [(lag, symbol) for symbol, lag in lags(panel, session).items() if lag > max_days]
-    counted = len(lags(panel, session))
-    return counted, [symbol for _, symbol in sorted(behind, key=lambda e: (-e[0], e[1]))]
-
-
-def describe(panel: dict[str, pd.DataFrame], session: pd.Timestamp, max_days: int) -> str:
-    """The stale series named with their lags, worst first, for an error or a log."""
+    """The series counted, and those lagging ``session`` by more than ``max_days``."""
     measured = lags(panel, session)
-    _, behind = stale_inputs(panel, session, max_days)
-    named = ", ".join(f"{symbol} ({measured[symbol]}d)" for symbol in behind[:8])
-    return named + (f" and {len(behind) - 8} more" if len(behind) > 8 else "")
+    return len(measured), behind(measured, max_days)
+
+
+def describe(measured: dict[str, int], stale: Sequence[str]) -> str:
+    """The stale series named with their lags, worst first, for an error or a log."""
+    named = ", ".join(f"{symbol} ({measured[symbol]}d)" for symbol in stale[:8])
+    return named + (f" and {len(stale) - 8} more" if len(stale) > 8 else "")
 
 
 def guard(
@@ -89,18 +97,21 @@ def guard(
     number that looks exactly like one that can.
 
     ``allow`` keeps the old behaviour available for the case where reading last
-    week's macro is the deliberate intent, and says so in the log rather than
-    passing quietly.
+    week's macro is the deliberate intent, and says so on the log rather than
+    passing quietly. It goes to the log and not to stdout because ``export``
+    writes its snapshot there: a warning printed alongside it would be read by
+    the next program in the pipe as the first line of the JSON.
     """
-    counted, behind = stale_inputs(panel, session, max_days)
-    if not behind:
+    measured = lags(panel, session)
+    stale = behind(measured, max_days)
+    if not stale:
         return
     detail = (
-        f"{len(behind)} of {counted} input series have no bar within {max_days} days of "
-        f"{session.date().isoformat()}: {describe(panel, session, max_days)}"
+        f"{len(stale)} of {len(measured)} input series have no bar within {max_days} days of "
+        f"{session.date().isoformat()}: {describe(measured, stale)}"
     )
     if allow:
-        print(f"warning: {detail} (--allow-stale)")
+        log.warning("%s (--allow-stale)", detail)
         return
     raise StaleInputs(
         f"{detail}. Their last value would be forward-filled, so the forecast would "
@@ -108,3 +119,42 @@ def guard(
         "--refresh to update the cache, --max-stale-days to widen the tolerance, or "
         "--allow-stale to forecast anyway."
     )
+
+
+def fresh_targets(
+    panel: dict[str, pd.DataFrame],
+    symbols: Sequence[str],
+    session: pd.Timestamp,
+    max_days: int = STALE_DAYS,
+    allow: bool = False,
+) -> list[str]:
+    """The requested names whose own history is current enough to forecast.
+
+    A stale feature is everyone's problem, because every model in the run reads
+    it; a stale target is only its own. One name that stopped trading — halted,
+    acquired, delisted since the universe file was written — should not decide
+    whether the other sixty-five get forecast, so it is dropped by name and the
+    run continues. Losing the whole ranking to it would be the same failure the
+    guard exists to prevent, in the other direction.
+    """
+    measured = lags({s: panel[s] for s in symbols if s in panel}, session)
+    stale = behind(measured, max_days)
+    if not stale or allow:
+        return list(symbols)
+    log.warning(
+        "skipping %d of %d requested names whose own history stops more than %d days before %s: %s",
+        len(stale),
+        len(symbols),
+        max_days,
+        session.date().isoformat(),
+        describe(measured, stale),
+    )
+    kept = [symbol for symbol in symbols if symbol not in set(stale)]
+    if not kept:
+        raise StaleInputs(
+            f"every requested name has no bar within {max_days} days of "
+            f"{session.date().isoformat()}: {describe(measured, stale)}. Re-run with "
+            "--refresh to update the cache, --max-stale-days to widen the tolerance, or "
+            "--allow-stale to forecast anyway."
+        )
+    return kept

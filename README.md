@@ -349,7 +349,20 @@ They refuse rather than dropping the dead columns: the model was fitted over a
 history in which those columns were live, so dropping them at inference time
 would answer a different question from the one the printed metrics describe.
 `--refresh` re-downloads, `--max-stale-days N` widens the tolerance, and
-`--allow-stale` forecasts anyway, warning instead of failing.
+`--allow-stale` forecasts anyway, warning on stderr instead of failing — so a
+snapshot piped from `export` stays valid JSON either way.
+
+Only shared inputs can fail a whole run. A single name that `stock` or
+`shortlist` was asked to forecast is read by one model — its own — so a listing
+that stopped trading is dropped by name and the rest of the universe is still
+ranked. A name that is a *peer* of something requested counts as a shared input,
+because it is a column in another company's model.
+
+The tolerance is measured in calendar days against today, which cannot tell a
+dead feed from a closed exchange: a week-long national holiday (Golden Week,
+Chinese New Year) will trip the guard on a panel that is perfectly current.
+`--max-stale-days` is the answer to that, and the reason the refusal names every
+series and its lag rather than asserting the feed is broken.
 
 ## Asia session dashboard
 

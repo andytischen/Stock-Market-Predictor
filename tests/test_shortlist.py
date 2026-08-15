@@ -391,6 +391,16 @@ def test_the_report_discloses_inputs_that_stopped_updating(panel):
     assert "stale inputs" not in render_text([pick("GOOD", 0.70, auc=0.62)])
 
 
+def test_the_footer_reports_the_tolerance_the_run_was_given(panel):
+    """A footer saying five days under `--max-stale-days 30` contradicts the
+    guard that let the run through."""
+    panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}
+    panel["^GSPC"] = _ending(panel["^GSPC"], SESSION - pd.Timedelta(days=7))
+    picks = [pick("GOOD", 0.70, auc=0.62)]
+    assert "within 30 days" not in render_text(picks, panel=panel)
+    assert "stale inputs" not in render_text(picks, panel=panel, max_stale_days=30)
+
+
 def test_the_worst_lag_is_named_first(panel):
     """Eight names are printed; they should be the eight furthest behind."""
     panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}

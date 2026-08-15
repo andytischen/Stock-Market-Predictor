@@ -227,6 +227,7 @@ def render_text(
     picks: list[StockPick],
     top: int | None = None,
     panel: dict[str, pd.DataFrame] | None = None,
+    max_stale_days: int = STALE_DAYS,
 ) -> str:
     """The ranking as a report, with what the numbers do and do not support."""
     ranked = rank(picks)
@@ -275,12 +276,14 @@ def render_text(
                 lines.append(f"  {pick.symbol}: {note}")
     if panel is not None and picks:
         session = max(p.forecast.session for p in picks)
-        counted, behind = stale_inputs(panel, session)
+        # The threshold the run was given, not the default: a footer disagreeing
+        # with the guard that let the run through says the wrong thing twice.
+        counted, behind = stale_inputs(panel, session, max_stale_days)
         if behind:
             lines.append("")
             lines.append(
                 f"stale inputs: {len(behind)} of {counted} series have no bar within "
-                f"{STALE_DAYS} days of {session.date().isoformat()}, a gap the calendar "
+                f"{max_stale_days} days of {session.date().isoformat()}, a gap the calendar "
                 "does not explain. Their last value is carried forward, so these "
                 "probabilities are the model's read of older cross-market and "
                 f"cross-asset data: {', '.join(behind[:8])}"

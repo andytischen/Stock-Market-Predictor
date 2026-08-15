@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -54,7 +55,7 @@ from .shortlist import forecast_universe
 from .shortlist import rank as rank_shortlist
 from .shortlist import render_text as render_shortlist_text
 from .shortlist import to_frame as shortlist_to_frame
-from .staleness import STALE_DAYS, guard, today
+from .staleness import STALE_DAYS, fresh_targets, guard, today
 from .stocks import (
     BLIND_SPOTS,
     SHORTLISTED,
@@ -184,7 +185,29 @@ def _panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     return load_panel(start=args.start, cache_dir=Path(args.cache), refresh=args.refresh)
 
 
-def _fresh_enough(panel: dict[str, pd.DataFrame], args: argparse.Namespace) -> None:
+def _shared_inputs(
+    panel: dict[str, pd.DataFrame], targets: Sequence[str]
+) -> dict[str, pd.DataFrame]:
+    """The panel minus the single names that are only ever this run's targets.
+
+    A stock panel is loaded whole — every curated name and every peer — whatever
+    was asked for, and a shortlist panel carries the sixty-odd listings it ranks.
+    Those series are read by one model each, so holding the whole run to their
+    freshness would let a single halted listing cancel sixty-five sound
+    forecasts. A name that is a *peer* of something requested stays here: it is
+    then a feature, read by a model other than its own, and its silence is
+    everyone's problem.
+    """
+    peers = {peer.symbol for symbol in targets for peer in peers_of(symbol)}
+    target_only = {s for s in panel if s in SHORTLISTED or s in STOCKS_BY_SYMBOL} - peers
+    return {symbol: bars for symbol, bars in panel.items() if symbol not in target_only}
+
+
+def _fresh_enough(
+    panel: dict[str, pd.DataFrame],
+    args: argparse.Namespace,
+    targets: Sequence[str] = (),
+) -> list[str]:
     """Stop a forecasting command before it fits anything on dead inputs.
 
     Checked here rather than inside the model because it is a question about the
@@ -192,8 +215,24 @@ def _fresh_enough(panel: dict[str, pd.DataFrame], args: argparse.Namespace) -> N
     backtest metrics beside it are still honestly earned. What is wrong is the
     conclusion a reader draws from a probability built by forward-filling a feed
     that stopped a week ago.
+
+    Returns the targets still worth forecasting: the shared inputs either pass
+    for everyone or fail the run, while a target with no recent bar of its own
+    is dropped by name.
     """
-    guard(panel, today(), max_days=args.max_stale_days, allow=args.allow_stale)
+    guard(
+        _shared_inputs(panel, targets),
+        today(),
+        max_days=args.max_stale_days,
+        allow=args.allow_stale,
+    )
+    return fresh_targets(
+        panel,
+        targets,
+        today(),
+        max_days=args.max_stale_days,
+        allow=args.allow_stale,
+    )
 
 
 def _stock_panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
@@ -334,7 +373,7 @@ def _cmd_stock(args: argparse.Namespace) -> None:
     """
     symbols = args.symbols or [s.symbol for s in STOCKS]
     panel = _stock_panel(args)
-    _fresh_enough(panel, args)
+    symbols = _fresh_enough(panel, args, symbols)
     forecasts = _forecast(panel, args, _hourly(args), dict(args.shock or []), symbols=symbols)
     frame = to_frame(forecasts).sort_values("p_open_up", ascending=False)
     print(frame.to_string(index=False))
@@ -584,9 +623,12 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
             require=("Adj Close",),
         )
     )
-    _fresh_enough(panel, args)
+    symbols = _fresh_enough(panel, args, symbols)
     picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
-    print(render_shortlist_text(picks, top=args.top, panel=panel), end="")
+    print(
+        render_shortlist_text(picks, top=args.top, panel=panel, max_stale_days=args.max_stale_days),
+        end="",
+    )
     if args.csv:
         # Written in the report's order, with the verdict as a column, so that
         # sorting the file on the raw probability is not the obvious next step.

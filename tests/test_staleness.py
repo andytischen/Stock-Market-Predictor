@@ -1,8 +1,16 @@
 import pandas as pd
 import pytest
 
-from gapmodel.cli import build_parser
-from gapmodel.staleness import STALE_DAYS, StaleInputs, guard, lags, stale_inputs, today
+from gapmodel.cli import _shared_inputs, build_parser
+from gapmodel.staleness import (
+    STALE_DAYS,
+    StaleInputs,
+    fresh_targets,
+    guard,
+    lags,
+    stale_inputs,
+    today,
+)
 
 SESSION = pd.Timestamp("2026-08-14")
 
@@ -49,10 +57,47 @@ def test_a_wider_tolerance_is_honoured_in_both_directions():
         guard(panel(AAPL=1), SESSION, max_days=0)
 
 
-def test_forecasting_from_stale_inputs_on_purpose_still_says_so(capsys):
-    guard(panel(**{"^GSPC": 10}), SESSION, allow=True)
-    printed = capsys.readouterr().out
-    assert "warning" in printed and "^GSPC (10d)" in printed and "--allow-stale" in printed
+def test_forecasting_from_stale_inputs_on_purpose_still_says_so(caplog, capsys):
+    with caplog.at_level("WARNING"):
+        guard(panel(**{"^GSPC": 10}), SESSION, allow=True)
+    assert "^GSPC (10d)" in caplog.text and "--allow-stale" in caplog.text
+    # Logged, not printed: `export` writes its JSON to stdout, and a warning
+    # there would be the first line of the document.
+    assert capsys.readouterr().out == ""
+
+
+def test_one_dead_listing_does_not_cancel_the_names_around_it(caplog):
+    """A stale feature is read by every model in the run; a stale target by one."""
+    universe = panel(AAPL=1, MSFT=1, HALTED=30)
+    with caplog.at_level("WARNING"):
+        kept = fresh_targets(universe, ["AAPL", "MSFT", "HALTED"], SESSION)
+    assert kept == ["AAPL", "MSFT"]
+    assert "HALTED (30d)" in caplog.text
+
+
+def test_a_run_whose_every_target_is_dead_fails_rather_than_forecasting_nothing():
+    with pytest.raises(StaleInputs) as raised:
+        fresh_targets(panel(AAPL=30, MSFT=30), ["AAPL", "MSFT"], SESSION)
+    assert "every requested name" in str(raised.value)
+
+
+def test_targets_are_kept_when_the_stale_read_is_the_deliberate_one():
+    assert fresh_targets(panel(AAPL=30), ["AAPL"], SESSION, allow=True) == ["AAPL"]
+
+
+def test_a_target_is_guarded_for_itself_and_a_peer_for_everyone():
+    """Which series can fail a whole run, and which only lose their own row.
+
+    ``stock`` and ``shortlist`` load their names in bulk, so the panel holds
+    listings this run may never forecast. Those cannot decide the run. A peer of
+    something requested is a different thing: it is a column in another name's
+    model, and stale it is read as a company that did not move.
+    """
+    loaded = panel(AAPL=1, MSFT=1, WDC=1, **{"^GSPC": 1, "005930.KS": 1})
+    # MSFT and WDC are loaded but unasked for, so neither can fail this run.
+    assert set(_shared_inputs(loaded, ["AAPL"])) == {"^GSPC", "005930.KS"}
+    # WDC is in MU's peer list, so a MU run reads it as a feature.
+    assert "WDC" in _shared_inputs(loaded, ["MU"])
 
 
 def test_an_empty_series_is_neither_counted_nor_flagged():
