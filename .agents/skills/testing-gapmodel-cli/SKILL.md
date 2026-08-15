@@ -148,7 +148,7 @@ The strong form: reconstruct each feature column from its source series at **bot
 require a match at exactly one — the expected one. A column matching both lags proves nothing.
 
 ```python
-mu, label = build_features("MU", panel)      # returns a (DataFrame, Series) TUPLE
+mu, label = build_features("MU", panel)  # returns a (DataFrame, Series) TUPLE
 ```
 Forward-fill the source onto a calendar index before reindexing, since features are aligned to the
 target's trading sessions. Column names carry suffixes (`own_close_return_lag1`, not
