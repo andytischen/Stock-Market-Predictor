@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from gapmodel.cli import _shared_inputs, build_parser
+from gapmodel.cli import _forecast_inputs, _shared_inputs, build_parser
 from gapmodel.staleness import (
     STALE_DAYS,
     StaleInputs,
@@ -75,10 +75,25 @@ def test_one_dead_listing_does_not_cancel_the_names_around_it(caplog):
     assert "HALTED (30d)" in caplog.text
 
 
-def test_a_run_whose_every_target_is_dead_fails_rather_than_forecasting_nothing():
-    with pytest.raises(StaleInputs) as raised:
+def test_a_run_whose_every_target_is_dead_fails_rather_than_forecasting_nothing(caplog):
+    with pytest.raises(StaleInputs) as raised, caplog.at_level("WARNING"):
         fresh_targets(panel(AAPL=30, MSFT=30), ["AAPL", "MSFT"], SESSION)
     assert "every requested name" in str(raised.value)
+    # Not "skipping" and then aborting: two lines describing two outcomes.
+    assert "skipping" not in caplog.text
+
+
+def test_the_footer_describes_the_series_the_run_read(caplog):
+    """A skipped name's last value is not carried forward, so it is not an input.
+
+    Handed the whole loaded panel the report would count the name it dropped and
+    say its stale value was read anyway, which is the opposite of what happened.
+    """
+    loaded = panel(AAPL=1, ZM=30, **{"^GSPC": 1})
+    with caplog.at_level("WARNING"):
+        kept = fresh_targets(loaded, ["AAPL", "ZM"], SESSION)
+    counted, stale = stale_inputs(_forecast_inputs(loaded, kept), SESSION)
+    assert (counted, stale) == (2, [])
 
 
 def test_targets_are_kept_when_the_stale_read_is_the_deliberate_one(caplog):

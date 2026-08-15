@@ -155,16 +155,20 @@ def fresh_targets(
             describe(measured, stale),
         )
         return list(symbols)
-    log.warning(
-        "skipping %d of %d requested names whose own history stops more than %d days before %s: %s",
-        len(stale),
-        len(symbols),
-        max_days,
-        session.date().isoformat(),
-        describe(measured, stale),
-    )
     kept = [symbol for symbol in symbols if symbol not in set(stale)]
-    if not kept:
+    if kept:
+        # Only when something is left to skip *to*: announcing a skip and then
+        # aborting the run would describe two different outcomes in two lines.
+        log.warning(
+            "skipping %d of %d requested names whose own history stops more than %d days "
+            "before %s: %s",
+            len(stale),
+            len(symbols),
+            max_days,
+            session.date().isoformat(),
+            describe(measured, stale),
+        )
+    else:
         raise StaleInputs(
             f"every requested name has no bar within {max_days} days of "
             f"{session.date().isoformat()}: {describe(measured, stale)}. Re-run with "

@@ -203,6 +203,19 @@ def _shared_inputs(
     return {symbol: bars for symbol, bars in panel.items() if symbol not in target_only}
 
 
+def _forecast_inputs(
+    panel: dict[str, pd.DataFrame], targets: Sequence[str]
+) -> dict[str, pd.DataFrame]:
+    """Exactly the series the run read: the shared inputs and the names kept.
+
+    What the report's stale-input footer should describe. Handed the whole loaded
+    panel it would count a name the run skipped, and say its last value was
+    carried forward when the reason it is not in the table is that it was not.
+    """
+    shared = _shared_inputs(panel, targets)
+    return shared | {symbol: panel[symbol] for symbol in targets if symbol in panel}
+
+
 def _fresh_enough(
     panel: dict[str, pd.DataFrame],
     args: argparse.Namespace,
@@ -626,7 +639,12 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     symbols = _fresh_enough(panel, args, symbols)
     picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
     print(
-        render_shortlist_text(picks, top=args.top, panel=panel, max_stale_days=args.max_stale_days),
+        render_shortlist_text(
+            picks,
+            top=args.top,
+            panel=_forecast_inputs(panel, symbols),
+            max_stale_days=args.max_stale_days,
+        ),
         end="",
     )
     if args.csv:
