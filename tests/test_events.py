@@ -9,6 +9,7 @@ from gapmodel.events import (
     SCHEDULES,
     caveats,
     events_on,
+    unmaintained_on,
 )
 from gapmodel.markets import last_observed_utc, market
 
@@ -109,7 +110,23 @@ def test_nothing_is_claimed_past_the_end_of_the_tables():
     """An unrefreshed calendar must not read as an empty one."""
     assert events_on(CALENDAR_END + pd.Timedelta(days=40)) == ()
     for schedule in SCHEDULES:
-        assert max(pd.Timestamp(d) for d in schedule.dates) <= CALENDAR_END
+        assert max(pd.Timestamp(d) for d in schedule.dates) <= schedule.end <= CALENDAR_END
+
+
+def test_the_decisions_run_a_year_past_the_statistical_releases():
+    """The Committee publishes its next year each September; the BLS does not."""
+    assert [e.name for e in events_on(pd.Timestamp("2027-09-15"))] == ["FOMC decision"]
+    assert "after this open" in caveats(market("^GSPC"), pd.Timestamp("2027-09-15"))[0]
+    assert FOMC.end > CPI.end
+
+
+def test_a_series_past_its_own_table_is_named_rather_than_left_silent():
+    """A 2027 session has no CPI flag, and that absence must not read as news."""
+    assert unmaintained_on(CPI_DAY) == ()
+    stale = unmaintained_on(pd.Timestamp("2027-09-15"))
+    assert set(stale) == {"US payrolls", "US CPI", "US PCE inflation"}
+    assert "FOMC decision" not in stale
+    assert unmaintained_on(CALENDAR_END + pd.Timedelta(days=1)) == tuple(s.name for s in SCHEDULES)
 
 
 def test_every_table_is_sorted_free_of_duplicates_and_attributed():

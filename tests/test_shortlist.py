@@ -31,6 +31,8 @@ from gapmodel.universe import NASDAQ, modelled_universe, nasdaq_universe
 from tests.test_features import synthetic_bars
 
 TICKER = "AAPL"
+# A shortlisted name carrying no hand-written peer complex of its own.
+PEERLESS = "TSLA"
 
 
 @pytest.fixture
@@ -115,8 +117,8 @@ def test_a_shortlisted_name_is_a_single_company_without_a_peer_list():
     is not labelled a down open. What the universe does not get is peers: those
     are hand-written per complex, and only the curated names carry them.
     """
-    assert is_stock(TICKER)
-    assert peers_of(TICKER) == ()
+    assert is_stock(PEERLESS)
+    assert peers_of(PEERLESS) == ()
     assert peers_of("MU"), "a curated name keeps its overnight peers"
     # An index is not a company; a foreign listing is not on Wall Street's
     # clock; and a ticker that is merely well-formed is not modelled at all.
@@ -319,7 +321,7 @@ def test_a_name_in_both_commands_is_read_from_the_same_features():
     assert equities[:2] == ["AAPL", "MU"]
     assert {"005930.KS", "000660.KS", "SMH"} <= set(equities)
     # A name with no peers adds nothing, and nothing repeats.
-    assert _shortlist_equities(["AAPL"]) == ["AAPL"]
+    assert _shortlist_equities([PEERLESS]) == [PEERLESS]
     assert equities == list(dict.fromkeys(equities))
 
 
@@ -392,6 +394,20 @@ def test_the_report_discloses_inputs_that_stopped_updating(panel):
     assert "^GSPC" in text
     # Without the panel the report cannot know, so it must not claim otherwise.
     assert "stale inputs" not in render_text([pick("GOOD", 0.70, auc=0.62)])
+
+
+def test_the_footer_reports_the_tolerance_the_run_was_given(panel):
+    """A footer saying five days under `--max-stale-days 30` contradicts the
+    guard that let the run through."""
+    panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}
+    panel["^GSPC"] = _ending(panel["^GSPC"], SESSION - pd.Timedelta(days=7))
+    picks = [pick("GOOD", 0.70, auc=0.62)]
+    # A seven-day lag is stale at the default and current at thirty.
+    assert "within 5 days" in render_text(picks, panel=panel)
+    assert "stale inputs" not in render_text(picks, panel=panel, max_stale_days=30)
+    # And the wording follows the threshold, not just the filtering.
+    panel["CL=F"] = _ending(panel["CL=F"], SESSION - pd.Timedelta(days=40))
+    assert "within 30 days" in render_text(picks, panel=panel, max_stale_days=30)
 
 
 def test_the_worst_lag_is_named_first(panel):

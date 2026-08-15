@@ -185,6 +185,28 @@ def policy_features(
     }
 
 
+def feature_symbols(target_symbol: str) -> set[str]:
+    """The panel series a model for ``target_symbol`` reads.
+
+    The download is one list for every target, so a loaded panel is wider than
+    any single model: the STOXX 600 sector trackers are skipped outside Europe,
+    and an opening-price stand-in is read only as the gap source of its own
+    index. Kept beside ``build_features`` because it has to answer for the same
+    branches — a column added there and not here would be read by a model
+    nothing was checked against.
+    """
+    target = target_market(target_symbol)
+    read = {target_symbol, target.gap_symbol}
+    read |= {other.symbol for other in MARKETS if other.symbol != target_symbol}
+    read |= {
+        indicator.symbol
+        for indicator in INDICATORS
+        if indicator.symbol not in SECTOR_SYMBOLS or target.region == "Europe"
+    }
+    read |= {peer.symbol for peer in peers_of(target_symbol)}
+    return read | {CURVE_FRONT, CURVE_STRIP, FUNDS_FUTURE, BILL_YIELD}
+
+
 def build_features(
     target_symbol: str,
     panel: dict[str, pd.DataFrame],

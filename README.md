@@ -101,10 +101,27 @@ second Friday in May and a Thursday before Independence Day in July. Times are
 converted from New York's clock for the date in question, so a 14:00 ET statement
 reads 18:00 UTC in September and 19:00 UTC in December.
 
-The cost of not guessing is that the tables end: **past `CALENDAR_END` the
-absence of a warning means nothing was checked, not that nothing is scheduled.**
-Refreshing them is a yearly job, and each `Schedule` carries the page it came
-from.
+The cost of not guessing is that the tables end, and they do not end together:
+the Committee announces its next year each September, so decisions are known
+through 2027, while the BLS and BEA pages carry only the coming twelve months and
+stop at the end of 2026. Each `Schedule` records how far it is maintained in
+`covers_until`, and **past that point the absence of a warning means nothing was
+checked, not that nothing is scheduled** — so `predict` names the series that
+have run out rather than letting the silence pass for a quiet day:
+
+```
+not checked for 2027-09-15 — these calendars end earlier:
+  US payrolls: table ends 2026-12-31 (bls.gov/schedule/news_release/empsit.htm)
+  US CPI: table ends 2026-12-31 (bls.gov/schedule/news_release/cpi.htm)
+  US PCE inflation: table ends 2026-12-31 (bea.gov/news/schedule)
+```
+
+`export` carries the same thing per market as `unchecked_releases`, so a snapshot
+consumer reading an empty `caveats` is not left to guess which of the two it
+means.
+
+Refreshing them is a yearly job: extend `dates` from the page each `Schedule`
+names and move its `covers_until` to match.
 
 ## Install
 
@@ -123,10 +140,12 @@ python -m gapmodel stock MU --explain  # one company's next open, with its drive
 python -m gapmodel predict --shock '^KS11=+2%'  # what-if: re-run under a hypothetical move
 python -m gapmodel predict --shock 'CL=F=-5%' --shock 'JPY=X=+2%'  # shocks compose
 python -m gapmodel backtest --reliability
+python -m gapmodel scorecard          # the last 21 sessions: called, realised, hit
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
 python -m gapmodel screen             # US stocks: liquid, unusually active, moving
 python -m gapmodel shortlist --top 10 # rank the US universe by demonstrated edge
 python -m gapmodel shortlist --gainers 10  # only the ten biggest movers of the latest session
+python -m gapmodel journal            # write today's calls down, and score the settled ones
 ```
 
 `predict` prints one row per market with the probability and the out-of-sample
@@ -250,8 +269,9 @@ the daily model with a warning instead of returning nothing.
 
 ### Single stocks
 
-`stock` forecasts one company's opening auction with the same machinery, and the
-memory and storage complex is what it is pointed at first:
+`stock` forecasts one company's opening auction with the same machinery, pointed
+at three complexes: memory and storage (MU, WDC, STX), AI accelerators (NVDA,
+AMD, AVGO) and consumer hardware (AAPL):
 
 ```bash
 python -m gapmodel stock                 # every modelled stock
@@ -269,11 +289,22 @@ traded the overnight memory story hours before New York opens, and their bars ar
 other storage names) close with Wall Street and are read a session late, as every
 other American bar is.
 
+Each complex carries its own peer list: the accelerator names read TSMC, SK
+Hynix, Samsung, Tokyo Electron and Advantest, and Apple reads its assemblers and
+component makers — Hon Hai, Largan, TSMC, Murata and LG Innotek — all of which
+price the same handset and datacentre demand before the New York auction. Both
+complexes carry US legs too (NVDA, AMD, AVGO and SMH; QCOM and SWKS for Apple),
+read a session late like every other American bar.
+
 | Stock | AUC | Accuracy | Brier skill | Base rate |
 | --- | --- | --- | --- | --- |
 | Micron (MU) | 0.69 | 0.65 | 0.10 | 0.57 |
 | Western Digital (WDC) | 0.66 | 0.62 | 0.07 | 0.53 |
 | Seagate (STX) | 0.65 | 0.62 | 0.06 | 0.54 |
+| Nvidia (NVDA) | 0.67 | 0.64 | 0.08 | 0.57 |
+| AMD | 0.67 | 0.64 | 0.06 | 0.57 |
+| Broadcom (AVGO) | 0.64 | 0.62 | 0.05 | 0.56 |
+| Apple (AAPL) | 0.64 | 0.61 | 0.05 | 0.55 |
 
 Better than the S&P's daily model, and for a plain reason: a single stock's gap
 is more autocorrelated and more exposed to a sector move than an index average
@@ -333,6 +364,97 @@ the same exchange instead — `ISF.L` for the FTSE 100 and `STW.AX` for the ASX
 as a down open. A series with more than half stale opens is refused outright.
 Bovespa is the worst of the included markets (a quarter of its opening prints
 repeat the previous close), which is part of why it scores lowest.
+
+A feed can also simply stop. Features are aligned by forward-filling, so a
+series that stopped updating is read as one that did not move — right for a
+holiday, wrong for a dead feed, and indistinguishable from inside the model.
+Every command that offers a probability — `predict`, `stock`, `shortlist`,
+`export`, `dashboard` and `sectors` — therefore refuses to run when an input has
+no bar within `--max-stale-days` (5) of today, naming the worst offenders and
+their lags:
+
+```
+error: 40 of 61 input series have no bar within 5 days of 2026-08-15:
+ASML.AS (11d), EXH8.DE (11d), ISF.L (11d), ^FTSE (11d) and 36 more.
+```
+
+They refuse rather than dropping the dead columns: the model was fitted over a
+history in which those columns were live, so dropping them at inference time
+would answer a different question from the one the printed metrics describe.
+`--refresh` re-downloads, `--max-stale-days N` widens the tolerance, and
+`--allow-stale` forecasts anyway, warning on stderr instead of failing — so a
+snapshot piped from `export` stays valid JSON either way.
+
+Only shared inputs can fail a whole run. A single name that `stock` or
+`shortlist` was asked to forecast is read by one model — its own — so a listing
+that stopped trading is dropped by name and the rest of the universe is still
+ranked. A name that is a *peer* of something requested counts as a shared input,
+because it is a column in another company's model.
+
+"Input" means a series the requested forecasts actually read, not everything the
+download happened to fetch. One panel serves every command and every model reads
+a subset of it: the STOXX 600 sector trackers are features of the European
+indices only, and a tracker standing in for an opening auction is read only by
+its own index. A quiet `EXH8.DE` fails `predict --market ^GDAXI` and is beside
+the point for `stock MU`, which never opens it.
+
+A series that arrived with no bars at all has no lag to measure, so it is named
+on stderr separately rather than counted among the series the refusal judges: a
+download that returned nothing is a different failure with a different remedy.
+
+`backtest` is not guarded, and deliberately: it scores history, where the bars
+in question are the data rather than forward-filled stand-ins for missing data.
+
+The tolerance is measured in calendar days against today, which cannot tell a
+dead feed from a closed exchange: a week-long national holiday (Golden Week,
+Chinese New Year) will trip the guard on a panel that is perfectly current.
+`--max-stale-days` is the answer to that, and the reason the refusal names every
+series and its lag rather than asserting the feed is broken. The daily Pages
+publish runs at `--max-stale-days 12` for exactly this reason — it has nobody to
+pass a flag when Shanghai closes for ten days — and still fails, rather than
+shipping the app a forward-filled snapshot, when a feed goes quiet for longer
+than any exchange calendar explains.
+
+## Recent record
+
+The table above is twenty years, which is the right measure of a model and the
+wrong measure of this week: a hundred recent sessions move the fourth decimal of
+five thousand, so a month that has stopped working is invisible in it.
+`scorecard` reads the same walk-forward predictions and keeps only the tail —
+what was called for each of the last sessions, what the auction did, and how that
+window's accuracy and calibration compare with the full sample.
+
+```bash
+python -m gapmodel scorecard                      # last 21 sessions, every index
+python -m gapmodel scorecard --market MU --window 63
+python -m gapmodel scorecard --log docs/live-scorecard.csv   # accumulate a log
+```
+
+```
+symbol last_session  p_open_up called realised  gap_pct  hit  n  window_accuracy  window_brier_skill  full_brier_skill  skill_change
+ ^N225   2026-08-14     0.5312     up       up    0.736 True 21           0.9524              0.7061            0.3611        0.3450
+ ^GSPC   2026-08-14     0.5045     up       up    0.098 True 21           0.7619              0.2688            0.1082        0.1607
+```
+
+Nothing is refitted or re-predicted: each probability is the walk-forward's own,
+from a model fitted only on sessions before the one it scored, which is what
+makes a recent window an out-of-sample record rather than a fit to last month.
+The realised gap *size* is carried beside the binary outcome because a miss is
+not one thing — calling a down open against a two-basis-point gap is the model
+declining to distinguish noise, and the same call against a 1.8% gap up is a call
+that was wrong about the session.
+
+A market is flagged only when its window is worse calibrated than its own base
+rate (negative Brier skill), and only over at least ten sessions. A fall from the
+full sample is not enough on its own, because a good month regresses, and neither
+is a low hit rate, which a run of near-flat opens produces by itself. Even then
+one window is weak evidence: at 21 sessions a hit rate's standard error is around
+11 points, so a run of flagged windows is the thing to read.
+
+`--log PATH` merges the scored sessions into a CSV, one row per market and
+session, so a daily run accumulates a record instead of overwriting one. It is
+idempotent: a session scored twice keeps the later row rather than double-counting
+the day.
 
 ## Asia session dashboard
 
@@ -467,6 +589,62 @@ listings, which means the backtest metrics carry survivorship bias — the names
 that were delisted or acquired are absent, so a genuinely point-in-time universe
 would read worse.
 
+## Forecast journal and live skill
+
+`scorecard` above measures the walk-forward record over its last sessions, which
+is still the model scoring itself on history it was handed whole. `journal`
+measures it against sessions that had not happened when the probability was
+written down — the number a reader of a live forecast can actually act on.
+
+```bash
+python -m gapmodel journal                       # record today, settle what printed, score
+python -m gapmodel journal --settle-only         # score the journal without forecasting
+python -m gapmodel journal --window 120 --fail-on-decay
+```
+
+Each run appends its forecasts to `docs/forecast-log.csv`, one row per market
+and session, then fills in the realised open for the rows whose auction has
+since printed. A session already in the journal is never re-forecast and never
+overwritten, so a probability cannot be improved after the fact and a run
+repeated twice in a morning does not get two attempts at the same open.
+
+Scoring follows the label the model is fitted on — an opening print above the
+previous close, read from the same symbol the model labels on, so the markets
+whose index open Yahoo repeats are settled on their tracker (`ISF.L` for the
+FTSE, `STW.AX` for the ASX) rather than graded on a price the project already
+rejects. Sessions that cannot carry a label are retired rather than counted: an
+open that merely repeats the previous close (`stale`) and a session the market
+never held (`no-session`, a holiday the journal did not know about).
+
+A third status covers the row that looks like a forecast but is not one. The
+session a model forecasts is the one after the last session it has *complete*
+features for, so a market still missing an indicator for yesterday is forecast
+for an auction that has already printed. Nothing is leaked — every feature is
+lagged either way — but it is not a call anybody could have acted on, so it is
+journalled as `late` and left out of the live record.
+
+```
+forecast journal: 320 rows  settled 288  pending 16  unscorable 16
+
+live record over the last 60 settled sessions per market:
+ market symbol  settled  hit_rate  base_rate  brier  brier_skill  mean_p       from         to
+S&P 500  ^GSPC       30      0.50       0.60 0.2666      -0.1109  0.5637 2026-07-06 2026-08-14
+
+below their own drift — the model is not adding a read here:
+  S&P 500 (^GSPC): hit 50% against a 60% drift, Brier skill -0.111 over 30 sessions
+```
+
+Skill is measured against each market's own drift over the same sessions, not
+against a coin flip: predicting "up" every morning in a market that opens up 60%
+of the time is drift, not a read, and a Brier score has to clear that constant
+forecast before it says anything. The accuracy to beat is whichever side the
+drift leans — 70% in a market that opened up only 30% of the time, where the
+up-rate alone would be a bar the model clears by knowing nothing. A market that
+fails to is called out by name, and `--fail-on-decay` turns that into a non-zero
+exit so a scheduled run can raise it. Nothing is reported for a market
+with fewer than 20 settled sessions: the sampling error on a hit rate over a
+handful of opens is wider than any decay worth alerting on.
+
 ## Trend score
 
 `score` ranks an arbitrary list of tickers by a single price-derived number: the
@@ -498,6 +676,51 @@ reproducible; the z-score depends only on the trailing window, so it was chosen
 instead. Either way this is an *approximation of the ranking*, not a reproduction
 of the column: the real one is driven by inputs a daily price bar does not
 contain.
+
+### Relative to a universe
+
+The score above is *absolute* — where a stock sits in its own history — so in a
+broadly rising market nearly every name reads positive and a watchlist bunches
+up well above zero (the 32-name list above averaged +1.49 on 2026-08-14, with
+only two names below zero). `--relative` restates it as a cross-section: the
+comparison universe is scored on the same session, and each ticker is reported
+as its standardised position within that distribution plus `pct`, the share of
+the universe scoring no higher (a name in the universe counts itself, so the
+weakest member of 157 reads 1 rather than 0).
+
+```bash
+python -m gapmodel score IVZ JPM CLX --relative              # vs the built-in US list
+python -m gapmodel score IVZ JPM --relative --universe my.txt
+```
+
+```
+symbol   last  relative  pct  score       asof
+   IVZ  32.55      1.67   97   2.59 2026-08-14
+   JPM 362.84      1.64   96   2.56 2026-08-14
+   CLX 105.70     -0.41   37   0.23 2026-08-14
+
+universe: 157 names as of 2026-08-14, raw score mean +0.69 sd 1.14
+```
+
+`relative` is 0 for an average stock *today* whatever the market has done, which
+makes it comparable across dates and is the shape the ThinkorSwim column has.
+The footer states what was compared against, and names whose data stops before
+the session are listed as stale rather than silently dragging the mean. The
+session is the newest close the universe actually reached at or before `--asof`,
+not `--asof` itself, so asking as of a weekend prices the cross-section on the
+Friday rather than declaring every name stale. The
+comparison universe defaults to `us_universe()`; a symbol being scored need not
+belong to it, and does not join the distribution it is measured against — asking
+about a stock must not move its own benchmark, so a non-member with fresher data
+can be dated *after* the cross-section, and the footer names it when it is.
+
+What this does **not** do is agree with that column any better. Re-centring is an
+affine transform of the same number, so the correlation is unchanged by
+construction (r = +0.475 on the sample date either way). It fixes the shape of
+the output, not its content: on the watchlist above, `relative` averages +0.70
+with sd 0.90 against the column's -0.27 and sd 1.77 — closer, but still tilted
+positive, because that watchlist really was stronger than the universe. Getting
+closer than this needs different inputs, not a different yardstick.
 
 ## Stock screener
 

@@ -82,6 +82,42 @@ def test_backtest_since_in_parser():
     assert not args.last_week
 
 
+def test_scorecard_accepts_a_window_a_stock_and_a_log():
+    parser = build_parser()
+    args = parser.parse_args(
+        ["scorecard", "--market", "mu", "--window", "40", "--log", "docs/log.csv"]
+    )
+    assert args.market == ["MU"]
+    assert args.window == 40
+    assert args.log == "docs/log.csv"
+
+
+def test_scorecard_rejects_an_unmodelled_symbol(capsys):
+    with pytest.raises(SystemExit):
+        main(["scorecard", "--market", "^NOPE"])
+    assert "unknown market" in capsys.readouterr().err
+
+
+def test_scorecard_rejects_an_empty_window_before_fitting_anything(capsys):
+    with pytest.raises(SystemExit):
+        main(["scorecard", "--window", "0"])
+    assert "must be greater than 0" in capsys.readouterr().err
+
+
+def test_journal_and_scorecard_are_separate_commands():
+    # Both score the model's calls, but scorecard reads the walk-forward's own
+    # predictions and journal reads what was written down before each open.
+    parser = build_parser()
+    live = parser.parse_args(
+        ["journal", "--market", "^FTSE", "--window", "90", "--min-settled", "5", "--settle-only"]
+    )
+    assert live.func is not parser.parse_args(["scorecard"]).func
+    assert live.market == ["^FTSE"]
+    assert (live.window, live.min_settled) == (90, 5)
+    assert live.settle_only and not live.fail_on_decay
+    assert live.log.endswith("forecast-log.csv")
+
+
 def test_shock_parsing_accepts_percentages_and_fractions():
     from gapmodel.predict import parse_shock
 
@@ -223,6 +259,65 @@ def test_screen_rejects_an_unreadable_universe_file(tmp_path):
     assert "error:" in str(exit_info.value)
 
 
+def test_score_rejects_a_comparison_universe_without_relative(tmp_path):
+    path = tmp_path / "u.txt"
+    path.write_text("AAPL\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exit_info:
+        main(["score", "IVZ", "--universe", str(path)])
+    assert "--universe applies to --relative" in str(exit_info.value)
+
+
+def test_score_rejects_an_unreadable_comparison_universe(tmp_path):
+    with pytest.raises(SystemExit) as exit_info:
+        main(["score", "IVZ", "--relative", "--universe", str(tmp_path / "missing.txt")])
+    assert "error:" in str(exit_info.value)
+
+
+def test_score_relative_compares_against_the_us_universe_by_default(monkeypatch, capsys):
+    from gapmodel import cli
+    from gapmodel.score import Reference, RelativeScore
+    from gapmodel.universe import us_universe
+
+    seen = {}
+
+    def fake_relative(symbols, universe, **kwargs):
+        seen["symbols"] = symbols
+        seen["universe"] = universe
+        scored = [RelativeScore("IVZ", 2.59, 1.4, 92.0, 32.55, pd.Timestamp("2026-08-14"), 200)]
+        return scored, Reference(pd.Timestamp("2026-08-14"), 150, 1.2, 0.98, stale=("KHC",))
+
+    monkeypatch.setattr(cli, "relative_scores", fake_relative)
+    main(["score", "ivz", "--relative"])
+
+    assert seen["symbols"] == ["IVZ"]
+    assert seen["universe"] == us_universe()
+    out = capsys.readouterr().out
+    assert "IVZ" in out and "1.4" in out
+    assert "universe: 150 names as of 2026-08-14" in out
+    assert "KHC" in out
+
+
+def test_score_without_relative_prints_the_raw_table(monkeypatch, capsys):
+    from gapmodel import cli
+    from gapmodel.score import TrendScore
+
+    def fake_relative(*_args, **_kwargs):
+        raise AssertionError("relative_scores must not run without --relative")
+
+    monkeypatch.setattr(cli, "relative_scores", fake_relative)
+    monkeypatch.setattr(
+        cli,
+        "score_symbols",
+        lambda symbols, **kwargs: [TrendScore("IVZ", 2.59, 32.55, pd.Timestamp("2026-08-14"), 200)],
+    )
+    main(["score", "IVZ"])
+
+    out = capsys.readouterr().out
+    assert "IVZ" in out
+    assert "universe:" not in out
+    assert "relative" not in out
+
+
 def test_intraday_falls_back_to_the_daily_model_when_futures_bars_are_missing(monkeypatch):
     """A stale futures feed should cost sharpness, not the whole forecast."""
     import argparse
@@ -274,14 +369,14 @@ def test_a_total_hourly_outage_still_yields_a_daily_forecast(monkeypatch, tmp_pa
     assert cli._hourly(args) is None
 
 
-def _stub_forecast(name: str, caveats: tuple[str, ...]):
+def _stub_forecast(name: str, caveats: tuple[str, ...], session: str = "2026-09-04"):
     from gapmodel.predict import Forecast
 
     return Forecast(
         symbol="^GSPC",
         name=name,
         region="Americas",
-        session=pd.Timestamp("2026-09-04"),
+        session=pd.Timestamp(session),
         probability_up=0.6,
         backtest={},
         contributions=pd.Series(dtype=float),
@@ -303,3 +398,29 @@ def test_an_uneventful_run_prints_no_caveat_section(capsys):
 
     cli._print_caveats([_stub_forecast("S&P 500", ())])
     assert capsys.readouterr().out == ""
+
+
+def test_a_session_past_a_calendar_is_told_the_calendar_ran_out(capsys):
+    """Only the FOMC table reaches 2027, so the rest must say they were unread."""
+    from gapmodel import cli
+
+    cli._print_caveats([_stub_forecast("S&P 500", (), session="2027-09-15")])
+    out = capsys.readouterr().out
+    assert "not checked for 2027-09-15" in out
+    assert "US CPI: table ends 2026-12-31" in out
+    assert "FOMC decision" not in out
+
+
+def test_a_run_spanning_the_year_end_warns_about_the_session_that_needs_it(capsys):
+    """Tokyo's next session can be past the tables while New York's is not."""
+    from gapmodel import cli
+
+    cli._print_caveats(
+        [
+            _stub_forecast("S&P 500", (), session="2026-12-31"),
+            _stub_forecast("Nikkei 225", (), session="2027-01-04"),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "not checked for 2027-01-04" in out
+    assert "2026-12-31 —" not in out

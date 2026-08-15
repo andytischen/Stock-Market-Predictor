@@ -15,10 +15,13 @@ BLS scheduled them for a Wednesday in February, the second Friday in May and a
 Thursday before Independence Day in July. A caveat that fires on the wrong day
 teaches you to ignore it, so nothing here is guessed.
 
-The consequence is that the tables end. Past ``CALENDAR_END`` no flag is raised,
-and the absence of a warning means nothing was checked rather than nothing being
-scheduled. Refreshing them is a yearly job: each ``Schedule`` names the page it
-came from.
+The consequence is that the tables end, and they end at different dates: the
+Fed publishes its decisions two years ahead, while the BLS and BEA pages carry
+only the coming twelve months. Each schedule therefore states how far it is
+maintained, and past that point no flag is raised for it — the absence of a
+warning means nothing was checked rather than nothing being scheduled.
+``unmaintained_on`` names the series in that state so silence can be reported as
+silence. Refreshing them is a yearly job: each ``Schedule`` names its page.
 """
 
 from __future__ import annotations
@@ -35,9 +38,6 @@ from .markets import Market, last_observed_utc
 # question rather than pinned to one offset.
 EASTERN = ZoneInfo("America/New_York")
 
-# Past this date every table below has run out.
-CALENDAR_END = pd.Timestamp("2026-12-31")
-
 
 @dataclass(frozen=True)
 class Schedule:
@@ -45,18 +45,27 @@ class Schedule:
 
     ``time_et`` is the announced release time on New York's clock, ``dates`` the
     published days, and ``source`` the page to refresh them from.
+    ``covers_until`` is how far that page reached when it was last read, which is
+    not the same as the last date in ``dates``: a table can be maintained through
+    December and simply have no release in the final week.
     """
 
     name: str
     time_et: tuple[int, int]
     source: str
+    covers_until: str
     dates: tuple[str, ...]
+
+    @property
+    def end(self) -> pd.Timestamp:
+        return pd.Timestamp(self.covers_until)
 
 
 PAYROLLS = Schedule(
     name="US payrolls",
     time_et=(8, 30),
     source="bls.gov/schedule/news_release/empsit.htm",
+    covers_until="2026-12-31",
     dates=(
         "2026-01-09",
         "2026-02-11",
@@ -77,6 +86,7 @@ CPI = Schedule(
     name="US CPI",
     time_et=(8, 30),
     source="bls.gov/schedule/news_release/cpi.htm",
+    covers_until="2026-12-31",
     dates=(
         "2026-01-13",
         "2026-02-13",
@@ -100,6 +110,7 @@ PCE = Schedule(
     name="US PCE inflation",
     time_et=(8, 30),
     source="bea.gov/news/schedule",
+    covers_until="2026-12-31",
     dates=(
         "2026-08-26",
         "2026-09-30",
@@ -110,11 +121,15 @@ PCE = Schedule(
 )
 
 # Decision days — the second day of each two-day meeting — with the statement at
-# 14:00 ET, an hour and a half before the cash close.
+# 14:00 ET, an hour and a half before the cash close. The Committee announces the
+# following year each September, so this table runs a year past the others; every
+# date after the current year is tentative until the preceding meeting confirms
+# it, which is close enough for a caveat.
 FOMC = Schedule(
     name="FOMC decision",
     time_et=(14, 0),
     source="federalreserve.gov/monetarypolicy/fomccalendars.htm",
+    covers_until="2027-12-31",
     dates=(
         "2026-01-28",
         "2026-03-18",
@@ -124,10 +139,21 @@ FOMC = Schedule(
         "2026-09-16",
         "2026-10-28",
         "2026-12-09",
+        "2027-01-27",
+        "2027-03-17",
+        "2027-04-28",
+        "2027-06-09",
+        "2027-07-28",
+        "2027-09-15",
+        "2027-10-27",
+        "2027-12-08",
     ),
 )
 
 SCHEDULES: tuple[Schedule, ...] = (PAYROLLS, CPI, PCE, FOMC)
+
+# Past this date nothing at all is checked, because no table reaches it.
+CALENDAR_END = max(schedule.end for schedule in SCHEDULES)
 
 
 @dataclass(frozen=True)
@@ -151,15 +177,24 @@ def _utc_hours(day: pd.Timestamp, time_et: tuple[int, int]) -> float:
 def events_on(date: pd.Timestamp) -> tuple[Event, ...]:
     """Releases scheduled for one calendar day, earliest first."""
     day = pd.Timestamp(date).normalize()
-    if day > CALENDAR_END:
-        return ()
     stamp = day.strftime("%Y-%m-%d")
     found = [
         Event(schedule.name, day, _utc_hours(day, schedule.time_et))
         for schedule in SCHEDULES
-        if stamp in schedule.dates
+        if day <= schedule.end and stamp in schedule.dates
     ]
     return tuple(sorted(found, key=lambda event: event.time_utc))
+
+
+def unmaintained_on(date: pd.Timestamp) -> tuple[str, ...]:
+    """Series whose published calendar does not reach ``date``.
+
+    Reported so that a day with no warning can be distinguished from a day
+    nobody has checked. Every name here needs its table refreshed from the
+    agency's page before a caveat on that date means anything.
+    """
+    day = pd.Timestamp(date).normalize()
+    return tuple(s.name for s in SCHEDULES if day > s.end)
 
 
 def caveats(target: Market, session: pd.Timestamp) -> tuple[str, ...]:

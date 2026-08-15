@@ -48,6 +48,35 @@ MEMORY_PEERS: tuple[Instrument, ...] = (
     Instrument("SMH", "US semiconductor ETF", close_utc=US_CLOSE_UTC),
 )
 
+# The accelerator complex: the foundry, memory and equipment names whose Asian
+# sessions price AI datacentre demand before New York opens, plus the US legs
+# that trade it a session late.
+ACCELERATOR_PEERS: tuple[Instrument, ...] = (
+    Instrument("2330.TW", "TSMC", close_utc=5.5),
+    Instrument("000660.KS", "SK Hynix", close_utc=6.5),
+    Instrument("005930.KS", "Samsung Electronics", close_utc=6.5),
+    Instrument("8035.T", "Tokyo Electron", close_utc=6.0),
+    Instrument("6857.T", "Advantest", close_utc=6.0),
+    Instrument("NVDA", "Nvidia", close_utc=US_CLOSE_UTC),
+    Instrument("AMD", "Advanced Micro Devices", close_utc=US_CLOSE_UTC),
+    Instrument("AVGO", "Broadcom", close_utc=US_CLOSE_UTC),
+    Instrument("SMH", "US semiconductor ETF", close_utc=US_CLOSE_UTC),
+)
+
+# Apple's hardware supply chain: the assemblers and component makers whose order
+# books are the same handset and Mac demand, all of them listed in Taipei, Tokyo
+# or Seoul and therefore closed before the New York auction.
+APPLE_PEERS: tuple[Instrument, ...] = (
+    Instrument("2317.TW", "Hon Hai Precision", close_utc=5.5),
+    Instrument("3008.TW", "Largan Precision", close_utc=5.5),
+    Instrument("2330.TW", "TSMC", close_utc=5.5),
+    Instrument("6981.T", "Murata Manufacturing", close_utc=6.0),
+    Instrument("011070.KS", "LG Innotek", close_utc=6.5),
+    Instrument("AAPL", "Apple", close_utc=US_CLOSE_UTC),
+    Instrument("QCOM", "Qualcomm", close_utc=US_CLOSE_UTC),
+    Instrument("SWKS", "Skyworks Solutions", close_utc=US_CLOSE_UTC),
+)
+
 
 @dataclass(frozen=True)
 class Stock:
@@ -80,18 +109,22 @@ STOCKS: tuple[Stock, ...] = (
     Stock("MU", "Micron Technology", "memory and storage", MEMORY_PEERS),
     Stock("WDC", "Western Digital", "memory and storage", MEMORY_PEERS),
     Stock("STX", "Seagate Technology", "memory and storage", MEMORY_PEERS),
+    Stock("NVDA", "Nvidia", "AI accelerators", ACCELERATOR_PEERS),
+    Stock("AMD", "Advanced Micro Devices", "AI accelerators", ACCELERATOR_PEERS),
+    Stock("AVGO", "Broadcom", "AI accelerators", ACCELERATOR_PEERS),
+    Stock("AAPL", "Apple", "consumer hardware", APPLE_PEERS),
 )
 
 STOCKS_BY_SYMBOL = {s.symbol: s for s in STOCKS}
 
-# Said next to every single-name probability. None of it is a feature, and all
-# of it moves an individual open more than the overnight tape does.
 # The shortlist universe: single listings the repository models without a peer
 # list of their own. Held as a set because every feature build asks whether its
 # target is a company.
 SHORTLISTED = frozenset(modelled_universe())
 
 
+# Said next to every single-name probability. None of it is a feature, and all
+# of it moves an individual open more than the overnight tape does.
 BLIND_SPOTS: tuple[str, ...] = (
     "results and guidance, including anything released after the previous bell",
     "analyst actions, index changes and block trades",
