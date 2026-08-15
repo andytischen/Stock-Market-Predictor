@@ -335,6 +335,41 @@ as a down open. A series with more than half stale opens is refused outright.
 Bovespa is the worst of the included markets (a quarter of its opening prints
 repeat the previous close), which is part of why it scores lowest.
 
+A feed can also simply stop. Features are aligned by forward-filling, so a
+series that stopped updating is read as one that did not move — right for a
+holiday, wrong for a dead feed, and indistinguishable from inside the model.
+`predict`, `stock`, `shortlist` and `export` therefore refuse to run when an
+input has no bar within `--max-stale-days` (5) of today, naming the worst
+offenders and their lags:
+
+```
+error: 40 of 61 input series have no bar within 5 days of 2026-08-15:
+ASML.AS (11d), EXH8.DE (11d), ISF.L (11d), ^FTSE (11d) and 36 more.
+```
+
+They refuse rather than dropping the dead columns: the model was fitted over a
+history in which those columns were live, so dropping them at inference time
+would answer a different question from the one the printed metrics describe.
+`--refresh` re-downloads, `--max-stale-days N` widens the tolerance, and
+`--allow-stale` forecasts anyway, warning on stderr instead of failing — so a
+snapshot piped from `export` stays valid JSON either way.
+
+Only shared inputs can fail a whole run. A single name that `stock` or
+`shortlist` was asked to forecast is read by one model — its own — so a listing
+that stopped trading is dropped by name and the rest of the universe is still
+ranked. A name that is a *peer* of something requested counts as a shared input,
+because it is a column in another company's model.
+
+The tolerance is measured in calendar days against today, which cannot tell a
+dead feed from a closed exchange: a week-long national holiday (Golden Week,
+Chinese New Year) will trip the guard on a panel that is perfectly current.
+`--max-stale-days` is the answer to that, and the reason the refusal names every
+series and its lag rather than asserting the feed is broken. The daily Pages
+publish runs at `--max-stale-days 12` for exactly this reason — it has nobody to
+pass a flag when Shanghai closes for ten days — and still fails, rather than
+shipping the app a forward-filled snapshot, when a feed goes quiet for longer
+than any exchange calendar explains.
+
 ## Recent record
 
 The table above is twenty years, which is the right measure of a model and the

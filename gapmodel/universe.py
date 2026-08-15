@@ -61,10 +61,13 @@ ETFS: tuple[str, ...] = (
 # fmt: on
 
 
-# Nasdaq-listed names, drawn from the two lists above. Listing venue is not
-# something Yahoo tells us, so this is a hand-maintained snapshot (2025) in the
-# same spirit as the lists it is drawn from: a venue slice of the forecast
-# universe, not an authoritative index membership.
+# Nasdaq-listed names, drawn from the two lists above and from the curated
+# single-name registry, which is why STX appears here and in neither list: the
+# invariant is that `stock` and `shortlist` accept the same symbols, and a test
+# asserts it. Listing venue is not something Yahoo tells us, so this is a
+# hand-maintained snapshot (2025) in the same spirit as the lists it is drawn
+# from: a venue slice of the forecast universe, not an authoritative index
+# membership.
 #
 # Two consequences worth stating. Selecting today's survivors and then fitting
 # on twenty years of their history is survivorship bias: the set excludes the
