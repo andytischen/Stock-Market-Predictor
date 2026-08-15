@@ -98,6 +98,12 @@ def test_scorecard_rejects_an_unmodelled_symbol(capsys):
     assert "unknown market" in capsys.readouterr().err
 
 
+def test_scorecard_rejects_an_empty_window_before_fitting_anything(capsys):
+    with pytest.raises(SystemExit):
+        main(["scorecard", "--window", "0"])
+    assert "must be greater than 0" in capsys.readouterr().err
+
+
 def test_shock_parsing_accepts_percentages_and_fractions():
     from gapmodel.predict import parse_shock
 

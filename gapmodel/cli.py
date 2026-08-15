@@ -803,7 +803,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scorecard.add_argument(
         "--window",
-        type=int,
+        type=_positive_int,
         default=RECENT_WINDOW,
         help=f"scored sessions in the recent window (default {RECENT_WINDOW})",
     )
