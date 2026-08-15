@@ -58,7 +58,9 @@ class ArbSignal:
     region: str
     p_model: float
     p_consensus: float
-    divergence: float  # p_model - p_consensus; + = model more bullish than peers
+    # p_model - p_consensus; + = model more bullish than peers. Full precision,
+    # used for ranking; to_frame recomputes it from the rounded columns.
+    divergence: float
     top_peer: str  # name of the most strongly correlated peer
     top_peer_corr: float  # signed rho with that peer; negative = inverse peer
     top_peer_prob: float  # that peer's own model probability
