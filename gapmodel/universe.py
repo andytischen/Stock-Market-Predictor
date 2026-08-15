@@ -61,6 +61,36 @@ ETFS: tuple[str, ...] = (
 # fmt: on
 
 
+# Nasdaq-listed names, drawn from the two lists above. Listing venue is not
+# something Yahoo tells us, so this is a hand-maintained snapshot (2025) in the
+# same spirit as the lists it is drawn from: it is the universe the per-stock
+# opening-gap model runs over, not an authoritative index membership.
+#
+# Two consequences worth stating. Selecting today's survivors and then fitting
+# on twenty years of their history is survivorship bias: the set excludes the
+# Nasdaq names that were delisted or acquired, so backtest metrics here read
+# better than a genuinely point-in-time universe would. And a name whose
+# listing moved (Honeywell and Palantir both changed venue) is classified by
+# where it trades now, not where it traded for the bulk of the sample.
+# fmt: off
+NASDAQ: tuple[str, ...] = (
+    "AAPL", "ADBE", "AMD", "AMGN", "AMZN", "AVGO", "BKNG", "CHTR", "CMCSA",
+    "COST", "CSCO", "GILD", "GOOG", "GOOGL", "HON", "INTC", "INTU", "ISRG",
+    "KHC", "MDLZ", "META", "MSFT", "MU", "NFLX", "NVDA", "PEP", "PYPL",
+    "QCOM", "SBUX", "TMUS", "TSLA", "TXN",
+    "AAL", "AFRM", "APP", "ARM", "COIN", "CRWD", "DDOG", "DKNG", "ENPH",
+    "ETSY", "FSLR", "HOOD", "LCID", "LULU", "LYFT", "MARA", "MRNA", "MSTR",
+    "OKTA", "ON", "PANW", "PLTR", "PLUG", "RIOT", "RIVN", "ROKU", "SMCI",
+    "SOFI", "STX", "TTD", "UAL", "WDC", "ZM", "ZS",
+)
+# fmt: on
+
+
+def nasdaq_universe() -> list[str]:
+    """Nasdaq-listed tickers the per-stock gap model forecasts, stable order."""
+    return list(dict.fromkeys(NASDAQ))
+
+
 def us_universe(include_etfs: bool = False) -> list[str]:
     """The default US screening universe, deduplicated and in a stable order."""
     symbols = LARGE_CAP + MID_CAP + (ETFS if include_etfs else ())
