@@ -2,7 +2,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gapmodel.features import _column_name, _lag_days, as_of, build_features, opening_gap
+from gapmodel.features import (
+    _column_name,
+    _lag_days,
+    as_of,
+    build_features,
+    feature_symbols,
+    opening_gap,
+)
 from gapmodel.markets import INDICATORS, MARKETS, SECTOR_SYMBOLS, all_symbols, market
 from gapmodel.model import walk_forward
 
@@ -125,6 +132,44 @@ def test_sector_features_reach_european_markets_only(panel):
     sectors = {f"ind_{_column_name(s)}_return" for s in SECTOR_SYMBOLS}
     assert sectors & set(european.columns)
     assert not sectors & set(overseas.columns)
+
+
+@pytest.mark.parametrize("target", ["^GSPC", "^GDAXI"])
+def test_the_named_inputs_are_the_ones_the_model_reads(panel, target):
+    """What the staleness guard is entitled to refuse a run over.
+
+    Both directions matter: a series left out must make no difference to the
+    design matrix, and a series named must make one, or the guard is judging a
+    run on a feed it never reads.
+    """
+    named = feature_symbols(target)
+    whole, _ = build_features(target, panel)
+    restricted, _ = build_features(target, {s: b for s, b in panel.items() if s in named})
+    pd.testing.assert_frame_equal(whole, restricted)
+    for symbol in (set(panel) & named) - {target}:
+        without, _ = build_features(target, {s: b for s, b in panel.items() if s != symbol})
+        assert set(without.columns) < set(whole.columns), f"{symbol} is named but unread"
+
+
+def test_a_sector_tracker_is_an_input_in_europe_and_not_elsewhere():
+    """The asymmetry `build_features` applies, in the form a guard can check."""
+    assert "EXH8.DE" in feature_symbols("^GDAXI")
+    assert "EXH8.DE" not in feature_symbols("^GSPC")
+    # A single name is given Wall Street's clock and reads what a US index does.
+    assert "EXH8.DE" not in feature_symbols("MU")
+
+
+def test_an_opening_stand_in_is_an_input_to_its_own_index_only():
+    """`ISF.L` is read as the FTSE's opening auction, and by nothing else."""
+    assert market("^FTSE").gap_symbol == "ISF.L"
+    assert "ISF.L" in feature_symbols("^FTSE")
+    assert "ISF.L" not in feature_symbols("^GSPC")
+
+
+def test_a_peer_is_an_input_to_the_names_it_leads(panel):
+    """A memory name reads Samsung's session; an index does not."""
+    assert "005930.KS" in feature_symbols("MU")
+    assert "005930.KS" not in feature_symbols("^GSPC")
 
 
 def test_oil_shock_is_the_move_scaled_by_known_volatility(panel):
