@@ -99,6 +99,32 @@ python -W ignore -m gapmodel --cache /tmp/probe-cache shortlist AMD MU JPM XOM -
 md5sum -c /tmp/warm.md5
 ```
 
+The cache may be **empty** on a fresh box (`~/.cache/gapmodel` absent). Warm it once with
+`python -W ignore -m gapmodel fetch` (~4 min, 61 symbols) before doing anything that needs bars;
+every staleness probe below is a copy of that warm cache.
+
+An *aged* cache for the staleness guard is one `awk` pass over the copy — trimming every series to a
+fixed old date gives a uniform lag, so the error message's `(Nd)` lags are predictable:
+
+```bash
+cp -a ~/.cache/gapmodel /tmp/stale-cache
+cd /tmp/stale-cache && for f in *.csv; do
+  awk -F, 'NR==1 || $1 <= "2026-07-20"' "$f" > /tmp/t && mv /tmp/t "$f"
+done
+```
+
+A series that "arrived with no bars at all" is a **header-only CSV** with its `.start`/`.fields`
+sidecars left in place: `load_symbol` then reads an empty frame and keeps it in the panel (delete the
+sidecars instead and it re-downloads). `head -1 idx_VIX.csv > tmp && mv tmp idx_VIX.csv` is enough.
+Note that widening the tolerance so a run *proceeds* with an empty series hits a pre-existing
+downstream failure (`no forecast for ^STOXX50E: '<' not supported between instances of 'Timestamp'
+and 'float'` → `error: no market could be modelled`, exit 1) — check `origin/main` with the same
+probe cache before filing it against a branch.
+
+**All of `--cache`, `--allow-stale`, `--max-stale-days`, `--refresh`, `--verbose` are global flags
+and must come before the subcommand.** `gapmodel export --allow-stale` exits 2 with an argparse
+usage message, which is easy to misread as the command failing.
+
 Pair it with a small explicit symbol list so the run costs two fits rather than 158. Truncating one
 name's CSV to an earlier date *and* inflating its final close is what distinguishes "ranked on the
 panel's latest session" from "ranked on each name's own last two bars": the doctored name has the

@@ -368,6 +368,10 @@ indices only, and a tracker standing in for an opening auction is read only by
 its own index. A quiet `EXH8.DE` fails `predict --market ^GDAXI` and is beside
 the point for `stock MU`, which never opens it.
 
+A series that arrived with no bars at all has no lag to measure, so it is named
+on stderr separately rather than counted among the series the refusal judges: a
+download that returned nothing is a different failure with a different remedy.
+
 `backtest` is not guarded, and deliberately: it scores history, where the bars
 in question are the data rather than forward-filled stand-ins for missing data.
 
