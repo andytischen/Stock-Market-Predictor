@@ -123,6 +123,7 @@ python -m gapmodel stock MU --explain  # one company's next open, with its drive
 python -m gapmodel predict --shock '^KS11=+2%'  # what-if: re-run under a hypothetical move
 python -m gapmodel predict --shock 'CL=F=-5%' --shock 'JPY=X=+2%'  # shocks compose
 python -m gapmodel backtest --reliability
+python -m gapmodel scorecard          # the last 21 sessions: called, realised, hit
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
 python -m gapmodel screen             # US stocks: liquid, unusually active, moving
 python -m gapmodel shortlist --top 10 # rank the Nasdaq universe by demonstrated edge
@@ -332,6 +333,47 @@ the same exchange instead — `ISF.L` for the FTSE 100 and `STW.AX` for the ASX
 as a down open. A series with more than half stale opens is refused outright.
 Bovespa is the worst of the included markets (a quarter of its opening prints
 repeat the previous close), which is part of why it scores lowest.
+
+## Recent record
+
+The table above is twenty years, which is the right measure of a model and the
+wrong measure of this week: a hundred recent sessions move the fourth decimal of
+five thousand, so a month that has stopped working is invisible in it.
+`scorecard` reads the same walk-forward predictions and keeps only the tail —
+what was called for each of the last sessions, what the auction did, and how that
+window's accuracy and calibration compare with the full sample.
+
+```bash
+python -m gapmodel scorecard                      # last 21 sessions, every index
+python -m gapmodel scorecard --market MU --window 63
+python -m gapmodel scorecard --log docs/live-scorecard.csv   # accumulate a log
+```
+
+```
+symbol last_session  p_open_up called realised  gap_pct  hit  n  window_accuracy  window_brier_skill  full_brier_skill  skill_change
+ ^N225   2026-08-14     0.5312     up       up    0.736 True 21           0.9524              0.7061            0.3611        0.3450
+ ^GSPC   2026-08-14     0.5045     up       up    0.098 True 21           0.7619              0.2688            0.1082        0.1607
+```
+
+Nothing is refitted or re-predicted: each probability is the walk-forward's own,
+from a model fitted only on sessions before the one it scored, which is what
+makes a recent window an out-of-sample record rather than a fit to last month.
+The realised gap *size* is carried beside the binary outcome because a miss is
+not one thing — calling a down open against a two-basis-point gap is the model
+declining to distinguish noise, and the same call against a 1.8% gap up is a call
+that was wrong about the session.
+
+A market is flagged only when its window is worse calibrated than its own base
+rate (negative Brier skill), and only over at least ten sessions. A fall from the
+full sample is not enough on its own, because a good month regresses, and neither
+is a low hit rate, which a run of near-flat opens produces by itself. Even then
+one window is weak evidence: at 21 sessions a hit rate's standard error is around
+11 points, so a run of flagged windows is the thing to read.
+
+`--log PATH` merges the scored sessions into a CSV, one row per market and
+session, so a daily run accumulates a record instead of overwriting one. It is
+idempotent: a session scored twice keeps the later row rather than double-counting
+the day.
 
 ## Asia session dashboard
 

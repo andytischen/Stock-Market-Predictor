@@ -32,6 +32,9 @@ from .regions import dashboard_symbols
 from .scenarios import SCENARIOS, scenario
 from .score import DEFAULT_WINDOW, score_symbols
 from .score import to_frame as score_to_frame
+from .scorecard import RECENT_WINDOW, build_scorecard, calls_frame
+from .scorecard import append_log as append_scorecard_log
+from .scorecard import render_text as render_scorecard_text
 from .screener import (
     ATR_WINDOW,
     AVG_WINDOW,
@@ -410,6 +413,27 @@ def _cmd_backtest(args: argparse.Namespace) -> None:
         print(pd.DataFrame(window_rows).round(4).to_string(index=False))
 
 
+def _cmd_scorecard(args: argparse.Namespace) -> None:
+    wanted = args.market or [m.symbol for m in MARKETS]
+    panel = _stock_panel(args) if any(is_stock(s) for s in wanted) else _panel(args)
+    hourly = _hourly(args)
+    records = build_scorecard(
+        panel,
+        symbols=wanted,
+        window=args.window,
+        c=args.regularisation,
+        min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
+        hourly=hourly,
+    )
+    print(render_scorecard_text(records, window=args.window), end="")
+    if args.csv:
+        calls_frame(records).to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
+    if args.log:
+        merged = append_scorecard_log(records, args.log)
+        print(f"\n{args.log}: {len(merged)} scored sessions logged")
+
+
 def _cmd_asia(args: argparse.Namespace) -> None:
     # Volume drives the turnover and participation columns, so a cache written
     # before it was collected is re-downloaded rather than shown as blank.
@@ -767,6 +791,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="shorthand for --since last-Monday-05:00-UTC (the opening of last week)",
     )
     backtest.set_defaults(func=_cmd_backtest)
+
+    scorecard = sub.add_parser(
+        "scorecard", help="recent out-of-sample record: what was called, what opened"
+    )
+    scorecard.add_argument(
+        "--market",
+        action="append",
+        type=_target_symbol,
+        help="restrict to a symbol; a modelled single stock is accepted too",
+    )
+    scorecard.add_argument(
+        "--window",
+        type=int,
+        default=RECENT_WINDOW,
+        help=f"scored sessions in the recent window (default {RECENT_WINDOW})",
+    )
+    scorecard.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
+    scorecard.add_argument("--csv", help="write the scored sessions to this file")
+    scorecard.add_argument(
+        "--log",
+        metavar="PATH",
+        help="merge the scored sessions into this CSV log, one row per session",
+    )
+    scorecard.set_defaults(func=_cmd_scorecard)
 
     asia = sub.add_parser(
         "asia", help="evaluate the Asian session: heavyweights and outside drivers"
