@@ -546,6 +546,7 @@ def _cmd_asia(args: argparse.Namespace) -> None:
 
 def _cmd_dashboard(args: argparse.Namespace) -> None:
     panel = _panel(args)
+    _fresh_enough(panel, args)
     hourly = _hourly(args)
     symbols = [m.symbol for m in MARKETS if m.region == args.region]
     forecasts = forecast_all(
@@ -677,6 +678,7 @@ def _cmd_screen(args: argparse.Namespace) -> None:
 
 def _cmd_sectors(args: argparse.Namespace) -> None:
     panel = _panel(args)
+    _fresh_enough(panel, args)
     forecasts = forecast_all(panel, symbols=[args.market], c=args.regularisation)
     print(render_sector_text(build_sector_board(panel, forecasts[0])), end="")
 
