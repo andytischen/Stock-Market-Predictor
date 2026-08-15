@@ -133,12 +133,13 @@ def guard(
     if absent:
         # Not a refusal: a download that returned nothing is a different failure
         # with a different remedy, and it is reported where it happens. Said here
-        # only so that the count below is not read as covering it.
+        # only so that the count below is not read as covering it — and said
+        # without a denominator of its own, since a second "N of M" beside a
+        # smaller total reads as the two lines disagreeing.
         log.warning(
-            "%d of %d input series arrived with no bars at all, so they are neither "
-            "counted nor judged below: %s",
+            "%d input series arrived with no bars at all, so they are neither counted "
+            "nor judged below: %s",
             len(absent),
-            len(panel),
             _at_most_eight(absent),
         )
     measured = lags(panel, session)
