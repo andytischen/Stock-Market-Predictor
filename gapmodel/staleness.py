@@ -105,8 +105,12 @@ def missing(panel: dict[str, pd.DataFrame]) -> list[str]:
     worse answer than no answer. Naming them separately is the alternative — a
     guard that says "2 of 3 input series" reads as reassurance about the third,
     when the third may never have arrived.
+
+    Sorted, because there is nothing to rank them by: the stale list is truncated
+    worst-first, while panel order would decide which eight of these get named on
+    the strength of download order alone, differently from one run to the next.
     """
-    return [symbol for symbol, bars in panel.items() if bars.empty]
+    return sorted(symbol for symbol, bars in panel.items() if bars.empty)
 
 
 def guard(
@@ -133,12 +137,12 @@ def guard(
     if absent:
         # Not a refusal: a download that returned nothing is a different failure
         # with a different remedy, and it is reported where it happens. Said here
-        # only so that the count below is not read as covering it — and said
-        # without a denominator of its own, since a second "N of M" beside a
-        # smaller total reads as the two lines disagreeing.
+        # only so that a count of the series that did arrive is not read as
+        # covering it — and said without a denominator of its own, since a second
+        # "N of M" beside a smaller total reads as the two lines disagreeing.
         log.warning(
             "%d input series arrived with no bars at all, so they are neither counted "
-            "nor judged below: %s",
+            "nor judged for staleness: %s",
             len(absent),
             _at_most_eight(absent),
         )
