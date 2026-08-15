@@ -125,7 +125,8 @@ python -m gapmodel predict --shock 'CL=F=-5%' --shock 'JPY=X=+2%'  # shocks comp
 python -m gapmodel backtest --reliability
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
 python -m gapmodel screen             # US stocks: liquid, unusually active, moving
-python -m gapmodel shortlist --top 10 # rank the Nasdaq universe by demonstrated edge
+python -m gapmodel shortlist --top 10 # rank the US universe by demonstrated edge
+python -m gapmodel shortlist --gainers 10  # only the ten biggest movers of the latest session
 ```
 
 `predict` prints one row per market with the probability and the out-of-sample
@@ -384,7 +385,7 @@ UTC and publishes the file to GitHub Pages when Pages is enabled with the
 builds the snapshot but skips deployment instead of failing. The published
 `snapshot.json` is what the app downloads and renders.
 
-## Shortlisting the Nasdaq universe
+## Shortlisting the US universe
 
 `stock` above forecasts a handful of names in depth, each with a hand-written
 list of the peers that trade the same demand overnight. `shortlist` takes the
@@ -397,17 +398,45 @@ What a shortlisted name does *not* get is peers; only the curated names have
 them, which the metrics beside each row price in.
 
 ```bash
-python -m gapmodel shortlist                        # the whole Nasdaq universe
+python -m gapmodel shortlist                        # the whole US universe (~158 names)
 python -m gapmodel shortlist AAPL NVDA MSFT         # just these
+python -m gapmodel shortlist --gainers 12           # only the twelve biggest movers
 python -m gapmodel shortlist --top 10 --csv out.csv # strongest ten, all of them to CSV
 ```
+
+The universe spans both venues. Listing venue is not a modelling boundary — the
+13:30 UTC auction is the same auction for a NYSE name as for a Nasdaq one — so
+restricting it to `NASDAQ` only cost coverage, leaving the banks, oils and
+industrials that lead whole sessions unreachable. `nasdaq_universe()` remains as
+a venue slice for a Nasdaq-only report.
+
+`--gainers N` forecasts the N names that moved up most in the panel's latest
+session, and names that session above the table. Only names whose own last bar
+*is* that session are eligible: these all trade one clock, so a series ending
+earlier did not trade in the session being ranked, and a halted or delisted name
+would otherwise hold its final move for ever and take a slot on every run. The
+ranking is a descending sort on the move, so on a session where everything fell
+these are the smallest fallers — which is why the line above the table says the
+selection was ranked on the move rather than asserting a rise. That is what makes a wide universe usable in
+a morning briefing: bars for every candidate are downloaded either way and cost
+almost nothing, while each walk-forward fit costs seconds, so the movers are
+selected *after* the panel exists and only they are fitted. A name is chosen for
+having already moved, which is a reason to read its call rather than evidence
+about it — whether the gap continues or reverses is exactly what the columns
+beside it answer.
+
+Every row also carries **`last_change`**, the move the name has just made, in
+percent. It is context printed next to the call, never a feature of it, and an
+empty cell means the bars could not supply it rather than that the name was
+unchanged. It is read from the raw close, the number a quote screen shows, while
+the model's own label continues to come from total-return bars.
 
 The names are targets and never features. Adding sixty shares to `MARKETS` would
 hand every index sixty new collinear columns and silently change the forecasts
 above, so `target_market()` describes a shortlisted name on demand instead and
 the default download panel is untouched. A ticker outside the universe is
-refused rather than downloaded and ranked beside the rest: add it to `NASDAQ` in
-`universe.py` to forecast it.
+refused rather than downloaded and ranked beside the rest: add it to `LARGE_CAP`
+or `MID_CAP` in `universe.py` to forecast it.
 
 Two columns matter more than the probability, because a naive ranking flatters
 itself twice over:
@@ -434,9 +463,9 @@ itself twice over:
 The horizon is narrow and worth restating: the target is the overnight move into
 the auction, not a view on the company and not a view on the session after the
 bell. The universe in `universe.py` is a hand-maintained snapshot of today's
-Nasdaq names, which means the backtest metrics carry survivorship bias — the
-names that were delisted or acquired are absent, so a genuinely point-in-time
-universe would read worse.
+listings, which means the backtest metrics carry survivorship bias — the names
+that were delisted or acquired are absent, so a genuinely point-in-time universe
+would read worse.
 
 ## Trend score
 
