@@ -35,9 +35,15 @@ jobs:
         run: pip install -e .
 
       - name: Build snapshot
+        # Twelve days, not the default five: Shanghai and Hong Kong close for
+        # eight to ten calendar days at Chinese New Year and the October Golden
+        # Week, and this job has nobody to pass a flag when they do. Wide enough
+        # to publish through a scheduled closure, narrow enough that a feed that
+        # actually stopped still fails the publish rather than shipping a
+        # forward-filled snapshot to the app.
         run: |
           mkdir -p site
-          python -m gapmodel export --out site/snapshot.json
+          python -m gapmodel export --max-stale-days 12 --out site/snapshot.json
           # A tiny index so the Pages root is not a 404.
           cp site/snapshot.json site/latest.json
 

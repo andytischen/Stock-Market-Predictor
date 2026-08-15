@@ -362,7 +362,11 @@ The tolerance is measured in calendar days against today, which cannot tell a
 dead feed from a closed exchange: a week-long national holiday (Golden Week,
 Chinese New Year) will trip the guard on a panel that is perfectly current.
 `--max-stale-days` is the answer to that, and the reason the refusal names every
-series and its lag rather than asserting the feed is broken.
+series and its lag rather than asserting the feed is broken. The daily Pages
+publish runs at `--max-stale-days 12` for exactly this reason — it has nobody to
+pass a flag when Shanghai closes for ten days — and still fails, rather than
+shipping the app a forward-filled snapshot, when a feed goes quiet for longer
+than any exchange calendar explains.
 
 ## Asia session dashboard
 
