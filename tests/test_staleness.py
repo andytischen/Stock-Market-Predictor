@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -157,3 +159,23 @@ def test_every_forecasting_command_is_guarded(command):
 def test_the_tolerance_must_be_a_positive_number_of_days():
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--max-stale-days", "-1", "predict"])
+
+
+def test_the_unattended_publish_asks_for_a_tolerance_the_parser_accepts():
+    """The one caller nobody is watching, parsed rather than eyeballed.
+
+    ``--max-stale-days`` is a global flag, so writing it after the subcommand is
+    a usage error rather than a wider tolerance: the daily job would fail every
+    morning instead of only during a closure, and the first symptom would be a
+    Pages snapshot that quietly stopped changing.
+    """
+    workflow = (Path(__file__).parent.parent / ".github/workflows/publish-snapshot.yml").read_text()
+    published = next(
+        line.split("python -m gapmodel")[1].split()
+        for line in workflow.splitlines()
+        if "python -m gapmodel" in line and "export" in line
+    )
+    args = build_parser().parse_args(published)
+    # Wide enough for Golden Week, and still a boundary rather than an off switch.
+    assert args.max_stale_days == 12
+    assert args.allow_stale is False

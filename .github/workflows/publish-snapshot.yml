@@ -43,7 +43,7 @@ jobs:
         # forward-filled snapshot to the app.
         run: |
           mkdir -p site
-          python -m gapmodel export --max-stale-days 12 --out site/snapshot.json
+          python -m gapmodel --max-stale-days 12 export --out site/snapshot.json
           # A tiny index so the Pages root is not a 404.
           cp site/snapshot.json site/latest.json
 
