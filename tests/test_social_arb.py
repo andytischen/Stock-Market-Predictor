@@ -248,6 +248,23 @@ def test_to_frame_columns():
     assert len(frame) == 1
 
 
+def test_to_frame_divergence_is_the_difference_of_the_printed_columns():
+    # 0.61237 - 0.32229 rounds to 0.2901, but the printed columns differ by 0.2900.
+    sig = ArbSignal(
+        symbol="^GSPC",
+        name="S&P 500",
+        region="Americas",
+        p_model=0.61237,
+        p_consensus=0.32229,
+        divergence=0.61237 - 0.32229,
+        top_peer="Nasdaq Composite",
+        top_peer_corr=0.9,
+        top_peer_prob=0.5,
+    )
+    row = to_frame([sig]).iloc[0]
+    assert row["divergence"] == pytest.approx(row["p_model"] - row["p_consensus"])
+
+
 def test_to_frame_empty():
     assert to_frame([]).empty
 
