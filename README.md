@@ -338,9 +338,10 @@ repeat the previous close), which is part of why it scores lowest.
 A feed can also simply stop. Features are aligned by forward-filling, so a
 series that stopped updating is read as one that did not move — right for a
 holiday, wrong for a dead feed, and indistinguishable from inside the model.
-`predict`, `stock`, `shortlist` and `export` therefore refuse to run when an
-input has no bar within `--max-stale-days` (5) of today, naming the worst
-offenders and their lags:
+Every command that offers a probability — `predict`, `stock`, `shortlist`,
+`export`, `dashboard` and `sectors` — therefore refuses to run when an input has
+no bar within `--max-stale-days` (5) of today, naming the worst offenders and
+their lags:
 
 ```
 error: 40 of 61 input series have no bar within 5 days of 2026-08-15:
@@ -366,6 +367,13 @@ a subset of it: the STOXX 600 sector trackers are features of the European
 indices only, and a tracker standing in for an opening auction is read only by
 its own index. A quiet `EXH8.DE` fails `predict --market ^GDAXI` and is beside
 the point for `stock MU`, which never opens it.
+
+A series that arrived with no bars at all has no lag to measure, so it is named
+on stderr separately rather than counted among the series the refusal judges: a
+download that returned nothing is a different failure with a different remedy.
+
+`backtest` is not guarded, and deliberately: it scores history, where the bars
+in question are the data rather than forward-filled stand-ins for missing data.
 
 The tolerance is measured in calendar days against today, which cannot tell a
 dead feed from a closed exchange: a week-long national holiday (Golden Week,

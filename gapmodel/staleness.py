@@ -13,6 +13,14 @@ current while ending yesterday, and an Asian series downloaded mid-session
 carries a partial bar for today. Anchoring on the maximum called all of Wall
 Street stale because Seoul was open, and made the count swing on which symbols a
 given run happened to load rather than on anything about the data.
+
+Two anchors follow from that, and they are not the same date. A guard asks
+whether data is too old to act on, which is a question about now, so it measures
+against ``today()``. A report's footer annotates a forecast already produced for
+a stated session, so it measures against that session — a footer anchored on
+today would call a series stale relative to a date the report never mentions.
+The two coincide whenever the run is current, which is what the guard enforces,
+and diverge only under ``--allow-stale`` or a widened tolerance.
 """
 
 from __future__ import annotations
@@ -77,10 +85,28 @@ def stale_inputs(
     return len(measured), behind(measured, max_days)
 
 
+def _at_most_eight(described: Sequence[str]) -> str:
+    """The first eight of ``described``, with the rest counted rather than listed."""
+    return ", ".join(described[:8]) + (
+        f" and {len(described) - 8} more" if len(described) > 8 else ""
+    )
+
+
 def describe(measured: dict[str, int], stale: Sequence[str]) -> str:
     """The stale series named with their lags, worst first, for an error or a log."""
-    named = ", ".join(f"{symbol} ({measured[symbol]}d)" for symbol in stale[:8])
-    return named + (f" and {len(stale) - 8} more" if len(stale) > 8 else "")
+    return _at_most_eight([f"{symbol} ({measured[symbol]}d)" for symbol in stale])
+
+
+def missing(panel: dict[str, pd.DataFrame]) -> list[str]:
+    """The series that arrived with no bars at all, and so have no lag to measure.
+
+    They are counted nowhere else: ``lags`` skips them, because a series with no
+    last bar cannot be a number of days behind one, and "0 days stale" would be a
+    worse answer than no answer. Naming them separately is the alternative — a
+    guard that says "2 of 3 input series" reads as reassurance about the third,
+    when the third may never have arrived.
+    """
+    return [symbol for symbol, bars in panel.items() if bars.empty]
 
 
 def guard(
@@ -103,6 +129,19 @@ def guard(
     writes its snapshot there: a warning printed alongside it would be read by
     the next program in the pipe as the first line of the JSON.
     """
+    absent = missing(panel)
+    if absent:
+        # Not a refusal: a download that returned nothing is a different failure
+        # with a different remedy, and it is reported where it happens. Said here
+        # only so that the count below is not read as covering it — and said
+        # without a denominator of its own, since a second "N of M" beside a
+        # smaller total reads as the two lines disagreeing.
+        log.warning(
+            "%d input series arrived with no bars at all, so they are neither counted "
+            "nor judged below: %s",
+            len(absent),
+            _at_most_eight(absent),
+        )
     measured = lags(panel, session)
     stale = behind(measured, max_days)
     if not stale:

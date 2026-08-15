@@ -3,7 +3,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from gapmodel.cli import _forecast_inputs, _shared_inputs, build_parser
+from gapmodel import cli
+from gapmodel.cli import _forecast_inputs, _shared_inputs, build_parser, main
 from gapmodel.staleness import (
     STALE_DAYS,
     StaleInputs,
@@ -152,6 +153,18 @@ def test_an_empty_series_is_neither_counted_nor_flagged():
     guard({"GONE": pd.DataFrame()}, SESSION)
 
 
+def test_a_series_that_never_arrived_is_named_rather_than_hidden(caplog, capsys):
+    """A count of the series that arrived reads as reassurance about the rest.
+
+    It cannot be given a lag — it has no last bar to be behind one — so it is
+    named separately instead, and on the log, where `export`'s JSON is not.
+    """
+    with caplog.at_level("WARNING"):
+        guard({"AAPL": bars(SESSION), "GONE": pd.DataFrame()}, SESSION)
+    assert "GONE" in caplog.text and "no bars at all" in caplog.text
+    assert capsys.readouterr().out == ""
+
+
 def test_lag_is_measured_in_whole_days_from_any_time_of_day():
     """An intraday timestamp is a bar for that date, not a fraction of a lag."""
     intraday = {"AAPL": bars(SESSION - pd.Timedelta(days=9))}
@@ -172,11 +185,31 @@ def test_the_guard_reference_is_a_bare_date_in_utc():
     assert abs(reference - pd.Timestamp.now(tz="UTC").tz_localize(None)) <= pd.Timedelta(days=1)
 
 
-@pytest.mark.parametrize("command", ["predict", "stock", "shortlist", "export"])
+@pytest.mark.parametrize(
+    "command", ["predict", "stock", "shortlist", "export", "dashboard", "sectors"]
+)
 def test_every_forecasting_command_is_guarded(command):
     args = build_parser().parse_args([command])
     assert args.max_stale_days == STALE_DAYS
     assert args.allow_stale is False
+
+
+@pytest.mark.parametrize(
+    "command", ["predict", "stock", "shortlist", "export", "dashboard", "sectors"]
+)
+def test_no_command_offers_a_probability_from_a_dead_panel(command, monkeypatch, capsys):
+    """Whichever command a reader reaches for, the same cache gives the same answer.
+
+    ``dashboard`` and ``sectors`` print a probability for the next open exactly as
+    ``predict`` does, so one refusing while another prints from the same dead feed
+    would tell a reader that the data is fine as long as they ask differently.
+    """
+    monkeypatch.setattr(cli, "load_panel", lambda **kwargs: panel(**{"^GSPC": 40, "CL=F": 40}))
+    with pytest.raises(SystemExit) as raised:
+        main([command])
+    assert "no bar within 5 days" in str(raised.value)
+    # Refused before anything was fitted, so there is no half-report on stdout.
+    assert capsys.readouterr().out == ""
 
 
 def test_the_tolerance_must_be_a_positive_number_of_days():
