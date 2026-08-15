@@ -272,7 +272,9 @@ other American bar is.
 Each complex carries its own peer list: the accelerator names read TSMC, SK
 Hynix, Samsung, Tokyo Electron and Advantest, and Apple reads its assemblers and
 component makers — Hon Hai, Largan, TSMC, Murata and LG Innotek — all of which
-price the same handset and datacentre demand before the New York auction.
+price the same handset and datacentre demand before the New York auction. Both
+complexes carry US legs too (NVDA, AMD, AVGO and SMH; QCOM and SWKS for Apple),
+read a session late like every other American bar.
 
 | Stock | AUC | Accuracy | Brier skill | Base rate |
 | --- | --- | --- | --- | --- |
