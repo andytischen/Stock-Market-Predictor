@@ -47,6 +47,7 @@ import pandas as pd
 
 from . import model as model_mod
 from .predict import Forecast, _display, forecast_market
+from .staleness import STALE_DAYS, stale_inputs
 from .universe import nasdaq_universe
 
 log = logging.getLogger(__name__)
@@ -209,43 +210,6 @@ def _why_discarded(pick: StockPick) -> str:
     if pick.n_oos < MIN_OOS:
         reasons.append(f"only {pick.n_oos} out-of-sample sessions")
     return ", ".join(reasons)
-
-
-# Calendar days a series may sit behind the session being forecast before it is
-# called stale. A series that traded on the previous session is one day behind,
-# and a long weekend or a holiday stretches that to four; five is the first lag
-# that cannot be explained by the calendar.
-STALE_DAYS = 5
-
-
-def stale_inputs(panel: dict[str, pd.DataFrame], session: pd.Timestamp) -> tuple[int, list[str]]:
-    """How many series lag ``session`` by more than the calendar can explain.
-
-    A stock's own bars can be current while the cross-market and cross-asset
-    series feeding it are days old: ``features`` aligns each source by
-    forward-filling to the target session, so a stale series is read as an
-    unchanged one rather than a missing one. The forecast stays internally
-    consistent and free of look-ahead, but it is answering the question given
-    last week's macro, which the report should say out loud rather than imply.
-
-    Measured against the session being forecast, deliberately, and not against
-    the freshest bar in the panel. Panels are mixed: a US series that has not
-    opened yet today is *current* while ending yesterday, and an Asian peer
-    downloaded mid-session carries a partial bar for today. Anchoring on the
-    maximum would call all of Wall Street stale because Seoul was open, and the
-    count would swing on which peers a given run happened to load rather than on
-    anything about the data.
-    """
-    counted = 0
-    behind = []
-    for symbol, bars in panel.items():
-        if bars.empty:
-            continue
-        lag = (session.normalize() - bars.index.max().normalize()).days
-        counted += 1
-        if lag > STALE_DAYS:
-            behind.append((lag, symbol))
-    return counted, [symbol for _, symbol in sorted(behind, key=lambda e: (-e[0], e[1]))]
 
 
 def to_frame(picks: list[StockPick]) -> pd.DataFrame:

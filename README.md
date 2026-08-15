@@ -333,6 +333,24 @@ as a down open. A series with more than half stale opens is refused outright.
 Bovespa is the worst of the included markets (a quarter of its opening prints
 repeat the previous close), which is part of why it scores lowest.
 
+A feed can also simply stop. Features are aligned by forward-filling, so a
+series that stopped updating is read as one that did not move — right for a
+holiday, wrong for a dead feed, and indistinguishable from inside the model.
+`predict`, `stock`, `shortlist` and `export` therefore refuse to run when an
+input has no bar within `--max-stale-days` (5) of today, naming the worst
+offenders and their lags:
+
+```
+error: 40 of 61 input series have no bar within 5 days of 2026-08-15:
+ASML.AS (11d), EXH8.DE (11d), ISF.L (11d), ^FTSE (11d) and 36 more.
+```
+
+They refuse rather than dropping the dead columns: the model was fitted over a
+history in which those columns were live, so dropping them at inference time
+would answer a different question from the one the printed metrics describe.
+`--refresh` re-downloads, `--max-stale-days N` widens the tolerance, and
+`--allow-stale` forecasts anyway, warning instead of failing.
+
 ## Asia session dashboard
 
 `asia` is the layer below the probability model: instead of scoring an index as

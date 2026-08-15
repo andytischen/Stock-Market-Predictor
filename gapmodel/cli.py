@@ -54,6 +54,7 @@ from .shortlist import forecast_universe
 from .shortlist import rank as rank_shortlist
 from .shortlist import render_text as render_shortlist_text
 from .shortlist import to_frame as shortlist_to_frame
+from .staleness import STALE_DAYS, guard, today
 from .stocks import (
     BLIND_SPOTS,
     SHORTLISTED,
@@ -183,6 +184,18 @@ def _panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     return load_panel(start=args.start, cache_dir=Path(args.cache), refresh=args.refresh)
 
 
+def _fresh_enough(panel: dict[str, pd.DataFrame], args: argparse.Namespace) -> None:
+    """Stop a forecasting command before it fits anything on dead inputs.
+
+    Checked here rather than inside the model because it is a question about the
+    run and not about the arithmetic: the fit is correct either way, and the
+    backtest metrics beside it are still honestly earned. What is wrong is the
+    conclusion a reader draws from a probability built by forward-filling a feed
+    that stopped a week ago.
+    """
+    guard(panel, today(), max_days=args.max_stale_days, allow=args.allow_stale)
+
+
 def _stock_panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     """The index panel plus the single names and their peers.
 
@@ -281,7 +294,9 @@ def _cmd_predict(args: argparse.Namespace) -> None:
     shocks = dict(scenario(args.scenario).shocks()) if args.scenario else {}
     # An explicit --shock on the same instrument replaces the scenario's leg.
     shocks.update(args.shock or [])
-    forecasts = _forecast(_panel(args), args, hourly, shocks)
+    panel = _panel(args)
+    _fresh_enough(panel, args)
+    forecasts = _forecast(panel, args, hourly, shocks)
     if args.scenario:
         print(f"scenario: {args.scenario} — {scenario(args.scenario).description}")
     if shocks:
@@ -319,6 +334,7 @@ def _cmd_stock(args: argparse.Namespace) -> None:
     """
     symbols = args.symbols or [s.symbol for s in STOCKS]
     panel = _stock_panel(args)
+    _fresh_enough(panel, args)
     forecasts = _forecast(panel, args, _hourly(args), dict(args.shock or []), symbols=symbols)
     frame = to_frame(forecasts).sort_values("p_open_up", ascending=False)
     print(frame.to_string(index=False))
@@ -338,6 +354,7 @@ def _cmd_stock(args: argparse.Namespace) -> None:
 
 def _cmd_export(args: argparse.Namespace) -> None:
     panel = _panel(args)
+    _fresh_enough(panel, args)
     hourly = _hourly(args)
     forecasts = _forecast(panel, args, hourly)
     snapshot = build_snapshot(forecasts, oil_readings(panel))
@@ -567,6 +584,7 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
             require=("Adj Close",),
         )
     )
+    _fresh_enough(panel, args)
     picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
     print(render_shortlist_text(picks, top=args.top, panel=panel), end="")
     if args.csv:
@@ -589,6 +607,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start", default="2005-01-01", help="first date to download")
     parser.add_argument("--cache", default=str(DEFAULT_CACHE), help="cache directory")
     parser.add_argument("--refresh", action="store_true", help="re-download prices")
+    parser.add_argument(
+        "--max-stale-days",
+        type=_positive_int,
+        default=STALE_DAYS,
+        help=f"refuse to forecast from inputs older than this many days (default: {STALE_DAYS})",
+    )
+    parser.add_argument(
+        "--allow-stale",
+        action="store_true",
+        help="forecast from stale inputs anyway, warning instead of failing",
+    )
     parser.add_argument("--regularisation", type=_positive_float, default=0.1, help="logistic C")
     parser.add_argument("--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
