@@ -82,6 +82,42 @@ def test_backtest_since_in_parser():
     assert not args.last_week
 
 
+def test_scorecard_accepts_a_window_a_stock_and_a_log():
+    parser = build_parser()
+    args = parser.parse_args(
+        ["scorecard", "--market", "mu", "--window", "40", "--log", "docs/log.csv"]
+    )
+    assert args.market == ["MU"]
+    assert args.window == 40
+    assert args.log == "docs/log.csv"
+
+
+def test_scorecard_rejects_an_unmodelled_symbol(capsys):
+    with pytest.raises(SystemExit):
+        main(["scorecard", "--market", "^NOPE"])
+    assert "unknown market" in capsys.readouterr().err
+
+
+def test_scorecard_rejects_an_empty_window_before_fitting_anything(capsys):
+    with pytest.raises(SystemExit):
+        main(["scorecard", "--window", "0"])
+    assert "must be greater than 0" in capsys.readouterr().err
+
+
+def test_journal_and_scorecard_are_separate_commands():
+    # Both score the model's calls, but scorecard reads the walk-forward's own
+    # predictions and journal reads what was written down before each open.
+    parser = build_parser()
+    live = parser.parse_args(
+        ["journal", "--market", "^FTSE", "--window", "90", "--min-settled", "5", "--settle-only"]
+    )
+    assert live.func is not parser.parse_args(["scorecard"]).func
+    assert live.market == ["^FTSE"]
+    assert (live.window, live.min_settled) == (90, 5)
+    assert live.settle_only and not live.fail_on_decay
+    assert live.log.endswith("forecast-log.csv")
+
+
 def test_shock_parsing_accepts_percentages_and_fractions():
     from gapmodel.predict import parse_shock
 

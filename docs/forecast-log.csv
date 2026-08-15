@@ -1,18 +1,1 @@
 recorded,session,symbol,market,region,p_open_up,oos_base_rate,oos_brier_skill,prev_close,open,gap,outcome,status
-2026-08-15T11:27:44Z,2026-08-14,^FTSE,FTSE 100,Europe,0.8109,0.5455,0.2639,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,000001.SS,Shanghai Composite,Asia,0.2623,0.3993,0.2,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^AXJO,ASX 200,Asia,0.5061,0.5706,0.3608,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^BVSP,Bovespa,Americas,0.5479,0.5706,0.0558,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^DJI,Dow Jones Industrial Average,Americas,0.6383,0.5186,0.0801,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^FCHI,CAC 40,Europe,0.6137,0.5419,0.2667,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^GDAXI,DAX,Europe,0.7359,0.5565,0.277,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^GSPC,S&P 500,Americas,0.6206,0.562,0.1082,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^GSPTSE,S&P/TSX Composite,Americas,0.5004,0.5595,0.1028,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^HSI,Hang Seng,Asia,0.4502,0.559,0.2345,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^IBEX,IBEX 35,Europe,0.6365,0.5522,0.257,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^IXIC,Nasdaq Composite,Americas,0.6715,0.5674,0.1163,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^KS11,KOSPI,Asia,0.5016,0.594,0.365,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^N225,Nikkei 225,Asia,0.4794,0.5359,0.3611,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^NSEI,Nifty 50,Asia,0.5072,0.6514,0.1767,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^SSMI,Swiss Market Index,Europe,0.5877,0.5263,0.2207,,,,,pending
-2026-08-15T08:53:53Z,2026-08-17,^STOXX50E,Euro Stoxx 50,Europe,0.6432,0.5342,0.2663,,,,,pending

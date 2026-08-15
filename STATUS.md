@@ -16,9 +16,9 @@ Progress: 10/19 tasks complete (53%).
 - **Project tracker (pm) for status updates and resource requests** (#5)
   - 2026-08-01: Merged in #7.
 - **Track live forecasts against realised opens to measure real-world skill** (#12)
-  - 2026-08-15: gapmodel scorecard journals each forecast to docs/forecast-log.csv and settles it against the realised open.
+  - 2026-08-15: gapmodel journal writes each forecast to docs/forecast-log.csv and settles it against the realised open.
 - **Alert when a market's out-of-sample skill decays below its base rate** (#13)
-  - 2026-08-15: Flags a market whose live hit rate falls under its own base rate; --fail-on-decay exits non-zero for the daily run.
+  - 2026-08-15: Flags a market whose live hit rate falls under its own drift; --fail-on-decay exits non-zero for the daily run.
 - **Oil-versus-Asia dashboard (gapmodel dashboard)** (#14)
   - 2026-08-01: Merged in #9; crude readings, session state and the oil log-odds behind each open call.
 - **Status deck generated from the board (pm deck)** (#15)
