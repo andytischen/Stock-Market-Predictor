@@ -74,6 +74,8 @@ from .shortlist import discarded as discarded_shortlist
 from .shortlist import rank as rank_shortlist
 from .shortlist import render_text as render_shortlist_text
 from .shortlist import to_frame as shortlist_to_frame
+from .social_arb import CORRELATION_WINDOW, build_social_arb
+from .social_arb import to_frame as social_arb_to_frame
 from .staleness import STALE_DAYS, fresh_targets, guard, today
 from .stocks import (
     BLIND_SPOTS,
@@ -579,6 +581,18 @@ def _cmd_asia(args: argparse.Namespace) -> None:
         print(f"wrote {args.out}")
     if args.out is None or args.text:
         print(render_asia_text(board))
+
+
+def _cmd_social_arb(args: argparse.Namespace) -> None:
+    panel = _panel(args)
+    symbols = _fresh_enough(panel, args, [m.symbol for m in MARKETS])
+    forecasts = forecast_all(panel, symbols=symbols, c=args.regularisation, min_train=MIN_TRAIN)
+    signals = build_social_arb(panel, forecasts, window=args.window)
+    frame = social_arb_to_frame(signals)
+    print(frame.to_string(index=False))
+    if args.csv:
+        frame.to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
 
 
 def _cmd_dashboard(args: argparse.Namespace) -> None:
@@ -1168,6 +1182,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     journal.add_argument("--csv", help="also write a copy of the journal to this path")
     journal.set_defaults(func=_cmd_journal)
+
+    social_arb = sub.add_parser(
+        "social-arb",
+        help="markets where the model probability diverges from what correlated peers imply",
+    )
+    social_arb.add_argument(
+        "--window",
+        type=_positive_int,
+        default=CORRELATION_WINDOW,
+        help="sessions used for the peer correlation matrix (default: %(default)s)",
+    )
+    social_arb.add_argument("--csv", help="also write the table to this path")
+    social_arb.set_defaults(func=_cmd_social_arb)
 
     return parser
 

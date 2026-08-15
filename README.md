@@ -146,6 +146,7 @@ python -m gapmodel screen             # US stocks: liquid, unusually active, mov
 python -m gapmodel shortlist --top 10 # rank the US universe by demonstrated edge
 python -m gapmodel shortlist --gainers 10  # only the ten biggest movers of the latest session
 python -m gapmodel journal            # write today's calls down, and score the settled ones
+python -m gapmodel social-arb         # calls that disagree with the markets they move with
 ```
 
 `predict` prints one row per market with the probability and the out-of-sample
@@ -793,6 +794,39 @@ same screen after the close; `--asof` screens a completed session. Unlike the
 model panel, the screen is *about* the latest session, so a cached series whose
 last bar predates the session being screened is re-downloaded even without
 `--refresh` — yesterday's cache would otherwise silently re-screen yesterday.
+
+## Social arbitrage
+
+`social-arb` asks a different question from the rest of the commands: not how
+confident the model is, but where its confidence is unsupported by the markets
+this one normally moves with. Every index's probability is compared with the
+weighted average of what its correlated peers imply, and the table is ranked by
+the size of the gap.
+
+```bash
+python -m gapmodel social-arb                       # ranked by |divergence|
+python -m gapmodel social-arb --window 120 --csv out.csv
+```
+
+```
+     market   symbol   region  p_model  p_consensus  divergence       top_peer  top_peer_corr  top_peer_prob
+ Nikkei 225    ^N225     Asia   0.8123       0.5604      0.2519          KOSPI          0.712         0.5901
+        DAX   ^GDAXI   Europe   0.4102       0.5688     -0.1586  EURO STOXX 50          0.884         0.5713
+```
+
+The weight a peer carries is the absolute strength of its historical return
+correlation, measured over the last `--window` sessions of the calendar the
+markets share. The sign is kept separate from the weight: a peer that moves *against*
+this market has its probability mirrored (`1 - p`) before it is averaged, so an
+inverse peer calling itself up is read as this market being called down, and
+`top_peer_corr` prints negative to say so. A market with no peer clearing the
+correlation floor has nothing to diverge from and is left out of the table, with
+the dropped names given in a warning.
+
+A divergence is a disagreement, not a verdict: the peers have no more claim to be
+right than the fitted model does. What it is useful for is finding the calls
+worth a second look — a market the model likes while everything it co-moves with
+is being called down is either the model's best idea or its worst.
 
 ## Project tracker
 
