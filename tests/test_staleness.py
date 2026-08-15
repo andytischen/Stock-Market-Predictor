@@ -115,10 +115,33 @@ def test_a_target_is_guarded_for_itself_and_a_peer_for_everyone():
     model, and stale it is read as a company that did not move.
     """
     loaded = panel(AAPL=1, MSFT=1, WDC=1, **{"^GSPC": 1, "005930.KS": 1})
-    # MSFT and WDC are loaded but unasked for, so neither can fail this run.
-    assert set(_shared_inputs(loaded, ["AAPL"])) == {"^GSPC", "005930.KS"}
+    # MSFT and WDC are loaded but unasked for, so neither can fail this run, and
+    # Samsung is a memory peer that nothing in an AAPL run reads.
+    assert set(_shared_inputs(loaded, ["AAPL"])) == {"^GSPC"}
     # WDC is in MU's peer list, so a MU run reads it as a feature.
     assert "WDC" in _shared_inputs(loaded, ["MU"])
+
+
+def test_a_series_no_model_in_the_run_reads_cannot_refuse_it():
+    """The panel is one download; a run of it is narrower than the whole list.
+
+    A European sector tracker is not a column in a US model, and an
+    opening-price stand-in is read only as the gap source of its own index.
+    Guarding a US run on those refuses a forecast over a feed it never opens.
+    """
+    loaded = panel(**{"^GSPC": 1, "^FTSE": 1, "EXH8.DE": 20, "ISF.L": 20})
+    guard(_shared_inputs(loaded, ["^GSPC"]), SESSION)
+    # The same two series, read by the models that do read them.
+    with pytest.raises(StaleInputs, match=r"EXH8\.DE"):
+        guard(_shared_inputs(loaded, ["^GDAXI"]), SESSION)
+    with pytest.raises(StaleInputs, match=r"ISF\.L"):
+        guard(_shared_inputs(loaded, ["^FTSE"]), SESSION)
+
+
+def test_a_run_that_names_no_target_is_judged_on_everything_loaded():
+    """Nothing is known about what it will read, so nothing is excused."""
+    with pytest.raises(StaleInputs):
+        guard(_shared_inputs(panel(**{"EXH8.DE": 20}), []), SESSION)
 
 
 def test_an_empty_series_is_neither_counted_nor_flagged():

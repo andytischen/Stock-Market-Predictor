@@ -360,6 +360,13 @@ that stopped trading is dropped by name and the rest of the universe is still
 ranked. A name that is a *peer* of something requested counts as a shared input,
 because it is a column in another company's model.
 
+"Input" means a series the requested forecasts actually read, not everything the
+download happened to fetch. One panel serves every command and every model reads
+a subset of it: the STOXX 600 sector trackers are features of the European
+indices only, and a tracker standing in for an opening auction is read only by
+its own index. A quiet `EXH8.DE` fails `predict --market ^GDAXI` and is beside
+the point for `stock AAPL`, which never opens it.
+
 The tolerance is measured in calendar days against today, which cannot tell a
 dead feed from a closed exchange: a week-long national holiday (Golden Week,
 Chinese New Year) will trip the guard on a panel that is perfectly current.

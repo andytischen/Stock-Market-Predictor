@@ -15,7 +15,7 @@ from .asia_report import render_asia_html, render_asia_text
 from .dashboard import build_dashboard, oil_readings, render_html, render_text
 from .data import DEFAULT_CACHE, load_panel
 from .export import build_snapshot, dumps
-from .features import build_features
+from .features import build_features, feature_symbols
 from .intraday import load_hourly_panel
 from .markets import (
     BILL_YIELD,
@@ -188,10 +188,27 @@ def _panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     return load_panel(start=args.start, cache_dir=Path(args.cache), refresh=args.refresh)
 
 
+def _model_inputs(
+    panel: dict[str, pd.DataFrame], targets: Sequence[str]
+) -> dict[str, pd.DataFrame]:
+    """The panel restricted to the series the requested models actually read.
+
+    One download serves every command, so a loaded panel is wider than any run
+    of it: the European sector trackers are skipped for a target outside Europe,
+    and an opening-price stand-in like ``ISF.L`` is read only as the gap source
+    of its own index. Judged on the whole panel, a quiet European sector ETF
+    refuses a US forecast that reads nothing it publishes.
+    """
+    if not targets:
+        return dict(panel)
+    read = set().union(*(feature_symbols(symbol) for symbol in targets))
+    return {symbol: bars for symbol, bars in panel.items() if symbol in read}
+
+
 def _shared_inputs(
     panel: dict[str, pd.DataFrame], targets: Sequence[str]
 ) -> dict[str, pd.DataFrame]:
-    """The panel minus the single names that are only ever this run's targets.
+    """The series this run reads for someone other than themselves.
 
     A stock panel is loaded whole — every curated name and every peer — whatever
     was asked for, and a shortlist panel carries the sixty-odd listings it ranks.
@@ -202,8 +219,9 @@ def _shared_inputs(
     everyone's problem.
     """
     peers = {peer.symbol for symbol in targets for peer in peers_of(symbol)}
-    target_only = {s for s in panel if s in SHORTLISTED or s in STOCKS_BY_SYMBOL} - peers
-    return {symbol: bars for symbol, bars in panel.items() if symbol not in target_only}
+    inputs = _model_inputs(panel, targets)
+    target_only = {s for s in inputs if s in SHORTLISTED or s in STOCKS_BY_SYMBOL} - peers
+    return {symbol: bars for symbol, bars in inputs.items() if symbol not in target_only}
 
 
 def _forecast_inputs(
@@ -350,8 +368,8 @@ def _cmd_predict(args: argparse.Namespace) -> None:
     # An explicit --shock on the same instrument replaces the scenario's leg.
     shocks.update(args.shock or [])
     panel = _panel(args)
-    _fresh_enough(panel, args)
-    forecasts = _forecast(panel, args, hourly, shocks)
+    symbols = _fresh_enough(panel, args, args.market or [m.symbol for m in MARKETS])
+    forecasts = _forecast(panel, args, hourly, shocks, symbols=symbols)
     if args.scenario:
         print(f"scenario: {args.scenario} — {scenario(args.scenario).description}")
     if shocks:
@@ -409,9 +427,9 @@ def _cmd_stock(args: argparse.Namespace) -> None:
 
 def _cmd_export(args: argparse.Namespace) -> None:
     panel = _panel(args)
-    _fresh_enough(panel, args)
+    symbols = _fresh_enough(panel, args, args.market or [m.symbol for m in MARKETS])
     hourly = _hourly(args)
-    forecasts = _forecast(panel, args, hourly)
+    forecasts = _forecast(panel, args, hourly, symbols=symbols)
     snapshot = build_snapshot(forecasts, oil_readings(panel))
     text = dumps(snapshot)
     if args.out:
