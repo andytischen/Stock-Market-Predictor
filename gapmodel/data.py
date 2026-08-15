@@ -13,7 +13,9 @@ from .markets import all_symbols
 log = logging.getLogger(__name__)
 
 DEFAULT_CACHE = Path.home() / ".cache" / "gapmodel"
-FIELDS = ("Open", "High", "Low", "Close", "Volume")
+# ``Adj Close`` carries Yahoo's dividend factor, which single equities need and
+# indices do not: see ``features.dividend_adjusted``.
+FIELDS = ("Open", "High", "Low", "Close", "Adj Close", "Volume")
 
 
 def _cache_path(cache_dir: Path, symbol: str) -> Path:

@@ -20,7 +20,7 @@ from .markets import Market
 log = logging.getLogger(__name__)
 
 # Instruments that trade through the night and lead the cash open.
-INTRADAY_SYMBOLS: tuple[str, ...] = ("ES=F", "NQ=F", "CL=F", "GC=F")
+INTRADAY_SYMBOLS: tuple[str, ...] = ("ES=F", "NQ=F", "YM=F", "CL=F", "GC=F")
 MAX_HOURLY_PERIOD = "730d"
 MOMENTUM_HOURS = 3
 # Yahoo timestamps an hourly bar with the *start* of the hour it covers, so a
@@ -34,6 +34,72 @@ MAX_STALENESS = pd.Timedelta(hours=24)
 # fetched, not on its last bar: when the market is shut the newest bar is old
 # however recently it was downloaded.
 CACHE_TTL = BAR_DURATION
+# Finer intervals to fall back on, coarsest first, when the hourly endpoint
+# lags behind the market. They cover a shorter history, which is why they are
+# only ever used to extend the tail of the hourly series.
+FALLBACK_INTERVALS: tuple[str, ...] = ("30m", "15m", "5m")
+FALLBACK_PERIOD = "5d"
+# The finer feeds only reach back over ``FALLBACK_PERIOD``, so an hourly series
+# older than that cannot be bridged: splicing would leave a hole in the middle.
+MAX_FALLBACK_GAP = pd.Timedelta(days=4)
+# How far the newest hourly bar may trail the present before the finer feeds
+# are consulted. Two bar durations tolerates the usual publication lag.
+STALE_AFTER = 2 * BAR_DURATION
+
+
+def _download(symbol: str, interval: str, period: str) -> pd.Series:
+    """Closes for one symbol at one interval, indexed in UTC."""
+    raw = yf.download(
+        symbol,
+        period=period,
+        interval=interval,
+        auto_adjust=False,
+        progress=False,
+    )
+    if raw is None or raw.empty:
+        raise RuntimeError(f"no {interval} data returned for {symbol}")
+    if isinstance(raw.columns, pd.MultiIndex):
+        raw.columns = raw.columns.droplevel(-1)
+    close = raw["Close"].astype(float).dropna().sort_index()
+    close.index = pd.to_datetime(close.index, utc=True)
+    return close[~close.index.duplicated(keep="last")]
+
+
+def _extend_tail(symbol: str, close: pd.Series) -> pd.Series:
+    """Top the hourly series up from a finer feed when it has fallen behind.
+
+    Yahoo's hourly endpoint sometimes stops updating hours before the finer
+    ones do, which strands the pre-open features on bars too old to describe
+    the run-up to the bell. Sub-hourly bars are resampled to the same hourly
+    grid — Yahoo stamps a bar with the start of the span it covers, so the
+    resample is left-labelled and left-closed to match — and only the part
+    newer than the hourly series is appended. If nothing finer is fresher, the
+    series is returned untouched.
+    """
+    if close.empty:
+        return close
+    behind = pd.Timestamp.now(tz="UTC") - close.index[-1]
+    if not STALE_AFTER < behind <= MAX_FALLBACK_GAP:
+        return close
+    for interval in FALLBACK_INTERVALS:
+        try:
+            fine = _download(symbol, interval, FALLBACK_PERIOD)
+        except Exception as exc:
+            log.debug("no %s bars for %s: %s", interval, symbol, exc)
+            continue
+        hourly = fine.resample(BAR_DURATION, label="left", closed="left").last().dropna()
+        newer = hourly[hourly.index > close.index[-1]]
+        if newer.empty:
+            continue
+        log.info(
+            "%s: hourly feed stale at %s, extended to %s from %s bars",
+            symbol,
+            close.index[-1],
+            newer.index[-1],
+            interval,
+        )
+        return pd.concat([close, newer]).sort_index()
+    return close
 
 
 def _cache_path(cache_dir: Path, symbol: str) -> Path:
@@ -54,20 +120,7 @@ def load_hourly(symbol: str, cache_dir: Path = DEFAULT_CACHE, refresh: bool = Fa
         close = pd.read_csv(path, index_col=0, parse_dates=True)["Close"]
         return close.tz_localize("UTC") if close.index.tz is None else close.tz_convert("UTC")
 
-    raw = yf.download(
-        symbol,
-        period=MAX_HOURLY_PERIOD,
-        interval="1h",
-        auto_adjust=False,
-        progress=False,
-    )
-    if raw is None or raw.empty:
-        raise RuntimeError(f"no hourly data returned for {symbol}")
-    if isinstance(raw.columns, pd.MultiIndex):
-        raw.columns = raw.columns.droplevel(-1)
-    close = raw["Close"].astype(float).dropna().sort_index()
-    close.index = pd.to_datetime(close.index, utc=True)
-    close = close[~close.index.duplicated(keep="last")]
+    close = _extend_tail(symbol, _download(symbol, "1h", MAX_HOURLY_PERIOD))
     cache_dir.mkdir(parents=True, exist_ok=True)
     close.to_frame("Close").to_csv(path)
     return close

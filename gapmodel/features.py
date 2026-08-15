@@ -6,10 +6,31 @@ import numpy as np
 import pandas as pd
 
 from .intraday import preopen_features
-from .markets import INDICATORS, MARKETS, OIL_SYMBOLS, Market, lag_days, market
+from .markets import (
+    BILL_CLOSE_UTC,
+    BILL_YIELD,
+    CURVE_CLOSE_UTC,
+    CURVE_FRONT,
+    CURVE_STRIP,
+    CURVE_WINDOW,
+    FUNDS_CLOSE_UTC,
+    FUNDS_FUTURE,
+    FX_SYMBOLS,
+    INDICATORS,
+    MARKETS,
+    OIL_SYMBOLS,
+    SECTOR_SYMBOLS,
+    Market,
+    lag_days,
+)
+from .stocks import is_stock, peers_of, target_market
 
 MIN_HISTORY = 60
 OIL_VOL_WINDOW = 20
+# Volatility window for the FX-intervention shock feature.  Kept identical to
+# the oil window so both shock series share a comparable normalisation scale,
+# but defined separately so it can be tuned independently.
+FX_VOL_WINDOW = 20
 # A gap of exactly zero means the source repeated the previous close instead of
 # publishing a real opening print; such sessions cannot be labelled.
 STALE_GAP_TOLERANCE = 1e-9
@@ -24,6 +45,35 @@ def log_return(close: pd.Series, periods: int = 1) -> pd.Series:
 def opening_gap(bars: pd.DataFrame) -> pd.Series:
     """Log return from the previous close to today's opening print."""
     return np.log(bars["Open"] / bars["Close"].shift(1))
+
+
+def dividend_adjusted(bars: pd.DataFrame) -> pd.DataFrame:
+    """Bars on a total-return basis, so going ex-dividend is not a down gap.
+
+    Yahoo's daily bars are split-adjusted but not dividend-adjusted, so a single
+    company's opening print falls by roughly the dividend on the morning it goes
+    ex and the label for that session records a gap the market never made. It is
+    a handful of sessions a year per name, but the sign is always the same one.
+    ``Adj Close`` carries the dividend factor; applying it to both prints of the
+    same session leaves that session's own returns untouched and corrects only
+    the previous-close-to-open step. An index pays nothing, so it is left alone,
+    and a cache written before the column was collected simply is not corrected.
+
+    The factor is cumulative and rises towards 1, so a gap in it is carried both
+    ways: filling leading rows with 1.0 instead of the first factor published
+    would put a made-up gap of the whole accumulated discount at the boundary.
+    """
+    if "Adj Close" not in bars:
+        return bars
+    factor = bars["Adj Close"] / bars["Close"].where(bars["Close"] > 0)
+    factor = factor.replace([np.inf, -np.inf], np.nan).ffill().bfill().fillna(1.0)
+    return bars.assign(Open=bars["Open"] * factor, Close=bars["Close"] * factor)
+
+
+def total_return_close(bars: pd.DataFrame) -> pd.Series:
+    """Closing series to take returns from: dividend-adjusted where published."""
+    column = "Adj Close" if "Adj Close" in bars else "Close"
+    return bars[column].dropna()
 
 
 def as_of(source: pd.Series, dates: pd.DatetimeIndex, lag_days: int) -> pd.Series:
@@ -50,6 +100,113 @@ def _lag_days(source_close_utc: float, target: Market) -> int:
     return lag_days(source_close_utc, target.open_utc)
 
 
+def curve_features(
+    panel: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, target: Market
+) -> dict[str, pd.Series]:
+    """Shape of the crude curve: the front month against the twelve-month strip.
+
+    Two readings, both differences of log returns so the funds' own price levels
+    and their tracking drift cancel: today's move of the front leg relative to
+    the strip, and the same over ``CURVE_WINDOW`` sessions. Negative is contango
+    — the front lagging, supply comfortable — and positive is backwardation.
+    Absent from the panel, the features are simply not built.
+    """
+    if CURVE_FRONT not in panel or CURVE_STRIP not in panel:
+        return {}
+    front = panel[CURVE_FRONT]["Close"].dropna()
+    strip = panel[CURVE_STRIP]["Close"].dropna()
+    lag = _lag_days(CURVE_CLOSE_UTC, target)
+    daily = log_return(front) - log_return(strip)
+    slow = log_return(front, CURVE_WINDOW) - log_return(strip, CURVE_WINDOW)
+    return {
+        "ind_oil_curve_return": as_of(daily.dropna(), dates, lag),
+        f"ind_oil_curve_slope_{CURVE_WINDOW}": as_of(slow.dropna(), dates, lag),
+    }
+
+
+def peer_features(
+    target_symbol: str, panel: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, target: Market
+) -> dict[str, pd.Series]:
+    """What the companies trading the same end demand did, daily and weekly.
+
+    Only single stocks have peers; an index is the average of its own. The lag
+    is the ordinary one, which is the point: Seoul and Tokyo close before New
+    York opens, so their sessions are same-day information for a US chipmaker,
+    while the US legs are read a session late like every other Wall Street bar.
+
+    Peers are single companies too, so their returns are taken from the
+    dividend-adjusted close: an ex-dividend date is not a fall in demand.
+    """
+    built: dict[str, pd.Series] = {}
+    for peer in peers_of(target_symbol):
+        if peer.symbol not in panel:
+            continue
+        close = total_return_close(panel[peer.symbol])
+        lag = _lag_days(peer.close_utc, target)
+        name = _column_name(peer.symbol)
+        built[f"peer_{name}_return"] = as_of(log_return(close), dates, lag)
+        built[f"peer_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
+    return built
+
+
+def policy_features(
+    panel: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, target: Market
+) -> dict[str, pd.Series]:
+    """What the market has priced for the policy rate, now and a quarter out.
+
+    Two readings in percentage points: the rate the front fed funds future is
+    priced for, and the tightening priced into the next quarter as the 13-week
+    bill's premium over it. A widening spread is the market pulling a hike
+    forward, which is the part of a hawkish turn a price-only model can actually
+    observe; the words spoken to cause it remain invisible.
+
+    The daily and monthly *changes* in the priced rate were measured and
+    dropped: they ranked last of eighty-three features by log-odds weight, which
+    is what one should expect of a series that moves in single basis points
+    outside a meeting week.
+
+    Levels, not log returns: a future priced near 100 has meaninglessly small
+    returns, and bill yields have sat at zero, where a log return is undefined.
+    The two legs close an hour apart, so both are read on the later of the two
+    clocks and the bill is carried forward onto the future's sessions.
+    """
+    if FUNDS_FUTURE not in panel or BILL_YIELD not in panel:
+        return {}
+    price = panel[FUNDS_FUTURE]["Close"].dropna()
+    bill = panel[BILL_YIELD]["Close"].dropna()
+    if price.empty or bill.empty:
+        return {}
+    implied = 100.0 - price
+    lag = _lag_days(max(FUNDS_CLOSE_UTC, BILL_CLOSE_UTC), target)
+    spread = bill.reindex(implied.index.union(bill.index)).ffill().reindex(implied.index) - implied
+    return {
+        "ind_policy_rate": as_of(implied, dates, lag),
+        "ind_policy_tightening_3m": as_of(spread.dropna(), dates, lag),
+    }
+
+
+def feature_symbols(target_symbol: str) -> set[str]:
+    """The panel series a model for ``target_symbol`` reads.
+
+    The download is one list for every target, so a loaded panel is wider than
+    any single model: the STOXX 600 sector trackers are skipped outside Europe,
+    and an opening-price stand-in is read only as the gap source of its own
+    index. Kept beside ``build_features`` because it has to answer for the same
+    branches — a column added there and not here would be read by a model
+    nothing was checked against.
+    """
+    target = target_market(target_symbol)
+    read = {target_symbol, target.gap_symbol}
+    read |= {other.symbol for other in MARKETS if other.symbol != target_symbol}
+    read |= {
+        indicator.symbol
+        for indicator in INDICATORS
+        if indicator.symbol not in SECTOR_SYMBOLS or target.region == "Europe"
+    }
+    read |= {peer.symbol for peer in peers_of(target_symbol)}
+    return read | {CURVE_FRONT, CURVE_STRIP, FUNDS_FUTURE, BILL_YIELD}
+
+
 def build_features(
     target_symbol: str,
     panel: dict[str, pd.DataFrame],
@@ -65,7 +222,7 @@ def build_features(
     With ``hourly`` the pre-open futures moves are added, which restricts the
     sample to the window those hourly bars cover.
     """
-    target = market(target_symbol)
+    target = target_market(target_symbol)
     if target_symbol not in panel:
         raise KeyError(f"no price history loaded for {target_symbol}")
 
@@ -74,6 +231,8 @@ def build_features(
         raise KeyError(f"no opening prices loaded for {gap_symbol}")
 
     bars = panel[gap_symbol].dropna(subset=["Open", "Close"])
+    if is_stock(target_symbol):
+        bars = dividend_adjusted(bars)
     if len(bars) < MIN_HISTORY:
         raise ValueError(f"{gap_symbol}: only {len(bars)} usable rows")
     if forecast_row:
@@ -105,6 +264,11 @@ def build_features(
     for indicator in INDICATORS:
         if indicator.symbol not in panel:
             continue
+        # European sector read-across is a European story: outside the region it
+        # measurably dilutes the fit, so those markets keep the whole-index and
+        # cross-asset indicators only.
+        if indicator.symbol in SECTOR_SYMBOLS and target.region != "Europe":
+            continue
         close = panel[indicator.symbol]["Close"].dropna()
         lag = _lag_days(indicator.close_utc, target)
         name = _column_name(indicator.symbol)
@@ -119,6 +283,21 @@ def build_features(
             features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
             features[f"ind_{name}_vol_{OIL_VOL_WINDOW}"] = as_of(vol, dates, lag)
             features[f"ind_{name}_shock"] = as_of(returns / vol.where(vol > 0), dates, lag)
+        elif indicator.symbol in FX_SYMBOLS:
+            # Central-bank intervention produces a move that is large relative
+            # to recent realised volatility.  The shock feature normalises the
+            # daily return by the preceding-bar volatility so the model can
+            # distinguish a routine 0.5% drift from a 3-sigma BoJ defence.
+            vol = returns.rolling(FX_VOL_WINDOW).std().shift(1)
+            features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
+            features[f"ind_{name}_vol_{FX_VOL_WINDOW}"] = as_of(vol, dates, lag)
+            features[f"ind_{name}_shock"] = as_of(returns / vol.where(vol > 0), dates, lag)
+        elif indicator.symbol in SECTOR_SYMBOLS:
+            features[f"ind_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
+
+    features.update(peer_features(target_symbol, panel, dates, target))
+    features.update(curve_features(panel, dates, target))
+    features.update(policy_features(panel, dates, target))
 
     frame = pd.DataFrame(features, index=dates)
     if hourly:
