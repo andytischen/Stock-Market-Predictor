@@ -155,7 +155,12 @@ def test_half_a_paired_block_is_read_by_nothing_and_so_judges_nothing():
 
 
 def test_a_leg_that_arrived_empty_does_not_complete_its_pair():
-    """``policy_features`` needs closes, not a key: an empty frame builds nothing."""
+    """A key with no bars is a partner in name only.
+
+    `load_panel` drops empty downloads rather than carrying the key, so this is
+    defensive: a frame with no rows builds no feature either way, and it must not
+    be what turns its partner's silence into a refusal.
+    """
     loaded = panel(**{"^GSPC": 1, "ZQ=F": 20})
     loaded["^IRX"] = pd.DataFrame()
     guard(_shared_inputs(loaded, ["^GSPC"]), SESSION)

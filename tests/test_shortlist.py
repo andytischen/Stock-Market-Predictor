@@ -428,6 +428,19 @@ def test_a_uniformly_old_panel_is_disclosed_by_the_session_it_forecast(panel):
     assert "stale run" not in render_text(picks, panel=panel, as_of=read_on, max_stale_days=40)
 
 
+def test_the_two_stale_footers_do_not_contradict_each_other(panel):
+    """A panel can be old *and* be ragged, and then both footers print."""
+    panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}
+    panel["^GSPC"] = _ending(panel["^GSPC"], SESSION - pd.Timedelta(days=60))
+    text = render_text(
+        [pick("GOOD", 0.70, auc=0.62)], panel=panel, as_of=SESSION + pd.Timedelta(days=30)
+    )
+    assert "^GSPC" in text
+    # Having just named one, the run footer cannot claim none was named.
+    assert "none is named above" not in text
+    assert "behind the rest of that panel" in text
+
+
 def test_the_worst_lag_is_named_first(panel):
     """Eight names are printed; they should be the eight furthest behind."""
     panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}

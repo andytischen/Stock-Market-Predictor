@@ -338,10 +338,12 @@ repeat the previous close), which is part of why it scores lowest.
 A feed can also simply stop. Features are aligned by forward-filling, so a
 series that stopped updating is read as one that did not move — right for a
 holiday, wrong for a dead feed, and indistinguishable from inside the model.
-Every command that fits a model and prints a probability — `predict`, `stock`,
-`shortlist`, `export`, `dashboard` and `sectors` — therefore refuses to run when
-an input has no bar within `--max-stale-days` (5) of today, naming the worst
-offenders and their lags:
+Every command that forecasts the next open — `predict`, `stock`, `shortlist`,
+`export`, `dashboard` and `sectors` — therefore refuses to run when an input has
+no bar within `--max-stale-days` (5) of today, naming the worst offenders and
+their lags. (`scorecard` and `backtest` are not among them: their probabilities
+are historical, dated by the session each row scores, and a cache that stops
+early shortens the record rather than misdating it.)
 
 ```
 error: 40 of 61 input series have no bar within 5 days of 2026-08-15:

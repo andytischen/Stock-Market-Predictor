@@ -389,20 +389,21 @@ def render_text(
         for pick in flagged:
             for note in pick.forecast.caveats:
                 lines.append(f"  {pick.symbol}: {note}")
+    named: list[str] = []
     if panel is not None and picks:
         session = max(p.forecast.session for p in picks)
         # The threshold the run was given, not the default: a footer disagreeing
         # with the guard that let the run through says the wrong thing twice.
-        counted, behind = stale_inputs(panel, session, max_stale_days)
-        if behind:
+        counted, named = stale_inputs(panel, session, max_stale_days)
+        if named:
             lines.append("")
             lines.append(
-                f"stale inputs: {len(behind)} of {counted} series have no bar within "
+                f"stale inputs: {len(named)} of {counted} series have no bar within "
                 f"{max_stale_days} days of {session.date().isoformat()}, a gap the calendar "
                 "does not explain. Their last value is carried forward, so these "
                 "probabilities are the model's read of older cross-market and "
-                f"cross-asset data: {', '.join(behind[:8])}"
-                + (f" and {len(behind) - 8} more" if len(behind) > 8 else "")
+                f"cross-asset data: {', '.join(named[:8])}"
+                + (f" and {len(named) - 8} more" if len(named) > 8 else "")
             )
     # Not conditional on the panel: this is a fact about the forecast itself, and
     # the only disclosure a uniformly old cache produces.
@@ -413,10 +414,16 @@ def render_text(
             lines.append("")
             lines.append(
                 "stale run: the session forecast above follows the panel's last bar and "
-                f"is {lag} days before {as_of.date().isoformat()}. The whole panel stops "
-                "there, so no series is behind the others and none is named above: these "
-                "probabilities are the model's read of the market as it stood then, not "
-                "this morning."
+                f"is {lag} days before {as_of.date().isoformat()}. "
+                + (
+                    "The series named above are behind the rest of that panel, which is "
+                    "itself behind today: "
+                    if named
+                    else "The whole panel stops there, so no series is behind the others "
+                    "and none is named above: "
+                )
+                + "these probabilities are the model's read of the market as it stood "
+                "then, not this morning."
             )
     lines.append("")
     lines.append(
