@@ -165,3 +165,87 @@ So when local is green and CI is red:
 3. Only then suspect the environment.
 
 Merging current `main` is usually the whole fix.
+
+## Testing `journal` (the forecast journal)
+
+`journal` both *writes* forecasts to a journal CSV and *settles* matured rows. Two rules make
+it cheap and safe to test:
+
+- **Always pass `--log /tmp/...`.** The default is the committed `docs/forecast-log.csv`; a bare
+  `journal` run rewrites a tracked file. Finish with `git status --porcelain` to prove you did
+  not. Copy the committed journal to `/tmp` when you want to test against the real seed.
+- **`--settle-only` skips forecasting entirely**, so it returns in seconds instead of ~1 min per
+  market. Almost every check (settle arithmetic, window/min-settled, decay, exit code) can be
+  driven from a *hand-built* journal CSV plus `--settle-only`. Only idempotence-of-recording
+  needs a real forecast.
+
+A hand-built journal only needs `session,symbol,market,p_open_up,status` — `read_log` widens a
+frame that is missing the optional columns, which is worth exercising on purpose. Set
+`status=settled` and supply your own `outcome` to test the metrics directly; set
+`status=pending` with real session dates to test settlement against the cache.
+
+### Settle on `Market.gap_symbol`, never on the index
+
+The single most important correctness check. Yahoo repeats the previous close as the *index*
+open for some markets, so the model labels those on a tracker (`Market.open_source`):
+`^FTSE` → `ISF.L`, `^AXJO` → `STW.AX`. Measured from the cache on this box:
+
+| symbol | stale-open fraction |
+| --- | --- |
+| `^FTSE` | 96.3% |
+| `ISF.L` | 1.5% |
+| `^AXJO` | 48.4% |
+| `STW.AX` | 6.6% |
+
+So code that settles against `panel[symbol]` retires almost every FTSE session as `stale` and
+the market silently never reaches `--min-settled` — a failure that looks like "no data yet"
+rather than a bug. Test it by journalling ~30 real tracker sessions as pending, settling, and
+asserting the recorded `prev_close`/`open` are at **tracker scale** (FTSE ≈ 1050, not ≈ 10800)
+and that `status=settled` dominates. `journal.opening_bars` must mirror
+`features.build_features` exactly (same `dropna(subset=["Open","Close"])`, same
+`is_stock(target_symbol)` gate on `dividend_adjusted`) — grading has to use the price the label
+was built from, so if you think the adjustment is wrong, it must be changed in *both* places or
+the score stops measuring the model. Note the trackers distribute, and leaving them unadjusted
+flips the gap sign on ~4% of `STW.AX` and ~0.7% of `ISF.L` sessions; that is a property of the
+model's label, not of the journal.
+
+### Forcing the statuses without touching the real cache
+
+`cp -r ~/.cache/gapmodel /tmp/cache-mod` and pass `--cache /tmp/cache-mod`. Then, editing the
+**gap symbol's** CSV:
+
+- `stale` — usually occurs naturally; otherwise set a session's `Open` equal to the previous
+  row's `Close` (tolerance is `features.STALE_GAP_TOLERANCE = 1e-9`).
+- `no-session` — drop a row whose date you have journalled, keeping later rows.
+- `pending` → `settled` — a trailing bar with `Close` NaN is dropped by `opening_bars`, so the
+  newest session stays pending; filling that `Close` in the copy settles it. This is exactly why
+  `^FTSE` can sit pending for a session the *index* already printed.
+- `late` — needs the forecast session to already be in the panel, which the model normally
+  prevents; `journal._already_printed(panel, symbol, session)` is the honest thing to probe
+  directly, and it must flip with the tracker's bars, not the index's.
+
+Assert unscorable rows never move the numbers: recompute the metrics over `status == "settled"`
+rows only and require an exact 4dp match to the printed table.
+
+### Decay has two legs — test them apart
+
+`Skill.decayed` is `brier_skill <= 0 or hit_rate < drift_rate`, where
+`drift_rate = max(base_rate, 1 - base_rate)`. Comparing against `base_rate` alone is wrong: in a
+market that opens *down* 67% of the time, always saying "down" scores 67%, so a 60% hit rate
+with a healthy Brier skill is still no read. A journal that hits both legs proves nothing about
+the drift leg, so build one where `brier_skill > 0` and `base_rate < hit_rate < drift_rate` and
+require it to be flagged anyway. A worked example that does it: 30 rows, 20 down / 10 up
+(`base_rate` 0.333, `drift_rate` 0.667), probabilities `[0.15]*14 + [0.52]*6 + [0.55]*4 +
+[0.48]*6` → hit 0.60, Brier skill +0.345, and it must still be listed under "below their own
+drift" with `--fail-on-decay` exiting 1.
+
+### Append-only is the other thing worth attacking
+
+`record` keys on `(symbol, session)`. Run the same command twice and require the file to be
+**byte-identical** (`diff`), not merely the same row count: the bug to catch is a second run
+overwriting `p_open_up` or `recorded` in place, which a row count cannot see.
+
+Beware that a seeded journal's probabilities stop reproducing once the cache is refreshed — a
+seed row and a fresh forecast for the same session can differ (seen: `^GSPC` seed 0.6206 vs
+fresh 0.6233) without anything being broken. `^FTSE` reproduces longer than the rest because
+`ISF.L` lags the index by a bar.

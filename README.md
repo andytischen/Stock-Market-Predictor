@@ -128,6 +128,7 @@ python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian 
 python -m gapmodel screen             # US stocks: liquid, unusually active, moving
 python -m gapmodel shortlist --top 10 # rank the US universe by demonstrated edge
 python -m gapmodel shortlist --gainers 10  # only the ten biggest movers of the latest session
+python -m gapmodel journal            # write today's calls down, and score the settled ones
 ```
 
 `predict` prints one row per market with the probability and the out-of-sample
@@ -558,6 +559,62 @@ bell. The universe in `universe.py` is a hand-maintained snapshot of today's
 listings, which means the backtest metrics carry survivorship bias — the names
 that were delisted or acquired are absent, so a genuinely point-in-time universe
 would read worse.
+
+## Forecast journal and live skill
+
+`scorecard` above measures the walk-forward record over its last sessions, which
+is still the model scoring itself on history it was handed whole. `journal`
+measures it against sessions that had not happened when the probability was
+written down — the number a reader of a live forecast can actually act on.
+
+```bash
+python -m gapmodel journal                       # record today, settle what printed, score
+python -m gapmodel journal --settle-only         # score the journal without forecasting
+python -m gapmodel journal --window 120 --fail-on-decay
+```
+
+Each run appends its forecasts to `docs/forecast-log.csv`, one row per market
+and session, then fills in the realised open for the rows whose auction has
+since printed. A session already in the journal is never re-forecast and never
+overwritten, so a probability cannot be improved after the fact and a run
+repeated twice in a morning does not get two attempts at the same open.
+
+Scoring follows the label the model is fitted on — an opening print above the
+previous close, read from the same symbol the model labels on, so the markets
+whose index open Yahoo repeats are settled on their tracker (`ISF.L` for the
+FTSE, `STW.AX` for the ASX) rather than graded on a price the project already
+rejects. Sessions that cannot carry a label are retired rather than counted: an
+open that merely repeats the previous close (`stale`) and a session the market
+never held (`no-session`, a holiday the journal did not know about).
+
+A third status covers the row that looks like a forecast but is not one. The
+session a model forecasts is the one after the last session it has *complete*
+features for, so a market still missing an indicator for yesterday is forecast
+for an auction that has already printed. Nothing is leaked — every feature is
+lagged either way — but it is not a call anybody could have acted on, so it is
+journalled as `late` and left out of the live record.
+
+```
+forecast journal: 320 rows  settled 288  pending 16  unscorable 16
+
+live record over the last 60 settled sessions per market:
+ market symbol  settled  hit_rate  base_rate  brier  brier_skill  mean_p       from         to
+S&P 500  ^GSPC       30      0.50       0.60 0.2666      -0.1109  0.5637 2026-07-06 2026-08-14
+
+below their own drift — the model is not adding a read here:
+  S&P 500 (^GSPC): hit 50% against a 60% drift, Brier skill -0.111 over 30 sessions
+```
+
+Skill is measured against each market's own drift over the same sessions, not
+against a coin flip: predicting "up" every morning in a market that opens up 60%
+of the time is drift, not a read, and a Brier score has to clear that constant
+forecast before it says anything. The accuracy to beat is whichever side the
+drift leans — 70% in a market that opened up only 30% of the time, where the
+up-rate alone would be a bar the model clears by knowing nothing. A market that
+fails to is called out by name, and `--fail-on-decay` turns that into a non-zero
+exit so a scheduled run can raise it. Nothing is reported for a market
+with fewer than 20 settled sessions: the sampling error on a hit rate over a
+handful of opens is wider than any decay worth alerting on.
 
 ## Trend score
 

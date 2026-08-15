@@ -104,6 +104,20 @@ def test_scorecard_rejects_an_empty_window_before_fitting_anything(capsys):
     assert "must be greater than 0" in capsys.readouterr().err
 
 
+def test_journal_and_scorecard_are_separate_commands():
+    # Both score the model's calls, but scorecard reads the walk-forward's own
+    # predictions and journal reads what was written down before each open.
+    parser = build_parser()
+    live = parser.parse_args(
+        ["journal", "--market", "^FTSE", "--window", "90", "--min-settled", "5", "--settle-only"]
+    )
+    assert live.func is not parser.parse_args(["scorecard"]).func
+    assert live.market == ["^FTSE"]
+    assert (live.window, live.min_settled) == (90, 5)
+    assert live.settle_only and not live.fail_on_decay
+    assert live.log.endswith("forecast-log.csv")
+
+
 def test_shock_parsing_accepts_percentages_and_fractions():
     from gapmodel.predict import parse_shock
 
