@@ -476,8 +476,9 @@ broadly rising market nearly every name reads positive and a watchlist bunches
 up well above zero (the 32-name list above averaged +1.49 on 2026-08-14, with
 only two names below zero). `--relative` restates it as a cross-section: the
 comparison universe is scored on the same session, and each ticker is reported
-as its standardised position within that distribution plus the percentile of the
-universe it beats.
+as its standardised position within that distribution plus `pct`, the share of
+the universe scoring no higher (a name in the universe counts itself, so the
+weakest member of 157 reads 1 rather than 0).
 
 ```bash
 python -m gapmodel score IVZ JPM CLX --relative              # vs the built-in US list
@@ -497,6 +498,9 @@ universe: 157 names as of 2026-08-14, raw score mean +0.69 sd 1.14
 makes it comparable across dates and is the shape the ThinkorSwim column has.
 The footer states what was compared against, and names whose data stops before
 the session are listed as stale rather than silently dragging the mean. The
+session is the newest close the universe actually reached at or before `--asof`,
+not `--asof` itself, so asking as of a weekend prices the cross-section on the
+Friday rather than declaring every name stale. The
 comparison universe defaults to `us_universe()`; a symbol being scored need not
 belong to it, and does not join the distribution it is measured against.
 

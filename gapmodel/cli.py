@@ -460,13 +460,7 @@ def _as_of(hours: float | None) -> pd.Timestamp | None:
 
 
 def _score_universe(args: argparse.Namespace) -> list[str]:
-    """The comparison list for ``--relative``: a file if given, else the US list.
-
-    ``--universe`` on its own is refused rather than quietly ignored: a caller
-    who names a comparison list plainly wants the comparison.
-    """
-    if args.universe and not args.relative:
-        raise SystemExit("error: --universe applies to --relative; pass --relative too")
+    """The comparison list for ``--relative``: a file if given, else the US list."""
     if args.universe:
         try:
             return read_universe(Path(args.universe))
@@ -483,12 +477,15 @@ def _cmd_score(args: argparse.Namespace) -> None:
             asof = pd.Timestamp(args.asof).tz_localize(None)
         except (ValueError, TypeError) as exc:
             raise SystemExit(f"error: --asof {args.asof!r} is not a valid date: {exc}") from exc
-    universe = _score_universe(args)
+    # Refused rather than quietly ignored: a caller who names a comparison list
+    # plainly wants the comparison.
+    if args.universe and not args.relative:
+        raise SystemExit("error: --universe applies to --relative; pass --relative too")
     footer = ""
     if args.relative:
         scores, reference = relative_scores(
             symbols,
-            universe,
+            _score_universe(args),
             window=args.window,
             asof=asof,
             start=args.start,

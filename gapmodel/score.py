@@ -169,10 +169,13 @@ def relative_scores(
     the output is centred by construction rather than by luck of the tape.
 
     A cross-section is only a cross-section if every name is measured on the same
-    day, so the comparison session is the newest one any universe member reached
-    (or ``asof`` when given), and members whose data stops earlier are reported
-    in ``Reference.stale`` — they still count, at their own last close, but the
-    caller can say how many are lagging.
+    day, so the comparison session is the newest close any universe member
+    reached at or before ``asof``, and members whose data stops earlier are
+    reported in ``Reference.stale`` — they still count, at their own last close,
+    but the caller can say how many are lagging. The session is *not* ``asof``
+    itself: ask as of a weekend or a holiday and the cross-section is the Friday
+    every member was scored on, which keeps the stale list to the names actually
+    lagging instead of all of them.
 
     ``symbols`` need not belong to ``universe``; names that do are scored once
     and appear in both. Returned strongest first.
@@ -198,7 +201,8 @@ def relative_scores(
     if spread == 0 or pd.isna(spread):
         raise ValueError("comparison universe has no spread to normalise against")
     mean = float(values.mean())
-    session = asof if asof is not None else max(m.asof for m in members)
+    newest = max(m.asof for m in members)
+    session = min(asof, newest) if asof is not None else newest
     out = [
         RelativeScore(
             symbol=s.symbol,

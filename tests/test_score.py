@@ -177,12 +177,23 @@ def test_session_is_the_newest_close_and_laggards_are_flagged(bars):
     assert reference.stale == ("EEE",)
 
 
-def test_asof_sets_the_session_even_when_no_member_reaches_it(bars):
+def test_a_non_trading_asof_falls_back_to_the_session_everyone_was_scored_on(bars):
+    """Asking as of a Saturday must not report the whole universe as lagging."""
     _, reference = relative_scores(
-        ["AAA"], UNIVERSE, window=WINDOW, asof=pd.Timestamp("2026-08-20")
+        ["AAA"], UNIVERSE, window=WINDOW, asof=pd.Timestamp("2026-08-15")
     )
-    assert reference.session == pd.Timestamp("2026-08-20")
-    assert set(reference.stale) == set(UNIVERSE)
+    assert reference.session == pd.Timestamp("2026-08-14")
+    assert reference.stale == ()
+
+
+def test_a_genuine_laggard_is_still_flagged_under_a_non_trading_asof(bars):
+    """The fallback must not empty the stale list, only stop it swallowing everyone."""
+    bars["EEE"] = "2026-08-11"
+    _, reference = relative_scores(
+        ["AAA"], UNIVERSE, window=WINDOW, asof=pd.Timestamp("2026-08-15")
+    )
+    assert reference.session == pd.Timestamp("2026-08-14")
+    assert reference.stale == ("EEE",)
 
 
 def test_to_relative_frame_rounds_and_orders_columns():
