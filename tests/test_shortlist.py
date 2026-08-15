@@ -9,14 +9,17 @@ from gapmodel.shortlist import (
     MIN_AUC,
     MIN_OOS,
     StockPick,
+    biggest_gainers,
     discarded,
     forecast_universe,
+    last_change,
     rank,
     render_text,
     stale_inputs,
     to_frame,
 )
 from gapmodel.stocks import (
+    SHORTLISTED,
     STOCKS_BY_SYMBOL,
     US_CLOSE_UTC,
     US_OPEN_UTC,
@@ -24,7 +27,7 @@ from gapmodel.stocks import (
     peers_of,
     target_market,
 )
-from gapmodel.universe import NASDAQ, nasdaq_universe
+from gapmodel.universe import NASDAQ, modelled_universe, nasdaq_universe
 from tests.test_features import synthetic_bars
 
 TICKER = "AAPL"
@@ -102,7 +105,7 @@ def test_a_repeated_ticker_is_forecast_once(panel):
     """Refitting the same name twice would double-count it in the header."""
     picks = forecast_universe(panel, symbols=[TICKER, TICKER, TICKER])
     assert [p.symbol for p in picks] == [TICKER]
-    assert "for 1 Nasdaq names" in render_text(picks)
+    assert "for 1 US names" in render_text(picks)
 
 
 def test_a_shortlisted_name_is_a_single_company_without_a_peer_list():
@@ -430,7 +433,7 @@ def test_every_curated_stock_can_also_be_shortlisted():
     A curated name absent here is accepted by ``stock`` and refused by
     ``shortlist``, so the parity between them cannot even be checked.
     """
-    assert set(STOCKS_BY_SYMBOL) <= set(nasdaq_universe())
+    assert set(STOCKS_BY_SYMBOL) <= set(modelled_universe())
 
 
 def test_the_universe_covers_a_useful_slice_of_the_nasdaq():
@@ -439,3 +442,102 @@ def test_the_universe_covers_a_useful_slice_of_the_nasdaq():
     assert all(symbol == symbol.upper() for symbol in universe)
     # Indices carry a caret; these are all single listings.
     assert all(not symbol.startswith("^") for symbol in universe)
+
+
+def test_the_modelled_universe_reaches_past_the_nasdaq():
+    """Venue is not a modelling boundary: NYSE names have the same auction."""
+    universe = modelled_universe()
+    assert universe == list(dict.fromkeys(universe))
+    assert set(nasdaq_universe()) <= set(universe)
+    assert len(universe) > len(nasdaq_universe())
+    # The names a Nasdaq-only list could never call, one per sleeve.
+    for elsewhere in ("JPM", "XOM", "CAT", "IBM", "CRM"):
+        assert elsewhere in universe
+    assert all(symbol == symbol.upper() for symbol in universe)
+    assert all(not symbol.startswith("^") for symbol in universe)
+    # A wider universe is only reachable if the parser accepts it.
+    assert all(symbol in SHORTLISTED for symbol in universe)
+
+
+def test_a_nyse_name_is_modelled_on_wall_streets_clock():
+    """Widening the list is worth nothing if the new names have no target."""
+    bank = target_market("JPM")
+    assert (bank.open_utc, bank.close_utc) == (US_OPEN_UTC, US_CLOSE_UTC)
+    assert bank.region == "Americas"
+    assert is_stock("JPM"), "a bank pays dividends: its bars need total return"
+
+
+def _closing(prices: list[float]) -> pd.DataFrame:
+    """Daily bars ending on the given closes, on consecutive business days."""
+    index = pd.date_range(end=SESSION, periods=len(prices), freq="B")
+    return pd.DataFrame({"Open": prices, "Close": prices}, index=index)
+
+
+def test_the_last_move_is_read_from_the_close_before_it():
+    assert last_change(_closing([100.0, 110.0])) == pytest.approx(0.10)
+    assert last_change(_closing([100.0, 95.0])) == pytest.approx(-0.05)
+
+
+def test_a_name_without_two_closes_has_no_last_move():
+    for unusable in ([100.0], [0.0, 100.0]):
+        with pytest.raises(ValueError):
+            last_change(_closing(unusable))
+
+
+def test_the_biggest_gainers_are_the_names_that_rose_most():
+    panel = {
+        "UP": _closing([100.0, 112.0]),
+        "MID": _closing([100.0, 104.0]),
+        "FLAT": _closing([100.0, 100.0]),
+        "DOWN": _closing([100.0, 90.0]),
+    }
+    assert biggest_gainers(panel, list(panel), 2) == ["UP", "MID"]
+    # Asking for more names than moved is not an error; it is all of them.
+    assert biggest_gainers(panel, list(panel), 10) == ["UP", "MID", "FLAT", "DOWN"]
+    with pytest.raises(ValueError):
+        biggest_gainers(panel, list(panel), 0)
+
+
+def test_ties_break_on_the_symbol_so_a_run_is_reproducible():
+    panel = {"BBB": _closing([100.0, 105.0]), "AAA": _closing([100.0, 105.0])}
+    assert biggest_gainers(panel, ["BBB", "AAA"], 2) == ["AAA", "BBB"]
+
+
+def test_a_name_the_panel_cannot_price_is_skipped_not_ranked(caplog):
+    """A missing or one-bar series must not silently rank as unchanged."""
+    panel = {"UP": _closing([100.0, 105.0]), "NEW": _closing([100.0])}
+    assert biggest_gainers(panel, ["UP", "NEW", "ABSENT"], 3) == ["UP"]
+    assert "NEW" in caplog.text
+
+
+def test_the_table_reports_the_move_the_name_has_just_made(panel):
+    entry = forecast_universe(panel, symbols=[TICKER], min_train=500)[0]
+    expected = last_change(panel[TICKER])
+    assert entry.last_change == pytest.approx(expected)
+    row = to_frame([entry]).iloc[0]
+    assert row["last_change"] == pytest.approx(round(expected * 100, 2))
+    # Context, not a claim: the report says so rather than leaving a reader to
+    # read the column as part of the forecast.
+    assert "last_change is the move the name has just made" in render_text([entry])
+
+
+def test_an_unknown_last_move_prints_empty_rather_than_zero():
+    """Zero would assert the name was unchanged, which is a different claim."""
+    row = to_frame([pick("X", 0.6, auc=0.6)]).iloc[0]
+    assert row["last_change"] is None or pd.isna(row["last_change"])
+
+
+def test_the_report_says_when_the_names_were_chosen_for_moving():
+    """Ten movers read as a universe would look like a market of only risers."""
+    text = render_text([pick("GOOD", 0.70, auc=0.62)], selection="the 1 biggest gainers")
+    assert "the 1 biggest gainers" in text
+    assert "biggest gainers" not in render_text([pick("GOOD", 0.70, auc=0.62)])
+
+
+def test_the_cli_exposes_the_gainers_pass():
+    args = build_parser().parse_args(["shortlist", "--gainers", "10"])
+    assert args.gainers == 10
+    assert build_parser().parse_args(["shortlist"]).gainers is None
+    for bad in ("0", "-2", "ten"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["shortlist", "--gainers", bad])
