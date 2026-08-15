@@ -14,6 +14,7 @@ from .asia import ACTIVITY_WINDOW, REGRESSION_WINDOW, build_asia_dashboard
 from .asia_report import render_asia_html, render_asia_text
 from .dashboard import build_dashboard, oil_readings, render_html, render_text
 from .data import DEFAULT_CACHE, load_panel
+from .events import SCHEDULES, unmaintained_on
 from .export import build_snapshot, dumps
 from .features import build_features, feature_symbols
 from .intraday import load_hourly_panel
@@ -406,12 +407,34 @@ def _cmd_predict(args: argparse.Namespace) -> None:
 def _print_caveats(forecasts: list[Forecast]) -> None:
     """Warn where a scheduled release makes a probability less than it looks."""
     flagged = [f for f in forecasts if f.caveats]
-    if not flagged:
-        return
-    print("\nscheduled releases this model cannot see:")
-    for forecast in flagged:
-        for note in forecast.caveats:
-            print(f"  {forecast.name}: {note}")
+    if flagged:
+        print("\nscheduled releases this model cannot see:")
+        for forecast in flagged:
+            for note in forecast.caveats:
+                print(f"  {forecast.name}: {note}")
+    _print_unmaintained(forecasts)
+
+
+def _print_unmaintained(forecasts: list[Forecast]) -> None:
+    """Say when a quiet session is merely an unread calendar.
+
+    The release tables are copied from the agencies' pages and run out at
+    different dates. Once a session is past one of them, the lack of a warning
+    for that series carries no information, and saying so is the only way the
+    silence stays honest.
+
+    One run can forecast more than one date — Tokyo's next session is the
+    following day while New York is still on today — so each date is checked on
+    its own rather than through the earliest of them.
+    """
+    for session in sorted({f.session for f in forecasts}):
+        stale = unmaintained_on(session)
+        if not stale:
+            continue
+        print(f"\nnot checked for {session.date()} — these calendars end earlier:")
+        for schedule in SCHEDULES:
+            if schedule.name in stale:
+                print(f"  {schedule.name}: table ends {schedule.covers_until} ({schedule.source})")
 
 
 def _cmd_stock(args: argparse.Namespace) -> None:
