@@ -178,6 +178,11 @@ def last_change(bars: pd.DataFrame) -> float:
     return float(close.iloc[-1]) / previous - 1.0
 
 
+def _last_bar(bars: pd.DataFrame) -> pd.Timestamp:
+    """The session a series ends on, to the day."""
+    return bars.index.max().normalize()
+
+
 def _changes(panel: dict[str, pd.DataFrame], symbols: list[str]) -> dict[str, float]:
     """Each name's last session move, skipping those the panel cannot supply."""
     moves: dict[str, float] = {}
@@ -193,13 +198,25 @@ def _changes(panel: dict[str, pd.DataFrame], symbols: list[str]) -> dict[str, fl
 
 
 def biggest_gainers(panel: dict[str, pd.DataFrame], symbols: list[str], count: int) -> list[str]:
-    """The ``count`` names that rose most in the last session in the panel.
+    """The ``count`` names that moved up most in the panel's latest session.
 
     Selection is the cheap half of the work: bars are downloaded once for the
     whole universe, while each walk-forward fit costs seconds, so narrowing to
     the movers before fitting is what makes a wide universe usable in a briefing.
 
-    A gainer is chosen for having already moved, which is a reason to read its
+    Ranked on the descending move and sliced, so on a session where everything
+    fell these are the smallest fallers rather than risers — the report names the
+    session and says the ranking is on the move, which is true either way.
+
+    Only names whose own last bar *is* that session are eligible. Every listing
+    here trades one clock, so a series ending earlier did not trade in the
+    session being ranked, and its own last two closes describe some older day: a
+    halted or delisted name would otherwise hold its final move for ever and
+    take a slot on every run, from the names that actually moved. Cached bars
+    make that the normal case, not an exotic one, since a panel is only as
+    current as its last ``--refresh``.
+
+    A mover is chosen for having already moved, which is a reason to read its
     call and not evidence about it: yesterday's largest rise is where a gap is
     most likely to be continuation or reversal, and the model's record for that
     name is the only thing that says which. Ties break on the symbol so a run is
@@ -207,7 +224,25 @@ def biggest_gainers(panel: dict[str, pd.DataFrame], symbols: list[str], count: i
     """
     if count < 1:
         raise ValueError(f"count must be at least 1, got {count}")
-    moves = _changes(panel, symbols)
+    dated = {
+        symbol: bars
+        for symbol in dict.fromkeys(symbols)
+        if (bars := panel.get(symbol)) is not None and not bars.empty
+    }
+    if not dated:
+        return []
+    latest = max(_last_bar(bars) for bars in dated.values())
+    eligible = [symbol for symbol, bars in dated.items() if _last_bar(bars) == latest]
+    behind = [symbol for symbol in dated if symbol not in set(eligible)]
+    if behind:
+        log.warning(
+            "%d of %d candidates have no bar for %s and cannot be ranked as movers: %s",
+            len(behind),
+            len(dated),
+            latest.date().isoformat(),
+            ", ".join(behind[:8]) + (f" and {len(behind) - 8} more" if len(behind) > 8 else ""),
+        )
+    moves = _changes(panel, eligible)
     ranked = sorted(moves.items(), key=lambda entry: (-entry[1], entry[0]))
     return [symbol for symbol, _ in ranked[:count]]
 
@@ -317,7 +352,9 @@ def _table(picks: list[StockPick]) -> str:
     """One printed block. The verdict is a column in the CSV, not here: each
     block is uniform in it, and the heading above already says which is which.
     """
-    return to_frame(picks).drop(columns=["credible"]).to_string(index=False)
+    # ``na_rep``, so a move the panel could not supply is a blank rather than the
+    # ``NaN`` pandas would print: an unknown move should not read as a number.
+    return to_frame(picks).drop(columns=["credible"]).to_string(index=False, na_rep="")
 
 
 def render_text(

@@ -576,9 +576,13 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
         symbols = biggest_gainers(panel, candidates, args.gainers)
         if not symbols:
             raise SystemExit("error: no candidate had two closes to compare")
+        # The session is named, and so is the ranking rule: sorting descending
+        # and slicing gives the smallest fallers on a session where everything
+        # fell, and calling those gainers would assert a rise the data denies.
+        moved = max(panel[symbol].index.max() for symbol in symbols).date().isoformat()
         selection = (
-            f"the {len(symbols)} biggest gainers of the last session, "
-            f"out of {len(candidates)} candidates"
+            f"the {len(symbols)} biggest gainers of session {moved}, out of "
+            f"{len(candidates)} candidates, ranked on their move in that session"
         )
     picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
     print(render_shortlist_text(picks, top=args.top, panel=panel, selection=selection), end="")
@@ -839,7 +843,7 @@ def build_parser() -> argparse.ArgumentParser:
     shortlist.add_argument(
         "--gainers",
         type=_positive_int,
-        help="forecast only the N biggest risers of the last session",
+        help="forecast only the N biggest movers of the latest session",
     )
     shortlist.add_argument(
         "--top",

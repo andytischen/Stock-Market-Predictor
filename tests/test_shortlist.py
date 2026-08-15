@@ -467,9 +467,9 @@ def test_a_nyse_name_is_modelled_on_wall_streets_clock():
     assert is_stock("JPM"), "a bank pays dividends: its bars need total return"
 
 
-def _closing(prices: list[float]) -> pd.DataFrame:
+def _closing(prices: list[float], end: pd.Timestamp | None = None) -> pd.DataFrame:
     """Daily bars ending on the given closes, on consecutive business days."""
-    index = pd.date_range(end=SESSION, periods=len(prices), freq="B")
+    index = pd.date_range(end=end if end is not None else SESSION, periods=len(prices), freq="B")
     return pd.DataFrame({"Open": prices, "Close": prices}, index=index)
 
 
@@ -510,6 +510,22 @@ def test_a_name_the_panel_cannot_price_is_skipped_not_ranked(caplog):
     assert "NEW" in caplog.text
 
 
+def test_a_name_that_did_not_trade_the_latest_session_is_not_ranked_as_a_mover(caplog):
+    """Otherwise a halted or delisted name holds its final move for ever.
+
+    Its own last two closes are a real move on some older day, so the rank would
+    be filled by a name that did not trade at all in the session on the heading,
+    displacing one that did. Cached bars make this the normal case.
+    """
+    panel = {
+        "STALE": _closing([100.0, 140.0], end=SESSION - pd.offsets.BDay(10)),
+        "UP": _closing([100.0, 105.0]),
+        "MID": _closing([100.0, 102.0]),
+    }
+    assert biggest_gainers(panel, list(panel), 2) == ["UP", "MID"]
+    assert "STALE" in caplog.text
+
+
 def test_the_table_reports_the_move_the_name_has_just_made(panel):
     entry = forecast_universe(panel, symbols=[TICKER], min_train=500)[0]
     expected = last_change(panel[TICKER])
@@ -522,9 +538,21 @@ def test_the_table_reports_the_move_the_name_has_just_made(panel):
 
 
 def test_an_unknown_last_move_prints_empty_rather_than_zero():
-    """Zero would assert the name was unchanged, which is a different claim."""
+    """Zero would assert the name was unchanged, which is a different claim.
+
+    And ``NaN`` in a column of percentages reads as a number that went wrong
+    rather than as a value nobody has, so the printed table blanks it too.
+    """
     row = to_frame([pick("X", 0.6, auc=0.6)]).iloc[0]
     assert row["last_change"] is None or pd.isna(row["last_change"])
+    text = render_text(
+        [
+            StockPick(pick("KNOWN", 0.70, auc=0.62).forecast, last_change=0.0123),
+            pick("UNKNOWN", 0.70, auc=0.62),
+        ]
+    )
+    assert "1.23" in text
+    assert "NaN" not in text and "None" not in text
 
 
 def test_the_report_says_when_the_names_were_chosen_for_moving():

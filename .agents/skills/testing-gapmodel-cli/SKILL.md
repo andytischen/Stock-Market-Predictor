@@ -16,8 +16,9 @@ The two single-stock commands are easy to confuse, and testing one proves nothin
 
 - `stock SYM` — the curated registry in `gapmodel/stocks.py` (`MU`, `WDC`, `STX`), which adds
   `peer_*` columns from the Asian memory names that trade the same demand overnight.
-- `shortlist [SYM ...]` — the broad ranking in `gapmodel/shortlist.py` over the ~66-name universe
-  in `gapmodel/universe.py`.
+- `shortlist [SYM ...]` — the broad ranking in `gapmodel/shortlist.py` over the ~158-name US
+  universe `modelled_universe()` in `gapmodel/universe.py` (`NASDAQ + LARGE_CAP + MID_CAP`, both
+  venues). `nasdaq_universe()` is the 66-name venue slice and is no longer what `shortlist` runs.
 
 They overlap on the curated names, so assert they **agree**: `shortlist SYM` must print the same
 `p_open_up` and OOS metrics as `stock SYM` for every name in `stocks.STOCKS_BY_SYMBOL`, which holds
@@ -45,9 +46,14 @@ there is no name that one command models and the other refuses.
 ## Runtime budget (walk-forward backtest per name, single-threaded per symbol)
 
 - ~1.3 min per stock for `python -W ignore -m gapmodel shortlist SYM ...`.
-- The full universe run is ~11 min alone and ~23 min alongside six other forecast jobs: the
-  dominant cost is CPU contention on this box, not the number of names. Start it in the
-  background *first* (`nohup ... > /tmp/log 2>&1 &`) and do targeted runs while it works.
+- The full universe is ~158 names, so budget upwards of half an hour and start it in the
+  background *first* (`nohup ... > /tmp/log 2>&1 &`), doing targeted runs while it works. CPU
+  contention on this box matters as much as the count: 66 names took ~11 min alone and ~23 min
+  alongside six other forecast jobs.
+- `--gainers N` is the cheap way to exercise the whole path: every candidate's bars are loaded but
+  only N walk-forwards are fitted, so a 12-name run costs about what 12 named symbols cost.
+  A staleness case must be **synthesised** — the warm cache is date-uniform, so a test that relies
+  on it to produce a lagging series passes vacuously.
 
 ## Checks that actually catch bugs (do these, not just "it printed a table")
 

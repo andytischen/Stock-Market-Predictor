@@ -126,7 +126,7 @@ python -m gapmodel backtest --reliability
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
 python -m gapmodel screen             # US stocks: liquid, unusually active, moving
 python -m gapmodel shortlist --top 10 # rank the US universe by demonstrated edge
-python -m gapmodel shortlist --gainers 10  # only the ten biggest risers of the last session
+python -m gapmodel shortlist --gainers 10  # only the ten biggest movers of the latest session
 ```
 
 `predict` prints one row per market with the probability and the out-of-sample
@@ -397,9 +397,9 @@ What a shortlisted name does *not* get is peers; only the curated names have
 them, which the metrics beside each row price in.
 
 ```bash
-python -m gapmodel shortlist                        # the whole US universe (~155 names)
+python -m gapmodel shortlist                        # the whole US universe (~158 names)
 python -m gapmodel shortlist AAPL NVDA MSFT         # just these
-python -m gapmodel shortlist --gainers 12           # only the twelve biggest risers
+python -m gapmodel shortlist --gainers 12           # only the twelve biggest movers
 python -m gapmodel shortlist --top 10 --csv out.csv # strongest ten, all of them to CSV
 ```
 
@@ -409,8 +409,14 @@ restricting it to `NASDAQ` only cost coverage, leaving the banks, oils and
 industrials that lead whole sessions unreachable. `nasdaq_universe()` remains as
 a venue slice for a Nasdaq-only report.
 
-`--gainers N` forecasts the N names that rose most in the last session in the
-panel, and says so above the table. That is what makes a wide universe usable in
+`--gainers N` forecasts the N names that moved up most in the panel's latest
+session, and names that session above the table. Only names whose own last bar
+*is* that session are eligible: these all trade one clock, so a series ending
+earlier did not trade in the session being ranked, and a halted or delisted name
+would otherwise hold its final move for ever and take a slot on every run. The
+ranking is a descending sort on the move, so on a session where everything fell
+these are the smallest fallers — which is why the line above the table says the
+selection was ranked on the move rather than asserting a rise. That is what makes a wide universe usable in
 a morning briefing: bars for every candidate are downloaded either way and cost
 almost nothing, while each walk-forward fit costs seconds, so the movers are
 selected *after* the panel exists and only they are fitted. A name is chosen for
