@@ -253,6 +253,8 @@ def append_log(records: list[Record], path: str | Path) -> pd.DataFrame:
     target = Path(path)
     if target.exists():
         previous = pd.read_csv(target)
+        # The log first, this run second: keeping the last duplicate is what makes
+        # the newer scoring of a session win, so the order here carries the rule.
         fresh = pd.concat([previous, fresh], ignore_index=True)
     merged = (
         fresh.drop_duplicates(subset=["session", "symbol"], keep="last")
