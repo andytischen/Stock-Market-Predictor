@@ -9,7 +9,6 @@ from gapmodel.social_arb import (
     to_frame,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -79,10 +78,7 @@ def _fake_forecast(symbol: str, name: str, prob: float):
 # ---------------------------------------------------------------------------
 
 
-def test_return_correlations_shape(monkeypatch):
-    from gapmodel import social_arb as sa
-    from gapmodel.markets import MARKETS
-
+def test_return_correlations_shape():
     panel = _correlated_panel()
     corr = return_correlations(panel, window=100)
     # Only the four symbols we provided should appear.
@@ -128,18 +124,14 @@ def _make_forecasts(probs: dict[str, float]):
 
 def test_build_social_arb_returns_one_signal_per_market():
     panel = _correlated_panel()
-    forecasts = _make_forecasts(
-        {"^GSPC": 0.6, "^IXIC": 0.55, "^N225": 0.7, "^GDAXI": 0.5}
-    )
+    forecasts = _make_forecasts({"^GSPC": 0.6, "^IXIC": 0.55, "^N225": 0.7, "^GDAXI": 0.5})
     signals = build_social_arb(panel, forecasts, window=100)
     assert len(signals) == len(forecasts)
 
 
 def test_build_social_arb_sorted_by_abs_divergence():
     panel = _correlated_panel()
-    forecasts = _make_forecasts(
-        {"^GSPC": 0.6, "^IXIC": 0.55, "^N225": 0.7, "^GDAXI": 0.5}
-    )
+    forecasts = _make_forecasts({"^GSPC": 0.6, "^IXIC": 0.55, "^N225": 0.7, "^GDAXI": 0.5})
     signals = build_social_arb(panel, forecasts, window=100)
     divs = [abs(s.divergence) for s in signals]
     assert divs == sorted(divs, reverse=True)
@@ -147,9 +139,7 @@ def test_build_social_arb_sorted_by_abs_divergence():
 
 def test_build_social_arb_divergence_is_model_minus_consensus():
     panel = _correlated_panel()
-    forecasts = _make_forecasts(
-        {"^GSPC": 0.8, "^IXIC": 0.3, "^N225": 0.3, "^GDAXI": 0.3}
-    )
+    forecasts = _make_forecasts({"^GSPC": 0.8, "^IXIC": 0.3, "^N225": 0.3, "^GDAXI": 0.3})
     signals = build_social_arb(panel, forecasts, window=100)
     sp500 = next(s for s in signals if s.symbol == "^GSPC")
     assert sp500.divergence == pytest.approx(sp500.p_model - sp500.p_consensus)
@@ -158,9 +148,7 @@ def test_build_social_arb_divergence_is_model_minus_consensus():
 def test_build_social_arb_high_model_gives_positive_divergence():
     panel = _correlated_panel()
     # ^GSPC at 0.9 while all peers are at 0.1 — should give a large positive divergence.
-    forecasts = _make_forecasts(
-        {"^GSPC": 0.9, "^IXIC": 0.1, "^N225": 0.1, "^GDAXI": 0.1}
-    )
+    forecasts = _make_forecasts({"^GSPC": 0.9, "^IXIC": 0.1, "^N225": 0.1, "^GDAXI": 0.1})
     signals = build_social_arb(panel, forecasts, window=100)
     sp500 = next(s for s in signals if s.symbol == "^GSPC")
     assert sp500.divergence > 0
@@ -168,19 +156,59 @@ def test_build_social_arb_high_model_gives_positive_divergence():
 
 def test_build_social_arb_consensus_is_bounded():
     panel = _correlated_panel()
-    forecasts = _make_forecasts(
-        {"^GSPC": 0.6, "^IXIC": 0.55, "^N225": 0.7, "^GDAXI": 0.5}
-    )
+    forecasts = _make_forecasts({"^GSPC": 0.6, "^IXIC": 0.55, "^N225": 0.7, "^GDAXI": 0.5})
     signals = build_social_arb(panel, forecasts, window=100)
     for sig in signals:
         assert 0.0 <= sig.p_consensus <= 1.0
 
 
+def _inverse_panel(n: int = 300) -> dict[str, pd.DataFrame]:
+    """^GSPC and ^IXIC move together; ^N225 and ^GDAXI move against them."""
+    rng = np.random.default_rng(11)
+    dates = pd.bdate_range("2020-01-01", periods=n)
+    common = rng.normal(0, 0.01, n)
+    panel: dict[str, pd.DataFrame] = {}
+    for sym in _SYMBOLS:
+        sign = 1.0 if sym in {"^GSPC", "^IXIC"} else -1.0
+        close = 100 * np.exp(np.cumsum(sign * common + rng.normal(0, 0.001, n)))
+        open_ = close * np.exp(rng.normal(0, 0.004, n))
+        panel[sym] = pd.DataFrame(
+            {
+                "Open": open_,
+                "High": np.maximum(open_, close),
+                "Low": np.minimum(open_, close),
+                "Close": close,
+            },
+            index=dates,
+        )
+    return panel
+
+
+def test_inverse_peers_are_mirrored_before_averaging():
+    panel = _inverse_panel()
+    corr = return_correlations(panel, window=200)
+    assert corr.loc["^GSPC", "^N225"] < -0.5  # the panel really is inverse
+
+    # Every peer reads bullish. The two that move against ^GSPC therefore imply
+    # a bearish ^GSPC, so the consensus must sit below the raw peer average.
+    forecasts = _make_forecasts({"^GSPC": 0.5, "^IXIC": 0.9, "^N225": 0.9, "^GDAXI": 0.9})
+    signals = build_social_arb(panel, forecasts, window=200, min_corr=0.5)
+    sp500 = next(s for s in signals if s.symbol == "^GSPC")
+    assert sp500.p_consensus < 0.5
+    assert sp500.divergence > 0
+
+
+def test_top_peer_corr_keeps_the_sign_of_an_inverse_peer():
+    panel = _inverse_panel()
+    forecasts = _make_forecasts({"^GSPC": 0.5, "^N225": 0.9, "^GDAXI": 0.9})
+    signals = build_social_arb(panel, forecasts, window=200, min_corr=0.5)
+    sp500 = next(s for s in signals if s.symbol == "^GSPC")
+    assert sp500.top_peer_corr < 0
+
+
 def test_build_social_arb_min_corr_filters_weak_peers():
     panel = _independent_panel()
-    forecasts = _make_forecasts(
-        {"^GSPC": 0.6, "^IXIC": 0.55, "^N225": 0.7, "^GDAXI": 0.5}
-    )
+    forecasts = _make_forecasts({"^GSPC": 0.6, "^IXIC": 0.55, "^N225": 0.7, "^GDAXI": 0.5})
     # Independent random series — correlations near zero, no peer should qualify
     # at min_corr=0.5.
     signals = build_social_arb(panel, forecasts, window=100, min_corr=0.5)
@@ -252,3 +280,12 @@ def test_social_arb_command_csv_flag():
     parser = build_parser()
     args = parser.parse_args(["social-arb", "--csv", "out.csv"])
     assert args.csv == "out.csv"
+
+
+@pytest.mark.parametrize("value", ["0", "-5"])
+def test_social_arb_command_rejects_non_positive_window(value):
+    from gapmodel.cli import build_parser
+
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["social-arb", "--window", value])
