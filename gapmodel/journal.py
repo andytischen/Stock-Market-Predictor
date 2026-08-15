@@ -134,8 +134,22 @@ def opening_bars(panel: dict[str, pd.DataFrame] | None, symbol: str) -> pd.DataF
 
 
 def _already_printed(panel: dict[str, pd.DataFrame] | None, symbol: str, session: str) -> bool:
-    """Whether the panel already holds a bar for the session being forecast."""
-    bars = opening_bars(panel, symbol)
+    """Whether the source already holds a bar for the session being forecast.
+
+    Read from the raw bars rather than the ones ``opening_bars`` keeps. The
+    session a model forecasts is the one after the last bar it has *complete*
+    features for, so asking the filtered bars whether that session exists can
+    only ever answer no. The row that matters is exactly the one the filter
+    drops: a session whose auction has printed but whose close has not, which
+    pushes the forecast onto a morning that has already happened.
+    """
+    if not panel:
+        return False
+    try:
+        gap_symbol = target_market(symbol).gap_symbol
+    except (KeyError, ValueError):
+        gap_symbol = symbol
+    bars = panel.get(gap_symbol)
     if bars is None or bars.empty:
         return False
     return bool(pd.Timestamp(session) in bars.index)
@@ -277,7 +291,15 @@ class Skill:
 
     @property
     def decayed(self) -> bool:
-        """Live record no better than always predicting the market's own drift."""
+        """Live record no better than always predicting the market's own drift.
+
+        A market that opened the same way on every settled session is never
+        flagged: its drift is a perfect 100% by construction, so any forecast
+        looks decayed against it, and with no variance to explain there is no
+        skill to have lost.
+        """
+        if not np.isfinite(self.brier_skill):
+            return False
         return self.brier_skill <= 0.0 or self.hit_rate < self.drift_rate
 
 
@@ -310,9 +332,19 @@ def skills(
 
     Markets with fewer than ``min_settled`` settled sessions are left out
     entirely rather than reported with a number nobody should read.
+
+    ``min_settled`` above ``window`` is refused rather than honoured: it asks
+    for more sessions than the window can hold, so every market would be
+    dropped however long its history, and the report would blame missing
+    history for a threshold that cannot be met.
     """
     if window < 1:
         raise ValueError(f"window must be at least 1, got {window}")
+    if min_settled > window:
+        raise ValueError(
+            f"min_settled ({min_settled}) cannot exceed window ({window}): "
+            "no market could ever be reported"
+        )
     settled_rows = log_frame.loc[log_frame["status"] == SETTLED]
     if settled_rows.empty:
         return []

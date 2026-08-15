@@ -795,6 +795,14 @@ def _cmd_journal(args: argparse.Namespace) -> None:
     written down before the auction it describes, and the only run that is
     certain to happen every morning is the one that makes the forecast.
     """
+    # Refused before the forecasts are fitted rather than after: the pair asks
+    # for more settled sessions than the window can hold, so the run would
+    # spend its half hour and then report nothing for every market.
+    if args.min_settled > args.window:
+        raise SystemExit(
+            f"error: --min-settled {args.min_settled} exceeds --window {args.window}: "
+            "no market could be reported"
+        )
     path = Path(args.log)
     journal = read_log(path)
     panel = _panel(args)

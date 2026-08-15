@@ -641,9 +641,15 @@ forecast before it says anything. The accuracy to beat is whichever side the
 drift leans — 70% in a market that opened up only 30% of the time, where the
 up-rate alone would be a bar the model clears by knowing nothing. A market that
 fails to is called out by name, and `--fail-on-decay` turns that into a non-zero
-exit so a scheduled run can raise it. Nothing is reported for a market
-with fewer than 20 settled sessions: the sampling error on a hit rate over a
-handful of opens is wider than any decay worth alerting on.
+exit so a scheduled run can raise it. A market that opened the same way on
+every session in the window is left alone: its drift is a perfect 100% by
+construction, and with no variance to explain there is no skill to have lost.
+
+Nothing is reported for a market with fewer than `--min-settled` (20) settled
+sessions: the sampling error on a hit rate over a handful of opens is wider than
+any decay worth alerting on. A minimum above `--window` is refused rather than
+honoured — it asks for more sessions than the window can hold, so every market
+would go unreported however long its history.
 
 ## Trend score
 

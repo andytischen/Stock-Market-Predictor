@@ -118,6 +118,24 @@ def test_journal_and_scorecard_are_separate_commands():
     assert live.log.endswith("forecast-log.csv")
 
 
+def test_journal_refuses_a_minimum_its_window_cannot_hold_before_fitting_anything(tmp_path):
+    # Rejected up front: the window is trimmed before the minimum is applied, so
+    # the run would fit every model and then report nothing for any market.
+    with pytest.raises(SystemExit) as exit_info:
+        main(
+            [
+                "journal",
+                "--log",
+                str(tmp_path / "forecast-log.csv"),
+                "--window",
+                "10",
+                "--min-settled",
+                "20",
+            ]
+        )
+    assert "exceeds --window" in str(exit_info.value)
+
+
 def test_shock_parsing_accepts_percentages_and_fractions():
     from gapmodel.predict import parse_shock
 

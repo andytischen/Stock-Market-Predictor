@@ -163,6 +163,16 @@ def test_the_late_check_reads_the_tracker_the_session_came_from():
     assert journal.at[0, "status"] == LATE
 
 
+def test_the_late_check_sees_the_session_whose_close_has_not_printed():
+    # The row that makes a forecast late is the one settlement discards: today's
+    # auction has printed, its close has not, so the model forecasts a session
+    # that is already in the past.
+    bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (101.0, 102.0)})
+    bars.loc[pd.Timestamp("2026-08-18"), "Close"] = float("nan")
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)], {"^GSPC": bars})
+    assert journal.at[0, "status"] == LATE
+
+
 def test_a_bar_with_no_opening_print_is_not_mistaken_for_a_holiday():
     journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
     bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (101.0, 102.0)})
@@ -257,6 +267,24 @@ def test_a_market_with_no_variance_reports_no_skill():
     rows = [_settled("^GSPC", f"2026-01-{day:02d}", 0.6, 1.0) for day in range(1, 11)]
     measured = skills(_journal(rows), min_settled=10)[0]
     assert np.isnan(measured.brier_skill)
+
+
+def test_a_market_with_no_variance_is_not_called_decayed():
+    # Its drift is a perfect 100% by construction, so any forecast is "below"
+    # it, and there is no measurable skill to report alongside the alert.
+    rows = [_settled("^GSPC", f"2026-01-{day:02d}", 0.6, 1.0) for day in range(1, 11)]
+    journal = _journal(rows)
+    measured = skills(journal, min_settled=10)
+    assert measured[0].drift_rate == pytest.approx(1.0)
+    assert not measured[0].decayed
+    assert decayed(measured) == []
+    assert "below their own drift" not in render_text(journal, measured, window=60, min_settled=10)
+
+
+def test_a_minimum_the_window_cannot_hold_is_refused():
+    rows = [_settled("^GSPC", f"2026-01-{day:02d}", 0.6, float(day % 2)) for day in range(1, 31)]
+    with pytest.raises(ValueError, match="cannot exceed window"):
+        skills(_journal(rows), window=10, min_settled=20)
 
 
 def test_skills_are_sorted_with_the_worst_last():
