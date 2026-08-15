@@ -502,7 +502,9 @@ session is the newest close the universe actually reached at or before `--asof`,
 not `--asof` itself, so asking as of a weekend prices the cross-section on the
 Friday rather than declaring every name stale. The
 comparison universe defaults to `us_universe()`; a symbol being scored need not
-belong to it, and does not join the distribution it is measured against.
+belong to it, and does not join the distribution it is measured against — asking
+about a stock must not move its own benchmark, so a non-member with fresher data
+can be dated *after* the cross-section, and the footer names it when it is.
 
 What this does **not** do is agree with that column any better. Re-centring is an
 affine transform of the same number, so the correlation is unchanged by

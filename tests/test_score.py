@@ -196,6 +196,28 @@ def test_a_genuine_laggard_is_still_flagged_under_a_non_trading_asof(bars):
     assert reference.stale == ("EEE",)
 
 
+def test_a_symbol_fresher_than_the_cross_section_is_named(bars):
+    """A non-member cannot move the session, so say when it is dated past it."""
+    for member in UNIVERSE:
+        bars[member] = "2026-08-11"
+    _, reference = relative_scores(["ZZZ"], UNIVERSE, window=WINDOW)
+    assert reference.session == pd.Timestamp("2026-08-11")
+    assert reference.ahead == ("ZZZ",)
+    assert reference.stale == ()
+
+
+def test_nothing_is_ahead_when_every_name_shares_the_session(bars):
+    _, reference = relative_scores(["ZZZ"], UNIVERSE, window=WINDOW)
+    assert reference.ahead == ()
+
+
+def test_render_reference_names_the_symbols_ahead_of_the_session():
+    footer = render_reference(
+        Reference(pd.Timestamp("2026-08-11"), 2, 1.3, 0.27, stale=(), ahead=("JPM",))
+    )
+    assert "ahead of the comparison session: JPM" in footer
+
+
 def test_to_relative_frame_rounds_and_orders_columns():
     scores = [
         RelativeScore("AAA", 1.234, 0.876, 83.3333, 10.0, pd.Timestamp("2026-08-14"), 200),

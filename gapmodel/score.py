@@ -106,6 +106,7 @@ class Reference:
     mean: float
     stdev: float
     stale: tuple[str, ...]
+    ahead: tuple[str, ...] = ()
 
 
 def score_symbols(
@@ -178,7 +179,10 @@ def relative_scores(
     lagging instead of all of them.
 
     ``symbols`` need not belong to ``universe``; names that do are scored once
-    and appear in both. Returned strongest first.
+    and appear in both. A non-member is deliberately kept out of the session it
+    is measured against — asking about a stock must not move its own benchmark —
+    so one with fresher data can be dated *after* the cross-section; those are
+    named in ``Reference.ahead``. Returned strongest first.
     """
     wanted = [s.upper() for s in symbols]
     reference = [s.upper() for s in universe]
@@ -224,6 +228,7 @@ def relative_scores(
         mean=mean,
         stdev=spread,
         stale=tuple(m.symbol for m in members if m.asof < session),
+        ahead=tuple(s.symbol for s in out if s.asof > session),
     )
 
 
@@ -253,6 +258,14 @@ def to_relative_frame(scores: list[RelativeScore]) -> pd.DataFrame:
     )
 
 
+def _names(symbols: tuple[str, ...], limit: int = 5) -> str:
+    """A footer-sized list: the first few names, then a count of the rest."""
+    listed = ", ".join(symbols[:limit])
+    if len(symbols) > limit:
+        listed += f", +{len(symbols) - limit} more"
+    return listed
+
+
 def render_reference(reference: Reference) -> str:
     """One-line footer stating what the relative scores were measured against."""
     line = (
@@ -261,8 +274,7 @@ def render_reference(reference: Reference) -> str:
         f"raw score mean {reference.mean:+.2f} sd {reference.stdev:.2f}"
     )
     if reference.stale:
-        names = ", ".join(reference.stale[:5])
-        if len(reference.stale) > 5:
-            names += f", +{len(reference.stale) - 5} more"
-        line += f"\nstale (scored at an earlier close): {names}"
+        line += f"\nstale (scored at an earlier close): {_names(reference.stale)}"
+    if reference.ahead:
+        line += f"\nahead of the comparison session: {_names(reference.ahead)}"
     return line
