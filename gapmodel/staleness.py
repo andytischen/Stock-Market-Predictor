@@ -24,10 +24,11 @@ import pandas as pd
 
 log = logging.getLogger(__name__)
 
-# Calendar days a series may sit behind the session before it is called stale.
-# A series that traded on the previous session is one day behind, and a long
-# weekend or a holiday stretches that to four; five is the first lag the
-# calendar cannot explain.
+# The largest lag, in calendar days, a series may carry and still be read as
+# current: the comparison is ``lag > STALE_DAYS``, so five days is tolerated and
+# six is not. A series that traded on the previous session is one day behind, a
+# long weekend stretches that to three, and a holiday on either side of one to
+# five; six is the first lag the calendar cannot explain.
 STALE_DAYS = 5
 
 
