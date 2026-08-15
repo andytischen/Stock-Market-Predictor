@@ -165,6 +165,19 @@ def test_a_series_that_never_arrived_is_named_rather_than_hidden(caplog, capsys)
     assert capsys.readouterr().out == ""
 
 
+def test_the_series_that_never_arrived_are_named_in_a_fixed_order(caplog):
+    """Only eight are named, so which eight cannot depend on the download order.
+
+    The stale list is truncated worst-first, which the absent list has no
+    equivalent of — none of them has a lag — so it is sorted instead, rather than
+    naming whichever eight the panel happens to hold first.
+    """
+    absent = {symbol: pd.DataFrame() for symbol in "JIHGFEDCBA"}
+    with caplog.at_level("WARNING"):
+        guard({"AAPL": bars(SESSION), **absent}, SESSION)
+    assert "A, B, C, D, E, F, G, H and 2 more" in caplog.text
+
+
 def test_lag_is_measured_in_whole_days_from_any_time_of_day():
     """An intraday timestamp is a bar for that date, not a fraction of a lag."""
     intraday = {"AAPL": bars(SESSION - pd.Timedelta(days=9))}
