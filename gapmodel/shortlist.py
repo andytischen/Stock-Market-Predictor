@@ -354,7 +354,11 @@ def _table(picks: list[StockPick]) -> str:
     """
     # ``na_rep``, so a move the panel could not supply is a blank rather than the
     # ``NaN`` pandas would print: an unknown move should not read as a number.
-    return to_frame(picks).drop(columns=["credible"]).to_string(index=False, na_rep="")
+    # The column is cast first because ``na_rep`` only reaches a missing float:
+    # left as it comes, an all-unknown column is object dtype and prints ``None``.
+    frame = to_frame(picks).drop(columns=["credible"])
+    frame["last_change"] = frame["last_change"].astype("float64")
+    return frame.to_string(index=False, na_rep="")
 
 
 def render_text(

@@ -84,6 +84,38 @@ Parse the CSV (`--csv PATH`) with pandas rather than eyeballing the table:
 6. Good tickers for exercising the filter: `ARM` (too few OOS sessions), `HOOD`/`COIN`
    (negative Brier skill), `AAPL`/`NVDA` (credible).
 
+## Faking a stale or missing series without harming the warm cache
+
+The global `--cache DIR` flag (before the subcommand) is the way to test anything that depends on
+the *shape* of the cached data — a series that stopped updating, a name with one bar, a missing
+column. Copy the cache and edit the copy; never edit `~/.cache/gapmodel` in place, since re-fetching
+it costs a slow network round trip for every symbol:
+
+```bash
+cp -a ~/.cache/gapmodel /tmp/probe-cache
+md5sum ~/.cache/gapmodel/AMD.csv > /tmp/warm.md5   # verify untouched afterwards
+# edit /tmp/probe-cache/AMD.csv, then:
+python -W ignore -m gapmodel --cache /tmp/probe-cache shortlist AMD MU JPM XOM --gainers 2
+md5sum -c /tmp/warm.md5
+```
+
+Pair it with a small explicit symbol list so the run costs two fits rather than 158. Truncating one
+name's CSV to an earlier date *and* inflating its final close is what distinguishes "ranked on the
+panel's latest session" from "ranked on each name's own last two bars": the doctored name has the
+largest own-tail move, so it must still be excluded, and a run that lists it has the bug back.
+Expect the same doctored series to be named twice — once by the mover-eligibility warning on stderr
+and once by the `stale inputs:` footer — which are different mechanisms; do not read one as the
+other.
+
+## Pandas `na_rep` only reaches a float column
+
+A missing numeric field rendered with `DataFrame.to_string(na_rep="")` prints blank only while the
+column still has at least one real value and is therefore `float64`. If *every* row is `None` the
+column is `object` dtype and pandas prints the literal `None`, `na_rep` notwithstanding. So test a
+"missing value prints blank" claim in **both** shapes — one missing among valued rows, and every row
+missing — or the all-missing case will slip through. `to_csv` writes an empty field in both, so the
+CSV passing says nothing about the table.
+
 ## Known data caveat to re-check, not to re-file
 
 The cached **index** series (`^GSPC`, `^IXIC`, European indices, `^VIX`, `^TNX`, ...) are often

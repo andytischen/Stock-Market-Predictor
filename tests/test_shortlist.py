@@ -553,6 +553,10 @@ def test_an_unknown_last_move_prints_empty_rather_than_zero():
     )
     assert "1.23" in text
     assert "NaN" not in text and "None" not in text
+    # And when no row has a move: the column is then all-missing, where pandas
+    # would print `None` per row unless it is a float column to begin with.
+    every = render_text([pick("A", 0.70, auc=0.62), pick("B", 0.71, auc=0.63)])
+    assert "NaN" not in every and "None" not in every
 
 
 def test_the_report_says_when_the_names_were_chosen_for_moving():
