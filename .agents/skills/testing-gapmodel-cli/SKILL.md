@@ -142,8 +142,8 @@ between the branch and `main`, not by reasoning about the code:
 
 ```bash
 git worktree add /tmp/gapmain main
-cd /tmp/gapmain && python -m gapmodel predict --market ^GSPC --market ^FTSE --explain > /tmp/main.txt
-cd <repo>        && python -m gapmodel predict --market ^GSPC --market ^FTSE --explain > /tmp/branch.txt
+cd /tmp/gapmain && python -W ignore -m gapmodel predict --market ^GSPC --market ^FTSE --explain > /tmp/main.txt
+cd <repo>        && python -W ignore -m gapmodel predict --market ^GSPC --market ^FTSE --explain > /tmp/branch.txt
 diff /tmp/main.txt /tmp/branch.txt      # expect no output
 git worktree remove --force /tmp/gapmain   # always clean up
 ```
