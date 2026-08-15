@@ -25,7 +25,7 @@ that has already printed. Nothing is leaked -- the features are lagged either
 way -- but it is not a forecast anybody could have acted on, so it is journalled
 as ``late`` and left out of the live record instead of scored beside the rest.
 
-Skill is reported against each market's own realised up-rate over the same
+Skill is reported against each market's own realised drift over the same
 sessions, not against a coin flip. Predicting "up" every morning in a market
 that opens up 54% of the time is not skill, and a Brier score has to clear that
 constant forecast before it says anything. A market whose live record fails to
@@ -42,8 +42,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .features import STALE_GAP_TOLERANCE
+from .features import STALE_GAP_TOLERANCE, dividend_adjusted
 from .predict import Forecast
+from .stocks import is_stock, target_market
 
 log = logging.getLogger(__name__)
 
@@ -104,12 +105,37 @@ def write_log(log_frame: pd.DataFrame, path: Path) -> None:
     """Write the journal sorted by session then market, so diffs stay readable."""
     path.parent.mkdir(parents=True, exist_ok=True)
     ordered = log_frame.sort_values(["session", "symbol"], kind="stable")
-    ordered.to_csv(path, index=False, float_format="%.6g")
+    # Enough digits that the stored prices still reproduce the stored gap: a
+    # five-digit index level keeps its cents, which %.6g rounds away.
+    ordered.to_csv(path, index=False, float_format="%.10g")
+
+
+def opening_bars(panel: dict[str, pd.DataFrame] | None, symbol: str) -> pd.DataFrame | None:
+    """The bars a market's opening auction is read from, as the model reads them.
+
+    Yahoo repeats the previous close as the open for a few indices, so the model
+    labels those markets on a liquid tracker listed on the same exchange instead
+    (``Market.gap_symbol``). Settling against the index itself would grade the
+    forecast on the very price the project rejected -- every session would come
+    back ``stale`` -- so the journal follows the same symbol, and drops the
+    unusable bars the way ``features`` does.
+    """
+    if not panel:
+        return None
+    try:
+        gap_symbol = target_market(symbol).gap_symbol
+    except (KeyError, ValueError):
+        gap_symbol = symbol
+    bars = panel.get(gap_symbol)
+    if bars is None:
+        return None
+    bars = bars.dropna(subset=["Open", "Close"])
+    return dividend_adjusted(bars) if is_stock(symbol) else bars
 
 
 def _already_printed(panel: dict[str, pd.DataFrame] | None, symbol: str, session: str) -> bool:
     """Whether the panel already holds a bar for the session being forecast."""
-    bars = (panel or {}).get(symbol)
+    bars = opening_bars(panel, symbol)
     if bars is None or bars.empty:
         return False
     return bool(pd.Timestamp(session) in bars.index)
@@ -193,13 +219,21 @@ def _settle_row(bars: pd.DataFrame, session: pd.Timestamp) -> dict[str, object] 
     }
 
 
-def settle(log_frame: pd.DataFrame, panel: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, int]:
-    """Fill in the realised open for every pending row whose session has printed."""
+def settle(
+    log_frame: pd.DataFrame, panel: dict[str, pd.DataFrame]
+) -> tuple[pd.DataFrame, int, int]:
+    """Fill in the realised open for every pending row whose session has printed.
+
+    Returns the journal, the rows that were scored, and the rows whose session
+    turned out not to be scorable -- counted apart, because a morning that
+    retires four holidays has not scored four sessions.
+    """
     updated = log_frame.copy()
     filled = 0
+    retired = 0
     for index in updated.index[updated["status"] == PENDING]:
         symbol = str(updated.at[index, "symbol"])
-        bars = panel.get(symbol)
+        bars = opening_bars(panel, symbol)
         if bars is None:
             log.warning("%s is not in the panel: leaving its rows pending", symbol)
             continue
@@ -208,8 +242,11 @@ def settle(log_frame: pd.DataFrame, panel: dict[str, pd.DataFrame]) -> tuple[pd.
             continue
         for column, value in outcome.items():
             updated.at[index, column] = value
-        filled += 1
-    return updated, filled
+        if outcome["status"] == SETTLED:
+            filled += 1
+        else:
+            retired += 1
+    return updated, filled, retired
 
 
 @dataclass(frozen=True)
@@ -228,9 +265,20 @@ class Skill:
     last: str
 
     @property
+    def drift_rate(self) -> float:
+        """Accuracy of always calling the side the market opened most often.
+
+        Whichever way the drift leans: a market that opened up on 30% of the
+        settled sessions is called correctly 70% of the time by saying "down"
+        every morning, so the up-rate alone would be a bar the model clears
+        without knowing anything.
+        """
+        return max(self.base_rate, 1.0 - self.base_rate)
+
+    @property
     def decayed(self) -> bool:
         """Live record no better than always predicting the market's own drift."""
-        return self.brier_skill <= 0.0 or self.hit_rate < self.base_rate
+        return self.brier_skill <= 0.0 or self.hit_rate < self.drift_rate
 
 
 def _skill(symbol: str, rows: pd.DataFrame) -> Skill:
@@ -300,7 +348,12 @@ def to_frame(measured: list[Skill]) -> pd.DataFrame:
     )
 
 
-def render_text(log_frame: pd.DataFrame, measured: list[Skill], window: int) -> str:
+def render_text(
+    log_frame: pd.DataFrame,
+    measured: list[Skill],
+    window: int,
+    min_settled: int = MIN_SETTLED,
+) -> str:
     """The journal's state and the live record, as the CLI prints it."""
     counts = log_frame["status"].value_counts()
     unscorable = sum(int(counts.get(status, 0)) for status in UNSCORABLE)
@@ -312,7 +365,7 @@ def render_text(log_frame: pd.DataFrame, measured: list[Skill], window: int) -> 
     ]
     if not measured:
         lines.append(
-            f"no market has {MIN_SETTLED} settled sessions yet: live skill is not reported."
+            f"no market has {min_settled} settled sessions yet: live skill is not reported."
         )
         return "\n".join(lines)
     lines.append(f"live record over the last {window} settled sessions per market:")
@@ -320,11 +373,11 @@ def render_text(log_frame: pd.DataFrame, measured: list[Skill], window: int) -> 
     losing = decayed(measured)
     if losing:
         lines.append("")
-        lines.append("below their own base rate — the model is not adding a read here:")
+        lines.append("below their own drift — the model is not adding a read here:")
         for skill in losing:
             lines.append(
                 f"  {skill.market} ({skill.symbol}): hit {skill.hit_rate:.0%} against a "
-                f"{skill.base_rate:.0%} base rate, Brier skill {skill.brier_skill:+.3f} "
+                f"{skill.drift_rate:.0%} drift, Brier skill {skill.brier_skill:+.3f} "
                 f"over {skill.settled} sessions"
             )
     return "\n".join(lines)

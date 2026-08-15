@@ -457,10 +457,12 @@ overwritten, so a probability cannot be improved after the fact and a run
 repeated twice in a morning does not get two attempts at the same open.
 
 Scoring follows the label the model is fitted on — an opening print above the
-previous close — and retires the sessions that cannot carry one rather than
-counting them: an open that merely repeats the previous close (`stale`, the same
-sessions the model refuses to be fitted on) and a session the market never held
-(`no-session`, a holiday the journal did not know about).
+previous close, read from the same symbol the model labels on, so the markets
+whose index open Yahoo repeats are settled on their tracker (`ISF.L` for the
+FTSE, `STW.AX` for the ASX) rather than graded on a price the project already
+rejects. Sessions that cannot carry a label are retired rather than counted: an
+open that merely repeats the previous close (`stale`) and a session the market
+never held (`no-session`, a holiday the journal did not know about).
 
 A third status covers the row that looks like a forecast but is not one. The
 session a model forecasts is the one after the last session it has *complete*
@@ -476,16 +478,18 @@ live record over the last 60 settled sessions per market:
  market symbol  settled  hit_rate  base_rate  brier  brier_skill  mean_p       from         to
 S&P 500  ^GSPC       30      0.50       0.60 0.2666      -0.1109  0.5637 2026-07-06 2026-08-14
 
-below their own base rate — the model is not adding a read here:
-  S&P 500 (^GSPC): hit 50% against a 60% base rate, Brier skill -0.111 over 30 sessions
+below their own drift — the model is not adding a read here:
+  S&P 500 (^GSPC): hit 50% against a 60% drift, Brier skill -0.111 over 30 sessions
 ```
 
-Skill is measured against each market's own realised up-rate over the same
-sessions, not against a coin flip: predicting "up" every morning in a market
-that opens up 60% of the time is drift, not a read, and a Brier score has to
-clear that constant forecast before it says anything. A market below its own
-base rate is called out by name, and `--fail-on-decay` turns that into a
-non-zero exit so a scheduled run can raise it. Nothing is reported for a market
+Skill is measured against each market's own drift over the same sessions, not
+against a coin flip: predicting "up" every morning in a market that opens up 60%
+of the time is drift, not a read, and a Brier score has to clear that constant
+forecast before it says anything. The accuracy to beat is whichever side the
+drift leans — 70% in a market that opened up only 30% of the time, where the
+up-rate alone would be a bar the model clears by knowing nothing. A market that
+fails to is called out by name, and `--fail-on-decay` turns that into a non-zero
+exit so a scheduled run can raise it. Nothing is reported for a market
 with fewer than 20 settled sessions: the sampling error on a hit rate over a
 handful of opens is wider than any decay worth alerting on.
 

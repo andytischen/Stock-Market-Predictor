@@ -83,17 +83,17 @@ def test_the_next_session_is_recorded_alongside_the_previous_one():
 
 
 def test_a_forecast_for_a_session_that_already_printed_is_journalled_late():
-    panel = {"^FTSE": _bars({"2026-08-13": (99.0, 100.0), "2026-08-14": (101.0, 102.0)})}
-    journal, added = record(empty_log(), [_forecast("^FTSE", "2026-08-14", 0.81)], panel)
-    assert added == ["^FTSE"]
+    panel = {"^GSPC": _bars({"2026-08-13": (99.0, 100.0), "2026-08-14": (101.0, 102.0)})}
+    journal, added = record(empty_log(), [_forecast("^GSPC", "2026-08-14", 0.81)], panel)
+    assert added == ["^GSPC"]
     assert journal.at[0, "status"] == LATE
 
 
 def test_a_late_row_is_never_settled_or_scored():
-    panel = {"^FTSE": _bars({"2026-08-13": (99.0, 100.0), "2026-08-14": (101.0, 102.0)})}
-    journal, _ = record(empty_log(), [_forecast("^FTSE", "2026-08-14", 0.81)], panel)
-    journal, filled = settle(journal, panel)
-    assert filled == 0
+    panel = {"^GSPC": _bars({"2026-08-13": (99.0, 100.0), "2026-08-14": (101.0, 102.0)})}
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-14", 0.81)], panel)
+    journal, filled, retired = settle(journal, panel)
+    assert (filled, retired) == (0, 0)
     assert pd.isna(journal.at[0, "outcome"])
     assert skills(journal, min_settled=1) == []
 
@@ -107,7 +107,7 @@ def test_a_forecast_for_a_session_still_to_come_is_pending():
 def test_settle_labels_an_up_gap_against_the_previous_close():
     journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
     panel = {"^GSPC": _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (101.0, 102.0)})}
-    journal, filled = settle(journal, panel)
+    journal, filled, _ = settle(journal, panel)
     assert filled == 1
     assert journal.at[0, "status"] == SETTLED
     assert journal.at[0, "prev_close"] == pytest.approx(100.0)
@@ -118,30 +118,65 @@ def test_settle_labels_an_up_gap_against_the_previous_close():
 def test_settle_labels_a_down_gap():
     journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
     panel = {"^GSPC": _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (98.0, 99.0)})}
-    journal, _ = settle(journal, panel)
+    journal, _, _ = settle(journal, panel)
     assert journal.at[0, "outcome"] == pytest.approx(0.0)
 
 
 def test_a_session_that_has_not_printed_stays_pending():
     journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
     panel = {"^GSPC": _bars({"2026-08-17": (99.0, 100.0)})}
-    journal, filled = settle(journal, panel)
-    assert filled == 0
+    journal, filled, retired = settle(journal, panel)
+    assert (filled, retired) == (0, 0)
     assert journal.at[0, "status"] == PENDING
 
 
 def test_an_open_repeating_the_previous_close_is_unscorable():
-    journal, _ = record(empty_log(), [_forecast("^AXJO", "2026-08-18", 0.61)])
-    panel = {"^AXJO": _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (100.0, 101.0)})}
-    journal, _ = settle(journal, panel)
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
+    panel = {"^GSPC": _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (100.0, 101.0)})}
+    journal, filled, retired = settle(journal, panel)
+    assert (filled, retired) == (0, 1)
     assert journal.at[0, "status"] == STALE
     assert pd.isna(journal.at[0, "outcome"])
+
+
+def test_a_market_with_a_stale_index_open_is_settled_on_its_tracker():
+    # Yahoo repeats the previous close as the FTSE's own open, which is why the
+    # model labels it on ISF.L: settling on the index would retire every session.
+    journal, _ = record(empty_log(), [_forecast("^FTSE", "2026-08-18", 0.61)])
+    panel = {
+        "^FTSE": _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (100.0, 101.0)}),
+        "ISF.L": _bars({"2026-08-17": (9.9, 10.0), "2026-08-18": (10.2, 10.3)}),
+    }
+    journal, filled, _ = settle(journal, panel)
+    assert filled == 1
+    assert journal.at[0, "status"] == SETTLED
+    assert journal.at[0, "open"] == pytest.approx(10.2)
+    assert journal.at[0, "outcome"] == pytest.approx(1.0)
+
+
+def test_the_late_check_reads_the_tracker_the_session_came_from():
+    panel = {
+        "^FTSE": _bars({"2026-08-17": (99.0, 100.0)}),
+        "ISF.L": _bars({"2026-08-17": (9.9, 10.0), "2026-08-18": (10.2, 10.3)}),
+    }
+    journal, _ = record(empty_log(), [_forecast("^FTSE", "2026-08-18", 0.61)], panel)
+    assert journal.at[0, "status"] == LATE
+
+
+def test_a_bar_with_no_opening_print_is_not_mistaken_for_a_holiday():
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
+    bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (101.0, 102.0)})
+    bars.loc[pd.Timestamp("2026-08-18"), "Open"] = float("nan")
+    journal, filled, retired = settle(journal, {"^GSPC": bars})
+    assert (filled, retired) == (0, 0)
+    assert journal.at[0, "status"] == PENDING
 
 
 def test_a_session_the_market_never_held_is_retired_not_awaited():
     journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
     panel = {"^GSPC": _bars({"2026-08-17": (99.0, 100.0), "2026-08-19": (101.0, 102.0)})}
-    journal, _ = settle(journal, panel)
+    journal, filled, retired = settle(journal, panel)
+    assert (filled, retired) == (0, 1)
     assert journal.at[0, "status"] == NO_SESSION
     assert pd.isna(journal.at[0, "outcome"])
 
@@ -149,9 +184,9 @@ def test_a_session_the_market_never_held_is_retired_not_awaited():
 def test_settled_rows_are_not_rescored():
     journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
     panel = {"^GSPC": _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (101.0, 102.0)})}
-    journal, _ = settle(journal, panel)
+    journal, _, _ = settle(journal, panel)
     revised = {"^GSPC": _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (90.0, 91.0)})}
-    journal, filled = settle(journal, revised)
+    journal, filled, _ = settle(journal, revised)
     assert filled == 0
     assert journal.at[0, "outcome"] == pytest.approx(1.0)
 
@@ -197,6 +232,25 @@ def test_a_forecast_that_beats_the_base_rate_is_not_decayed():
     assert measured.brier_skill > 0.9
     assert not measured.decayed
     assert decayed([measured]) == []
+
+
+def test_the_bar_is_the_drift_not_the_up_rate_in_a_falling_market():
+    # Opens up on 3 of 10 sessions, so calling every open down is right 70% of
+    # the time. A 60% hit rate beats the up-rate and still adds no direction.
+    calls = [(0.3, 0.0)] * 6 + [(0.6, 0.0), (0.45, 1.0), (0.45, 1.0), (0.45, 1.0)]
+    rows = [
+        _settled("^BVSP", f"2026-01-{day:02d}", probability, outcome)
+        for day, (probability, outcome) in enumerate(calls, start=1)
+    ]
+    measured = skills(_journal(rows), min_settled=10)[0]
+    assert measured.base_rate == pytest.approx(0.3)
+    assert measured.drift_rate == pytest.approx(0.7)
+    assert measured.hit_rate == pytest.approx(0.6)
+    assert measured.hit_rate > measured.base_rate
+    # Decay is called on the hit rate alone: the probabilities are still
+    # calibrated enough to beat a constant forecast on Brier score.
+    assert measured.brier_skill > 0.0
+    assert measured.decayed
 
 
 def test_a_market_with_no_variance_reports_no_skill():
@@ -245,7 +299,13 @@ def test_render_says_so_when_there_is_not_enough_history():
     journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
     text = render_text(journal, [], window=60)
     assert "pending 1" in text
-    assert "live skill is not reported" in text
+    assert "no market has 20 settled sessions" in text
+
+
+def test_render_quotes_the_minimum_it_was_asked_for():
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
+    text = render_text(journal, [], window=60, min_settled=5)
+    assert "no market has 5 settled sessions" in text
 
 
 def test_render_calls_out_a_decayed_market():
@@ -255,5 +315,5 @@ def test_render_calls_out_a_decayed_market():
     ]
     journal = _journal(rows)
     text = render_text(journal, skills(journal, min_settled=10), window=60)
-    assert "below their own base rate" in text
+    assert "below their own drift" in text
     assert "^N225" in text
