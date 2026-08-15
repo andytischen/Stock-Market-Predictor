@@ -16,8 +16,9 @@ The two single-stock commands are easy to confuse, and testing one proves nothin
 
 - `stock SYM` — the curated registry in `gapmodel/stocks.py` (`MU`, `WDC`, `STX`), which adds
   `peer_*` columns from the Asian memory names that trade the same demand overnight.
-- `shortlist [SYM ...]` — the broad ranking in `gapmodel/shortlist.py` over the ~66-name universe
-  in `gapmodel/universe.py`.
+- `shortlist [SYM ...]` — the broad ranking in `gapmodel/shortlist.py` over the ~158-name US
+  universe `modelled_universe()` in `gapmodel/universe.py` (`NASDAQ + LARGE_CAP + MID_CAP`, both
+  venues). `nasdaq_universe()` is the 66-name venue slice and is no longer what `shortlist` runs.
 
 They overlap on the curated names, so assert they **agree**: `shortlist SYM` must print the same
 `p_open_up` and OOS metrics as `stock SYM` for every name in `stocks.STOCKS_BY_SYMBOL`, which holds
@@ -45,9 +46,14 @@ there is no name that one command models and the other refuses.
 ## Runtime budget (walk-forward backtest per name, single-threaded per symbol)
 
 - ~1.3 min per stock for `python -W ignore -m gapmodel shortlist SYM ...`.
-- The full universe run is ~11 min alone and ~23 min alongside six other forecast jobs: the
-  dominant cost is CPU contention on this box, not the number of names. Start it in the
-  background *first* (`nohup ... > /tmp/log 2>&1 &`) and do targeted runs while it works.
+- The full universe is ~158 names, so budget upwards of half an hour and start it in the
+  background *first* (`nohup ... > /tmp/log 2>&1 &`), doing targeted runs while it works. CPU
+  contention on this box matters as much as the count: 66 names took ~11 min alone and ~23 min
+  alongside six other forecast jobs.
+- `--gainers N` is the cheap way to exercise the whole path: every candidate's bars are loaded but
+  only N walk-forwards are fitted, so a 12-name run costs about what 12 named symbols cost.
+  A staleness case must be **synthesised** — the warm cache is date-uniform, so a test that relies
+  on it to produce a lagging series passes vacuously.
 
 ## Checks that actually catch bugs (do these, not just "it printed a table")
 
@@ -77,6 +83,38 @@ Parse the CSV (`--csv PATH`) with pandas rather than eyeballing the table:
    deliberately absent from the printed tables. `--top 0`/negatives are rejected by the parser.
 6. Good tickers for exercising the filter: `ARM` (too few OOS sessions), `HOOD`/`COIN`
    (negative Brier skill), `AAPL`/`NVDA` (credible).
+
+## Faking a stale or missing series without harming the warm cache
+
+The global `--cache DIR` flag (before the subcommand) is the way to test anything that depends on
+the *shape* of the cached data — a series that stopped updating, a name with one bar, a missing
+column. Copy the cache and edit the copy; never edit `~/.cache/gapmodel` in place, since re-fetching
+it costs a slow network round trip for every symbol:
+
+```bash
+cp -a ~/.cache/gapmodel /tmp/probe-cache
+md5sum ~/.cache/gapmodel/AMD.csv > /tmp/warm.md5   # verify untouched afterwards
+# edit /tmp/probe-cache/AMD.csv, then:
+python -W ignore -m gapmodel --cache /tmp/probe-cache shortlist AMD MU JPM XOM --gainers 2
+md5sum -c /tmp/warm.md5
+```
+
+Pair it with a small explicit symbol list so the run costs two fits rather than 158. Truncating one
+name's CSV to an earlier date *and* inflating its final close is what distinguishes "ranked on the
+panel's latest session" from "ranked on each name's own last two bars": the doctored name has the
+largest own-tail move, so it must still be excluded, and a run that lists it has the bug back.
+Expect the same doctored series to be named twice — once by the mover-eligibility warning on stderr
+and once by the `stale inputs:` footer — which are different mechanisms; do not read one as the
+other.
+
+## Pandas `na_rep` only reaches a float column
+
+A missing numeric field rendered with `DataFrame.to_string(na_rep="")` prints blank only while the
+column still has at least one real value and is therefore `float64`. If *every* row is `None` the
+column is `object` dtype and pandas prints the literal `None`, `na_rep` notwithstanding. So test a
+"missing value prints blank" claim in **both** shapes — one missing among valued rows, and every row
+missing — or the all-missing case will slip through. `to_csv` writes an empty field in both, so the
+CSV passing says nothing about the table.
 
 ## Known data caveat to re-check, not to re-file
 

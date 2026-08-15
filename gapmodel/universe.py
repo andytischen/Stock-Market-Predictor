@@ -66,8 +66,8 @@ ETFS: tuple[str, ...] = (
 # invariant is that `stock` and `shortlist` accept the same symbols, and a test
 # asserts it. Listing venue is not something Yahoo tells us, so this is a
 # hand-maintained snapshot (2025) in the same spirit as the lists it is drawn
-# from: it is the universe the per-stock opening-gap model runs over, not an
-# authoritative index membership.
+# from: a venue slice of the forecast universe, not an authoritative index
+# membership.
 #
 # Two consequences worth stating. Selecting today's survivors and then fitting
 # on twenty years of their history is survivorship bias: the set excludes the
@@ -90,8 +90,27 @@ NASDAQ: tuple[str, ...] = (
 
 
 def nasdaq_universe() -> list[str]:
-    """Nasdaq-listed tickers the per-stock gap model forecasts, stable order."""
+    """Nasdaq-listed tickers, stable order. A venue slice of the list below."""
     return list(dict.fromkeys(NASDAQ))
+
+
+def modelled_universe() -> list[str]:
+    """Every single listing the per-stock gap model forecasts, stable order.
+
+    Listing venue is not a modelling boundary. A stock's opening gap is read
+    from the overnight tape and its own history, and Wall Street's auction is
+    the same auction for a NYSE name as for a Nasdaq one, so restricting the
+    forecast set to one venue only cost coverage: the banks, the oils and the
+    industrials that lead whole sessions were unreachable. The venue slice is
+    kept above because a Nasdaq-only report is still a thing to ask for, not
+    because the model needs it.
+
+    The survivorship caveat on ``NASDAQ`` applies here in full, and more widely:
+    this is a snapshot of today's listings fitted over their whole history, so
+    the acquired and the delisted are missing and the metrics read better than a
+    point-in-time universe would.
+    """
+    return list(dict.fromkeys(NASDAQ + LARGE_CAP + MID_CAP))
 
 
 def us_universe(include_etfs: bool = False) -> list[str]:

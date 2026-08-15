@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .markets import Instrument, Market, market
-from .universe import nasdaq_universe
+from .universe import modelled_universe
 
 # Wall Street's clock, shared with the indices listed on it. The 09:30 ET
 # auction is 13:30 UTC under daylight time and 14:30 under standard time
@@ -87,7 +87,7 @@ STOCKS_BY_SYMBOL = {s.symbol: s for s in STOCKS}
 # The shortlist universe: single listings the repository models without a peer
 # list of their own. Held as a set because every feature build asks whether its
 # target is a company.
-SHORTLISTED = frozenset(nasdaq_universe())
+SHORTLISTED = frozenset(modelled_universe())
 
 
 # Said next to every single-name probability. None of it is a feature, and all

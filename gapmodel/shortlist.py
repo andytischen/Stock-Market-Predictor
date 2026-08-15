@@ -1,4 +1,4 @@
-"""A ranked shortlist of next-open calls across the Nasdaq universe.
+"""A ranked shortlist of next-open calls across the US universe.
 
 ``stock`` forecasts a handful of names in depth: each one carries a hand-written
 peer list, the companies whose own sessions price the same end demand. That does
@@ -48,7 +48,7 @@ import pandas as pd
 from . import model as model_mod
 from .predict import Forecast, _display, forecast_market
 from .staleness import STALE_DAYS, stale_inputs
-from .universe import nasdaq_universe
+from .universe import modelled_universe
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +70,11 @@ class StockPick:
     """One stock's next-open call, with the quality of the model behind it."""
 
     forecast: Forecast
+    # The move the name has just made, carried so a reader can see whether a
+    # call follows through on a rally or leans against it. ``None`` when the
+    # bars were not to hand, which prints as an empty cell rather than a zero:
+    # "unchanged" and "unknown" are different claims.
+    last_change: float | None = None
 
     @property
     def symbol(self) -> str:
@@ -130,6 +135,7 @@ class StockPick:
         return {
             "symbol": self.symbol,
             "session": self.forecast.session.date().isoformat(),
+            "last_change": (None if self.last_change is None else round(self.last_change * 100, 2)),
             "p_open_up": probability,
             "base_rate": base_rate,
             "edge": round(probability - base_rate, 4),
@@ -155,6 +161,93 @@ def _rank_key(pick: StockPick) -> float:
     return abs(pick.edge) * max(pick.auc - 0.5, 0.0)
 
 
+def last_change(bars: pd.DataFrame) -> float:
+    """Fractional move of the last session in ``bars`` against the one before.
+
+    Read from the raw close, which is the number a quote screen shows, so a name
+    that went ex-dividend reads as the market saw it. The model's own label is
+    taken from total-return bars instead, deliberately: this is reporting, not a
+    feature. A session still in progress carries a partial bar, so mid-session
+    this is the move so far rather than a completed one.
+    """
+    close = bars["Close"].dropna().astype(float)
+    if len(close) < 2:
+        raise ValueError(f"need two closes, have {len(close)}")
+    previous = float(close.iloc[-2])
+    if previous <= 0:
+        raise ValueError("non-positive previous close")
+    return float(close.iloc[-1]) / previous - 1.0
+
+
+def _last_bar(bars: pd.DataFrame) -> pd.Timestamp:
+    """The session a series ends on, to the day."""
+    return bars.index.max().normalize()
+
+
+def _changes(panel: dict[str, pd.DataFrame], symbols: list[str]) -> dict[str, float]:
+    """Each name's last session move, skipping those the panel cannot supply."""
+    moves: dict[str, float] = {}
+    for symbol in dict.fromkeys(symbols):
+        bars = panel.get(symbol)
+        if bars is None or bars.empty:
+            continue
+        try:
+            moves[symbol] = last_change(bars)
+        except (KeyError, ValueError) as exc:
+            log.warning("no last move for %s: %s", symbol, exc)
+    return moves
+
+
+def biggest_gainers(panel: dict[str, pd.DataFrame], symbols: list[str], count: int) -> list[str]:
+    """The ``count`` names that moved up most in the panel's latest session.
+
+    Selection is the cheap half of the work: bars are downloaded once for the
+    whole universe, while each walk-forward fit costs seconds, so narrowing to
+    the movers before fitting is what makes a wide universe usable in a briefing.
+
+    Ranked on the descending move and sliced, so on a session where everything
+    fell these are the smallest fallers rather than risers — the report names the
+    session and says the ranking is on the move, which is true either way.
+
+    Only names whose own last bar *is* that session are eligible. Every listing
+    here trades one clock, so a series ending earlier did not trade in the
+    session being ranked, and its own last two closes describe some older day: a
+    halted or delisted name would otherwise hold its final move for ever and
+    take a slot on every run, from the names that actually moved. Cached bars
+    make that the normal case, not an exotic one, since a panel is only as
+    current as its last ``--refresh``.
+
+    A mover is chosen for having already moved, which is a reason to read its
+    call and not evidence about it: yesterday's largest rise is where a gap is
+    most likely to be continuation or reversal, and the model's record for that
+    name is the only thing that says which. Ties break on the symbol so a run is
+    reproducible.
+    """
+    if count < 1:
+        raise ValueError(f"count must be at least 1, got {count}")
+    dated = {
+        symbol: bars
+        for symbol in dict.fromkeys(symbols)
+        if (bars := panel.get(symbol)) is not None and not bars.empty
+    }
+    if not dated:
+        return []
+    latest = max(_last_bar(bars) for bars in dated.values())
+    eligible = [symbol for symbol, bars in dated.items() if _last_bar(bars) == latest]
+    behind = [symbol for symbol in dated if symbol not in set(eligible)]
+    if behind:
+        log.warning(
+            "%d of %d candidates have no bar for %s and cannot be ranked as movers: %s",
+            len(behind),
+            len(dated),
+            latest.date().isoformat(),
+            ", ".join(behind[:8]) + (f" and {len(behind) - 8} more" if len(behind) > 8 else ""),
+        )
+    moves = _changes(panel, eligible)
+    ranked = sorted(moves.items(), key=lambda entry: (-entry[1], entry[0]))
+    return [symbol for symbol, _ in ranked[:count]]
+
+
 def forecast_universe(
     panel: dict[str, pd.DataFrame],
     symbols: list[str] | None = None,
@@ -170,7 +263,9 @@ def forecast_universe(
     an inflated count.
     """
     picks: list[StockPick] = []
-    for symbol in dict.fromkeys(symbols or nasdaq_universe()):
+    wanted = list(dict.fromkeys(symbols or modelled_universe()))
+    moves = _changes(panel, wanted)
+    for symbol in wanted:
         try:
             picks.append(
                 StockPick(
@@ -180,7 +275,8 @@ def forecast_universe(
                         c=c,
                         min_train=min_train,
                         top_drivers=top_drivers,
-                    )
+                    ),
+                    last_change=moves.get(symbol),
                 )
             )
         except Exception as exc:
@@ -220,7 +316,13 @@ def _table(picks: list[StockPick]) -> str:
     """One printed block. The verdict is a column in the CSV, not here: each
     block is uniform in it, and the heading above already says which is which.
     """
-    return to_frame(picks).drop(columns=["credible"]).to_string(index=False)
+    # ``na_rep``, so a move the panel could not supply is a blank rather than the
+    # ``NaN`` pandas would print: an unknown move should not read as a number.
+    # The column is cast first because ``na_rep`` only reaches a missing float:
+    # left as it comes, an all-unknown column is object dtype and prints ``None``.
+    frame = to_frame(picks).drop(columns=["credible"])
+    frame["last_change"] = frame["last_change"].astype("float64")
+    return frame.to_string(index=False, na_rep="")
 
 
 def render_text(
@@ -228,17 +330,23 @@ def render_text(
     top: int | None = None,
     panel: dict[str, pd.DataFrame] | None = None,
     max_stale_days: int = STALE_DAYS,
+    selection: str | None = None,
 ) -> str:
-    """The ranking as a report, with what the numbers do and do not support."""
+    """The ranking as a report, with what the numbers do and do not support.
+
+    ``selection`` says how the names in front of the reader were chosen, when it
+    was not simply "all of them": a table of ten movers read as a whole universe
+    would look like a market where every name had just risen.
+    """
     ranked = rank(picks)
     # `top is not None`, not `if top`: asking for the strongest zero names is a
     # request for none of them, not a request for all of them.
     shown = ranked[:top] if top is not None else ranked
     lines: list[str] = []
     sessions = sorted({p.forecast.session.date().isoformat() for p in picks})
-    lines.append(
-        f"Next-open direction for {len(picks)} Nasdaq names (session {', '.join(sessions)})"
-    )
+    lines.append(f"Next-open direction for {len(picks)} US names (session {', '.join(sessions)})")
+    if selection:
+        lines.append(selection)
     lines.append("")
     if shown:
         lines.append(
@@ -291,9 +399,11 @@ def render_text(
             )
     lines.append("")
     lines.append(
+        "last_change is the move the name has just made, for context only; it is "
+        "not part of the model's view. "
         "The target is the opening print against the previous close — an overnight "
         "move, not a view on the company or on the session after the bell. "
-        "Fitted on today's Nasdaq names, so the metrics carry survivorship bias. "
+        "Fitted on today's listings, so the metrics carry survivorship bias. "
         "Only the names in `gapmodel stock` read their overnight peers."
     )
     return "\n".join(lines) + "\n"

@@ -33,6 +33,9 @@ from .regions import dashboard_symbols
 from .scenarios import SCENARIOS, scenario
 from .score import DEFAULT_WINDOW, score_symbols
 from .score import to_frame as score_to_frame
+from .scorecard import RECENT_WINDOW, build_scorecard, calls_frame
+from .scorecard import append_log as append_scorecard_log
+from .scorecard import render_text as render_scorecard_text
 from .screener import (
     ATR_WINDOW,
     AVG_WINDOW,
@@ -50,8 +53,8 @@ from .screener import render_text as render_screen_text
 from .screener import to_frame as screen_to_frame
 from .sectors import build_sector_board
 from .sectors import render_text as render_sector_text
+from .shortlist import biggest_gainers, forecast_universe
 from .shortlist import discarded as discarded_shortlist
-from .shortlist import forecast_universe
 from .shortlist import rank as rank_shortlist
 from .shortlist import render_text as render_shortlist_text
 from .shortlist import to_frame as shortlist_to_frame
@@ -65,7 +68,7 @@ from .stocks import (
     peers_of,
     stock_symbols,
 )
-from .universe import nasdaq_universe, read_universe, us_universe
+from .universe import modelled_universe, read_universe, us_universe
 
 log = logging.getLogger(__name__)
 
@@ -98,8 +101,8 @@ def _shortlisted_symbol(value: str) -> str:
     symbol = value.upper()
     if symbol not in SHORTLISTED:
         raise argparse.ArgumentTypeError(
-            f"{value!r} is not in the modelled Nasdaq universe; add it to NASDAQ "
-            "in gapmodel/universe.py to forecast it"
+            f"{value!r} is not in the modelled US universe; add it to LARGE_CAP or "
+            "MID_CAP in gapmodel/universe.py to forecast it"
         )
     return symbol
 
@@ -479,6 +482,27 @@ def _cmd_backtest(args: argparse.Namespace) -> None:
         print(pd.DataFrame(window_rows).round(4).to_string(index=False))
 
 
+def _cmd_scorecard(args: argparse.Namespace) -> None:
+    wanted = args.market or [m.symbol for m in MARKETS]
+    panel = _stock_panel(args) if any(is_stock(s) for s in wanted) else _panel(args)
+    hourly = _hourly(args)
+    records = build_scorecard(
+        panel,
+        symbols=wanted,
+        window=args.window,
+        c=args.regularisation,
+        min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
+        hourly=hourly,
+    )
+    print(render_scorecard_text(records, window=args.window), end="")
+    if args.csv:
+        calls_frame(records).to_csv(args.csv, index=False)
+        print(f"\nwrote {args.csv}")
+    if args.log:
+        merged = append_scorecard_log(records, args.log)
+        print(f"\n{args.log}: {len(merged)} scored sessions logged")
+
+
 def _cmd_asia(args: argparse.Namespace) -> None:
     # Volume drives the turnover and participation columns, so a cache written
     # before it was collected is re-downloaded rather than shown as blank.
@@ -621,7 +645,7 @@ def _shortlist_equities(symbols: list[str]) -> list[str]:
 
 def _cmd_shortlist(args: argparse.Namespace) -> None:
     """Rank the universe by how much edge each name's own record supports."""
-    symbols = args.symbols or nasdaq_universe()
+    candidates = args.symbols or modelled_universe()
     # The names are not part of the default panel — they are targets, never
     # features — so they are loaded on top of it, and only the equity legs are
     # asked for ``Adj Close``: a company's dividend would otherwise be read as an
@@ -629,13 +653,32 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     panel = _panel(args)
     panel.update(
         load_panel(
-            symbols=_shortlist_equities(symbols),
+            symbols=_shortlist_equities(candidates),
             start=args.start,
             cache_dir=Path(args.cache),
             refresh=args.refresh,
             require=("Adj Close",),
         )
     )
+    # Every candidate is downloaded and only the chosen ones are fitted: the
+    # bars are cheap and each walk-forward is not, so the mover pass narrows
+    # after the panel exists rather than guessing which names moved beforehand.
+    symbols = candidates
+    selection: str | None = None
+    if args.gainers:
+        symbols = biggest_gainers(panel, candidates, args.gainers)
+        if not symbols:
+            raise SystemExit("error: no candidate had two closes to compare")
+        # The session is named, and so is the ranking rule: sorting descending
+        # and slicing gives the smallest fallers on a session where everything
+        # fell, and calling those gainers would assert a rise the data denies.
+        moved = max(panel[symbol].index.max() for symbol in symbols).date().isoformat()
+        selection = (
+            f"the {len(symbols)} biggest gainers of session {moved}, out of "
+            f"{len(candidates)} candidates, ranked on their move in that session"
+        )
+    # After the mover pass, so that a stale listing is judged only when it is one
+    # of the names about to be fitted.
     symbols = _fresh_enough(panel, args, symbols)
     picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
     print(
@@ -644,6 +687,7 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
             top=args.top,
             panel=_forecast_inputs(panel, symbols),
             max_stale_days=args.max_stale_days,
+            selection=selection,
         ),
         end="",
     )
@@ -857,6 +901,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     backtest.set_defaults(func=_cmd_backtest)
 
+    scorecard = sub.add_parser(
+        "scorecard", help="recent out-of-sample record: what was called, what opened"
+    )
+    scorecard.add_argument(
+        "--market",
+        action="append",
+        type=_target_symbol,
+        help="restrict to a symbol; a modelled single stock is accepted too",
+    )
+    scorecard.add_argument(
+        "--window",
+        type=_positive_int,
+        default=RECENT_WINDOW,
+        help=f"scored sessions in the recent window (default {RECENT_WINDOW})",
+    )
+    scorecard.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
+    scorecard.add_argument("--csv", help="write the scored sessions to this file")
+    scorecard.add_argument(
+        "--log",
+        metavar="PATH",
+        help="merge the scored sessions into this CSV log, one row per session",
+    )
+    scorecard.set_defaults(func=_cmd_scorecard)
+
     asia = sub.add_parser(
         "asia", help="evaluate the Asian session: heavyweights and outside drivers"
     )
@@ -904,13 +976,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     shortlist = sub.add_parser(
         "shortlist",
-        help="next-open probability across the Nasdaq universe, ranked by demonstrated edge",
+        help="next-open probability across the US universe, ranked by demonstrated edge",
     )
     shortlist.add_argument(
         "symbols",
         nargs="*",
         type=_shortlisted_symbol,
-        help="forecast these tickers instead of the whole Nasdaq universe",
+        help="forecast these tickers instead of the whole US universe",
+    )
+    shortlist.add_argument(
+        "--gainers",
+        type=_positive_int,
+        help="forecast only the N biggest movers of the latest session",
     )
     shortlist.add_argument(
         "--top",

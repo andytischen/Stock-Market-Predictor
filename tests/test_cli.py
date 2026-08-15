@@ -82,6 +82,28 @@ def test_backtest_since_in_parser():
     assert not args.last_week
 
 
+def test_scorecard_accepts_a_window_a_stock_and_a_log():
+    parser = build_parser()
+    args = parser.parse_args(
+        ["scorecard", "--market", "mu", "--window", "40", "--log", "docs/log.csv"]
+    )
+    assert args.market == ["MU"]
+    assert args.window == 40
+    assert args.log == "docs/log.csv"
+
+
+def test_scorecard_rejects_an_unmodelled_symbol(capsys):
+    with pytest.raises(SystemExit):
+        main(["scorecard", "--market", "^NOPE"])
+    assert "unknown market" in capsys.readouterr().err
+
+
+def test_scorecard_rejects_an_empty_window_before_fitting_anything(capsys):
+    with pytest.raises(SystemExit):
+        main(["scorecard", "--window", "0"])
+    assert "must be greater than 0" in capsys.readouterr().err
+
+
 def test_shock_parsing_accepts_percentages_and_fractions():
     from gapmodel.predict import parse_shock
 
