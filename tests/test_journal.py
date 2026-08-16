@@ -182,6 +182,26 @@ def test_a_session_whose_auction_has_not_run_yet_is_a_forecast_not_a_late_row():
     assert journal.at[0, "status"] == PENDING
 
 
+def test_an_open_repeating_the_previous_close_does_not_retire_the_forecast():
+    # The source publishes a placeholder open for a session it has no auction
+    # for. Reading that as an opening print would file the forecast late, and
+    # late is terminal, so the morning could never be scored once it arrives.
+    bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (100.0, 101.0)})
+    bars.loc[pd.Timestamp("2026-08-18"), "Close"] = float("nan")
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)], {"^GSPC": bars})
+    assert journal.at[0, "status"] == PENDING
+
+
+def test_a_placeholder_open_still_settles_as_stale_once_the_session_closes():
+    # The same row the late check declines to read: settlement is what retires
+    # it, and it does so as stale rather than never scoring it at all.
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
+    panel = {"^GSPC": _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (100.0, 101.0)})}
+    journal, filled, retired = settle(journal, panel)
+    assert (filled, retired) == (0, 1)
+    assert journal.at[0, "status"] == STALE
+
+
 def test_a_bar_with_no_opening_print_is_not_mistaken_for_a_holiday():
     journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
     bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (101.0, 102.0)})

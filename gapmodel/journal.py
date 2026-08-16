@@ -150,14 +150,32 @@ def _already_printed(panel: dict[str, pd.DataFrame] | None, symbol: str, session
     An opening print is what makes a session past, not a row in the file. This
     source also publishes a bar for a session before its auction, so a row whose
     ``Open`` is still missing is a morning yet to come and stays a real forecast.
+    An ``Open`` that merely repeats the previous close is the same non-event:
+    ``_settle_row`` refuses to score it as an auction, and this refuses to read
+    it as one, so the journal cannot retire a forecast on a price the rest of the
+    project rejects. Being wrong here is expensive in one direction only --
+    ``late`` is terminal, since ``settle`` revisits pending rows alone -- so an
+    unconvincing print leaves the forecast pending, to be settled or retired once
+    the session really is in the file.
     """
     if not panel:
         return False
     bars = panel.get(_gap_symbol(symbol))
     if bars is None or bars.empty:
         return False
+    stamp = pd.Timestamp(session)
     printed = bars.dropna(subset=["Open"])
-    return bool(pd.Timestamp(session) in printed.index)
+    if stamp not in printed.index:
+        return False
+    opening = float(printed.loc[[stamp]]["Open"].iloc[-1])
+    earlier = bars.loc[bars.index < stamp, "Close"].dropna()
+    if earlier.empty:
+        # Nothing to compare the print against, so take it at face value.
+        return True
+    previous = float(earlier.iloc[-1])
+    if not (opening > 0 and previous > 0):
+        return False
+    return abs(float(np.log(opening / previous))) > STALE_GAP_TOLERANCE
 
 
 def record(
@@ -302,7 +320,10 @@ class Skill:
         direction alone: its drift is a perfect 100% by construction, so no
         forecast can clear it and there is no variance for a Brier score to
         explain, but a model calling the wrong side of a one-way market is still
-        a model that has stopped reading it. The bar there is a coin flip.
+        a model that has stopped reading it. The bar there is a coin flip, and
+        deliberately the stricter of the two comparisons: a market read no
+        better than a coin is not being read at all, while a record that merely
+        equals a lopsided (not total) drift is left alone.
         """
         if not np.isfinite(self.brier_skill):
             return self.hit_rate <= 0.5
