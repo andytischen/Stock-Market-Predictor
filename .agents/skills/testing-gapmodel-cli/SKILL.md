@@ -319,6 +319,21 @@ model's label, not of the journal.
   filing it `late` instead would be terminal); and after filling a real `late` row's `Close`, it
   must still never settle, because `settle` revisits `pending` rows only.
 
+  Add a **boundary probe** for the placeholder rule, because it guards the opposite defect: the
+  natural print clears the tolerance by six orders of magnitude (`|log(1056.0/1053.5999755859375)|
+  = 2.3e-3` against `1e-9`), so it cannot tell a correct `>` comparison from a guard so wide it
+  swallows genuine prints. Set the `Open` to `prev_close * math.exp(2e-9)` and require `late`
+  anyway; `prev_close * math.exp(5e-10)` is the under-tolerance twin. Both survive the cache CSV
+  round-trip exactly at these price magnitudes (~1e3, where float64 resolution is ~1e-13) — verify
+  that by re-reading the CSV and printing `abs(log(open/prev_close))` before trusting the result,
+  since the whole test lives inside the last few bits of the mantissa.
+
+  Run the four variants — real print, blanked `Open`, `Open == prev_close`, and the boundary — as
+  one table against the *same* market and session, since only the `Open` differs and everything
+  else (session `2026-08-14`, `p_open_up 0.8109`) must stay put. Reproducing the old rule inline
+  (`session in bars.dropna(["Open"]).index`) over the same four caches is a cheap way to show
+  which variant a change actually moves.
+
 A run after every market it forecasts has closed (the daily automation, 21:47 UTC) sees complete
 tracker bars and so journals `pending`, not `late`: `late` is what a run *during* a session gets,
 and it is the honest status there. Do not read a `late` `^FTSE` row from a mid-session cache as a
