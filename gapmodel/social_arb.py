@@ -58,7 +58,9 @@ class ArbSignal:
     region: str
     p_model: float
     p_consensus: float
-    divergence: float  # p_model - p_consensus; + = model more bullish than peers
+    # p_model - p_consensus; + = model more bullish than peers. Full precision,
+    # used for ranking; to_frame recomputes it from the rounded columns.
+    divergence: float
     top_peer: str  # name of the most strongly correlated peer
     top_peer_corr: float  # signed rho with that peer; negative = inverse peer
     top_peer_prob: float  # that peer's own model probability
@@ -170,21 +172,25 @@ def build_social_arb(
     return sorted(signals, key=lambda s: abs(s.divergence), reverse=True)
 
 
+def _row(s: ArbSignal) -> dict[str, object]:
+    # The divergence is rounded from the two printed probabilities rather than
+    # from the full-precision ones, so the column a reader checks by hand is the
+    # difference of the two columns either side of it.
+    p_model = round(s.p_model, 4)
+    p_consensus = round(s.p_consensus, 4)
+    return {
+        "market": s.name,
+        "symbol": s.symbol,
+        "region": s.region,
+        "p_model": p_model,
+        "p_consensus": p_consensus,
+        "divergence": round(p_model - p_consensus, 4),
+        "top_peer": s.top_peer,
+        "top_peer_corr": round(s.top_peer_corr, 3),
+        "top_peer_prob": round(s.top_peer_prob, 4),
+    }
+
+
 def to_frame(signals: list[ArbSignal]) -> pd.DataFrame:
     """Flat DataFrame suitable for printing or CSV export."""
-    return pd.DataFrame(
-        [
-            {
-                "market": s.name,
-                "symbol": s.symbol,
-                "region": s.region,
-                "p_model": round(s.p_model, 4),
-                "p_consensus": round(s.p_consensus, 4),
-                "divergence": round(s.divergence, 4),
-                "top_peer": s.top_peer,
-                "top_peer_corr": round(s.top_peer_corr, 3),
-                "top_peer_prob": round(s.top_peer_prob, 4),
-            }
-            for s in signals
-        ]
-    )
+    return pd.DataFrame([_row(s) for s in signals])

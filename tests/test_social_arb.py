@@ -248,6 +248,26 @@ def test_to_frame_columns():
     assert len(frame) == 1
 
 
+def test_to_frame_divergence_is_the_difference_of_the_printed_columns():
+    # Rounding the full-precision difference gives 0.2749; the printed columns,
+    # 0.8059 and 0.5309, differ by 0.2750. The table has to say the latter.
+    sig = ArbSignal(
+        symbol="^GSPC",
+        name="S&P 500",
+        region="Americas",
+        p_model=0.805869,
+        p_consensus=0.530924,
+        divergence=0.805869 - 0.530924,
+        top_peer="Nasdaq Composite",
+        top_peer_corr=0.9,
+        top_peer_prob=0.5,
+    )
+    row = to_frame([sig]).iloc[0]
+    assert (row["p_model"], row["p_consensus"]) == (0.8059, 0.5309)
+    assert row["divergence"] == 0.275
+    assert round(sig.divergence, 4) == 0.2749  # what the column used to print
+
+
 def test_to_frame_empty():
     assert to_frame([]).empty
 
