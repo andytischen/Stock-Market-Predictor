@@ -143,7 +143,7 @@ When a PR claims "existing index/market outputs are unchanged", prove it by diff
 between the branch and `main`, not by reasoning about the code:
 
 ```bash
-git worktree add /tmp/gapmain main
+git worktree add --detach /tmp/gapmain origin/main   # detached: `main` may be checked out already
 cd /tmp/gapmain && python -W ignore -m gapmodel predict --market ^GSPC --market ^FTSE --explain > /tmp/main.txt
 cd <repo>        && python -W ignore -m gapmodel predict --market ^GSPC --market ^FTSE --explain > /tmp/branch.txt
 diff /tmp/main.txt /tmp/branch.txt      # expect no output
@@ -151,7 +151,8 @@ git worktree remove --force /tmp/gapmain   # always clean up
 ```
 
 Use `--explain` so driver names and log-odds values are compared too, not just probabilities. A
-worktree is essential: it shares the cache but never touches the working tree.
+worktree is essential: it shares the cache but never touches the working tree. Compare against
+`origin/main` rather than the local branch, which may be behind.
 
 **Ordering rule:** run paired comparisons **before** any `--refresh`, so both sides read a
 byte-identical cache. Otherwise new bars or newly-collected columns make a code difference
