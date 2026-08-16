@@ -238,7 +238,9 @@ def test_render_reference_states_the_comparison():
 
 
 def test_render_reference_summarises_a_long_stale_list():
+    """How many are lagging governs how far to trust the yardstick, so always say."""
     stale = tuple(f"S{i}" for i in range(8))
     footer = render_reference(Reference(pd.Timestamp("2026-08-14"), 150, 0.0, 1.0, stale))
+    assert "stale (8 of 150, still in the mean at an earlier close):" in footer
     assert "S0, S1, S2, S3, S4, +3 more" in footer
     assert "S5" not in footer
