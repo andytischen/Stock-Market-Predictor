@@ -43,7 +43,7 @@ from .markets import (
     MARKETS_BY_SYMBOL,
     REGIONS,
 )
-from .model import MIN_TRAIN, walk_forward
+from .model import INTRADAY_MIN_TRAIN, MIN_TRAIN, walk_forward
 from .predict import Forecast, forecast_all, parse_shock, to_frame
 from .regions import dashboard_symbols
 from .scenarios import SCENARIOS, scenario
@@ -88,11 +88,11 @@ from .stocks import (
     stock_symbols,
 )
 from .universe import modelled_universe, read_universe, us_universe
+from .utctime import as_of as _as_of
+from .utctime import parse_utc_time
+from .web import serve_dashboard
 
 log = logging.getLogger(__name__)
-
-# The hourly window is short, so the intraday variant needs a smaller warm-up.
-INTRADAY_MIN_TRAIN = 200
 
 
 def _market_symbol(value: str) -> str:
@@ -197,10 +197,9 @@ def _non_negative_float(value: str) -> float:
 def _utc_time(value: str) -> float:
     """``HH:MM`` (UTC) as hours from midnight."""
     try:
-        moment = pd.Timestamp(value)
+        return parse_utc_time(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"{value!r} is not a time of day (use HH:MM)") from exc
-    return moment.hour + moment.minute / 60
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _panel(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
@@ -621,12 +620,17 @@ def _cmd_dashboard(args: argparse.Namespace) -> None:
         print(f"\nwrote {args.html}")
 
 
-def _as_of(hours: float | None) -> pd.Timestamp | None:
-    """Today's date at the given UTC hour, or now when no hour is given."""
-    if hours is None:
-        return None
-    now = pd.Timestamp.now("UTC").tz_localize(None)
-    return now.normalize() + pd.Timedelta(hours=hours)
+def _cmd_web(args: argparse.Namespace) -> None:
+    serve_dashboard(
+        _panel(args),
+        _hourly(args),
+        host=args.host,
+        port=args.port,
+        region=args.region,
+        at=args.at,
+        regularisation=args.regularisation,
+        launch_browser=not args.no_browser,
+    )
 
 
 def _score_universe(args: argparse.Namespace) -> list[str]:
@@ -1118,6 +1122,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     dashboard.set_defaults(func=_cmd_dashboard)
+
+    web = sub.add_parser("web", help="serve the dashboard in a local browser interface")
+    web.add_argument("--region", choices=REGIONS, default="Asia")
+    web.add_argument(
+        "--at", type=_utc_time, help="UTC time of day to render for, e.g. 05:00 (default: now)"
+    )
+    web.add_argument("--host", default="127.0.0.1", help="address to bind")
+    web.add_argument("--port", type=int, default=8000, help="port to bind")
+    web.add_argument("--no-browser", action="store_true", help="do not auto-open a browser tab")
+    web.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
+    web.set_defaults(func=_cmd_web)
 
     export = sub.add_parser(
         "export", help="write the forecast run as a JSON snapshot for the mobile app"

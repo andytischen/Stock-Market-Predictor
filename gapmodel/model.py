@@ -12,6 +12,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 MIN_TRAIN = 500
+# The hourly window is short, so the intraday variant needs a smaller warm-up.
+INTRADAY_MIN_TRAIN = 200
 REFIT_EVERY = 21
 
 

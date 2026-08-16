@@ -142,6 +142,7 @@ python -m gapmodel predict --shock 'CL=F=-5%' --shock 'JPY=X=+2%'  # shocks comp
 python -m gapmodel backtest --reliability
 python -m gapmodel scorecard          # the last 21 sessions: called, realised, hit
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
+python -m gapmodel web --region Asia --at 05:00             # local browser interface
 python -m gapmodel screen             # US stocks: liquid, unusually active, moving
 python -m gapmodel shortlist --top 10 # rank the US universe by demonstrated edge
 python -m gapmodel shortlist --gainers 10  # only the ten biggest movers of the latest session
@@ -168,6 +169,16 @@ session is doing with it. `--at` pins the clock (session state is read at that
 UTC time, so `--at 05:00` shows Tokyo, Hong Kong, Seoul, Shanghai and Mumbai
 mid-session and Sydney already shut), `--region` switches to Europe or the
 Americas, and `--html` writes a standalone page.
+
+`web` serves the same dashboard behind a lightweight local browser interface.
+It starts an HTTP server (default `http://127.0.0.1:8000/`) with a small form
+to switch region and time. Each submission re-fits and re-renders from the bars
+downloaded when the server started, so restart it to pick up newer prices:
+
+```bash
+python -m gapmodel web --region Asia --at 05:00
+python -m gapmodel web --host 0.0.0.0 --port 8080 --no-browser
+```
 
 ```
 Crude:
