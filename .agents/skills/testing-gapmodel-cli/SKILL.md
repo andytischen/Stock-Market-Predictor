@@ -144,6 +144,7 @@ between the branch and `main`, not by reasoning about the code:
 
 ```bash
 git worktree add --detach /tmp/gapmain origin/main   # detached: `main` may be checked out already
+cd /tmp/gapmain && python -c 'import gapmodel; print(gapmodel.__file__)'   # must print /tmp/gapmain/...
 cd /tmp/gapmain && python -W ignore -m gapmodel predict --market ^GSPC --market ^FTSE --explain > /tmp/main.txt
 cd <repo>        && python -W ignore -m gapmodel predict --market ^GSPC --market ^FTSE --explain > /tmp/branch.txt
 diff /tmp/main.txt /tmp/branch.txt      # expect no output
@@ -153,6 +154,11 @@ git worktree remove --force /tmp/gapmain   # always clean up
 Use `--explain` so driver names and log-odds values are compared too, not just probabilities. A
 worktree is essential: it shares the cache but never touches the working tree. Compare against
 `origin/main` rather than the local branch, which may be behind.
+
+The `main` side only runs `main`'s code because `python -m` puts the cwd ahead of the editable
+install on `sys.path` — nothing enforces it. Anything that removes the cwd (`-I`, `PYTHONSAFEPATH`,
+invoking from elsewhere) silently compares the branch with itself and the empty diff means nothing,
+so print `gapmodel.__file__` first and check it points into the worktree.
 
 **Ordering rule:** run paired comparisons **before** any `--refresh`, so both sides read a
 byte-identical cache. Otherwise new bars or newly-collected columns make a code difference
