@@ -369,10 +369,10 @@ repeat the previous close), which is part of why it scores lowest.
 A feed can also simply stop. Features are aligned by forward-filling, so a
 series that stopped updating is read as one that did not move — right for a
 holiday, wrong for a dead feed, and indistinguishable from inside the model.
-Every command that offers a probability — `predict`, `stock`, `shortlist`,
-`export`, `dashboard` and `sectors` — therefore refuses to run when an input has
-no bar within `--max-stale-days` (5) of today, naming the worst offenders and
-their lags:
+Every command that offers a probability for the next open — `predict`, `stock`,
+`shortlist`, `export`, `dashboard` and `sectors` — therefore refuses to run when
+an input has no bar within `--max-stale-days` (5) of today, naming the worst
+offenders and their lags:
 
 ```
 error: 40 of 61 input series have no bar within 5 days of 2026-08-15:
@@ -382,6 +382,11 @@ ASML.AS (11d), EXH8.DE (11d), ISF.L (11d), ^FTSE (11d) and 36 more.
 They refuse rather than dropping the dead columns: the model was fitted over a
 history in which those columns were live, so dropping them at inference time
 would answer a different question from the one the printed metrics describe.
+
+`scorecard` and `backtest` are deliberately outside the guard: their
+probabilities are historical and dated by the session each row scores, so a
+cache that stops early shortens the record rather than misdating it.
+
 `--refresh` re-downloads, `--max-stale-days N` widens the tolerance, and
 `--allow-stale` forecasts anyway, warning on stderr instead of failing — so a
 snapshot piped from `export` stays valid JSON either way.
@@ -397,7 +402,19 @@ download happened to fetch. One panel serves every command and every model reads
 a subset of it: the STOXX 600 sector trackers are features of the European
 indices only, and a tracker standing in for an opening auction is read only by
 its own index. A quiet `EXH8.DE` fails `predict --market ^GDAXI` and is beside
-the point for `stock MU`, which never opens it.
+the point for `stock MU`, which never opens it. A block built from two legs is
+read from both or from neither — the crude curve is a `USO`/`USL` spread and the
+policy signal a `ZQ=F`/`^IRX` premium — so when one leg fails to download the
+survivor is a series no feature was derived from, and it cannot fail the run
+alone.
+
+`--allow-stale` shifts the burden to disclosure, and a panel that stopped
+entirely needs a different sentence from one series lagging the rest: lags are
+measured against the session being forecast, which is dated from the panel's own
+last bar, so a month-old cache has nothing lagging *within* it and the named
+list comes back empty. `shortlist` therefore says how far the forecast session
+itself sits behind today, so the reader knows the probabilities describe the
+market as it stood then.
 
 A series that arrived with no bars at all has no lag to measure, so it is named
 on stderr separately rather than counted among the series the refusal judges: a

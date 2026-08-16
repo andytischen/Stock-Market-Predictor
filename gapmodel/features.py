@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 import numpy as np
 import pandas as pd
 
@@ -35,6 +37,9 @@ FX_VOL_WINDOW = 20
 # publishing a real opening print; such sessions cannot be labelled.
 STALE_GAP_TOLERANCE = 1e-9
 MAX_STALE_FRACTION = 0.5
+# Feature blocks built from two legs or from neither: the crude curve is a
+# spread and the policy rate a premium, so one leg alone measures nothing.
+PAIRED_INPUTS = ((CURVE_FRONT, CURVE_STRIP), (FUNDS_FUTURE, BILL_YIELD))
 
 
 def log_return(close: pd.Series, periods: int = 1) -> pd.Series:
@@ -185,7 +190,7 @@ def policy_features(
     }
 
 
-def feature_symbols(target_symbol: str) -> set[str]:
+def feature_symbols(target_symbol: str, available: Collection[str] | None = None) -> set[str]:
     """The panel series a model for ``target_symbol`` reads.
 
     The download is one list for every target, so a loaded panel is wider than
@@ -194,6 +199,11 @@ def feature_symbols(target_symbol: str) -> set[str]:
     index. Kept beside ``build_features`` because it has to answer for the same
     branches — a column added there and not here would be read by a model
     nothing was checked against.
+
+    ``available`` names the series the panel actually carries, which decides the
+    paired blocks: a spread needs both its legs, so when one download failed the
+    surviving leg is read by nothing and naming it would judge the run on a
+    series no feature was built from.
     """
     target = target_market(target_symbol)
     read = {target_symbol, target.gap_symbol}
@@ -204,7 +214,10 @@ def feature_symbols(target_symbol: str) -> set[str]:
         if indicator.symbol not in SECTOR_SYMBOLS or target.region == "Europe"
     }
     read |= {peer.symbol for peer in peers_of(target_symbol)}
-    return read | {CURVE_FRONT, CURVE_STRIP, FUNDS_FUTURE, BILL_YIELD}
+    for pair in PAIRED_INPUTS:
+        if available is None or set(pair) <= set(available):
+            read |= set(pair)
+    return read
 
 
 def build_features(

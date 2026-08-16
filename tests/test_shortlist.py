@@ -410,6 +410,39 @@ def test_the_footer_reports_the_tolerance_the_run_was_given(panel):
     assert "within 30 days" in render_text(picks, panel=panel, max_stale_days=30)
 
 
+def test_a_uniformly_old_panel_is_disclosed_by_the_session_it_forecast(panel):
+    """The one run the per-series footer cannot describe.
+
+    Lags are measured against the session being forecast, which is dated from
+    the panel's own last bar, so a cache that stopped a month ago has nothing
+    lagging within itself: every series is equally old and none is named. The
+    report has to say the forecast is a month old instead.
+    """
+    panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}
+    picks = [pick("GOOD", 0.70, auc=0.62)]
+    read_on = SESSION + pd.Timedelta(days=30)
+    assert "stale inputs" not in render_text(picks, panel=panel, as_of=read_on)
+    text = render_text(picks, panel=panel, as_of=read_on)
+    assert "stale run" in text and "30 days before" in text
+    # A report read the morning it was built says nothing, and the widened
+    # tolerance the run was given is honoured here too.
+    assert "stale run" not in render_text(picks, panel=panel, as_of=SESSION)
+    assert "stale run" not in render_text(picks, panel=panel, as_of=read_on, max_stale_days=40)
+
+
+def test_the_two_stale_footers_do_not_contradict_each_other(panel):
+    """A panel can be old *and* be ragged, and then both footers print."""
+    panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}
+    panel["^GSPC"] = _ending(panel["^GSPC"], SESSION - pd.Timedelta(days=60))
+    text = render_text(
+        [pick("GOOD", 0.70, auc=0.62)], panel=panel, as_of=SESSION + pd.Timedelta(days=30)
+    )
+    assert "^GSPC" in text
+    # Having just named one, the run footer cannot claim none was named.
+    assert "none is named above" not in text
+    assert "behind the rest of that panel" in text
+
+
 def test_the_worst_lag_is_named_first(panel):
     """Eight names are printed; they should be the eight furthest behind."""
     panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}

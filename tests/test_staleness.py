@@ -139,6 +139,33 @@ def test_a_series_no_model_in_the_run_reads_cannot_refuse_it():
         guard(_shared_inputs(loaded, ["^FTSE"]), SESSION)
 
 
+def test_half_a_paired_block_is_read_by_nothing_and_so_judges_nothing():
+    """The crude curve is a spread and the policy rate a premium.
+
+    Both are built from two legs or from neither, so when one download fails the
+    survivor is a series no feature is derived from — and refusing a run over it
+    is the same over-broad judgement as guarding a sector tracker nobody reads.
+    """
+    orphaned = panel(**{"^GSPC": 1, "USO": 20, "ZQ=F": 20})
+    guard(_shared_inputs(orphaned, ["^GSPC"]), SESSION)
+    # Both legs present: the feature is built, so its silence stops the run.
+    paired = panel(**{"^GSPC": 1, "USO": 20, "USL": 20})
+    with pytest.raises(StaleInputs, match=r"USO"):
+        guard(_shared_inputs(paired, ["^GSPC"]), SESSION)
+
+
+def test_a_leg_that_arrived_empty_does_not_complete_its_pair():
+    """A key with no bars is a partner in name only.
+
+    `load_panel` drops empty downloads rather than carrying the key, so this is
+    defensive: a frame with no rows builds no feature either way, and it must not
+    be what turns its partner's silence into a refusal.
+    """
+    loaded = panel(**{"^GSPC": 1, "ZQ=F": 20})
+    loaded["^IRX"] = pd.DataFrame()
+    guard(_shared_inputs(loaded, ["^GSPC"]), SESSION)
+
+
 def test_a_run_that_names_no_target_is_judged_on_everything_loaded():
     """Nothing is known about what it will read, so nothing is excused."""
     with pytest.raises(StaleInputs):
