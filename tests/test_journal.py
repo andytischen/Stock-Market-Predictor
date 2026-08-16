@@ -163,6 +163,25 @@ def test_the_late_check_reads_the_tracker_the_session_came_from():
     assert journal.at[0, "status"] == LATE
 
 
+def test_the_late_check_sees_the_session_whose_close_has_not_printed():
+    # The row that makes a forecast late is the one settlement discards: today's
+    # auction has printed, its close has not, so the model forecasts a session
+    # that is already in the past.
+    bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (101.0, 102.0)})
+    bars.loc[pd.Timestamp("2026-08-18"), "Close"] = float("nan")
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)], {"^GSPC": bars})
+    assert journal.at[0, "status"] == LATE
+
+
+def test_a_session_whose_auction_has_not_run_yet_is_a_forecast_not_a_late_row():
+    # The source publishes tomorrow's row before the auction: an empty ``Open``
+    # is a morning still to come, so the forecast stays scoreable.
+    bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (101.0, 102.0)})
+    bars.loc[pd.Timestamp("2026-08-18"), ["Open", "Close"]] = float("nan")
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)], {"^GSPC": bars})
+    assert journal.at[0, "status"] == PENDING
+
+
 def test_a_bar_with_no_opening_print_is_not_mistaken_for_a_holiday():
     journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
     bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (101.0, 102.0)})
@@ -257,6 +276,51 @@ def test_a_market_with_no_variance_reports_no_skill():
     rows = [_settled("^GSPC", f"2026-01-{day:02d}", 0.6, 1.0) for day in range(1, 11)]
     measured = skills(_journal(rows), min_settled=10)[0]
     assert np.isnan(measured.brier_skill)
+
+
+def test_a_market_with_no_variance_is_not_decayed_for_missing_the_perfect_drift():
+    # Its drift is a perfect 100% by construction, so no forecast can clear it
+    # and there is no measurable skill to print alongside the alert.
+    rows = [_settled("^GSPC", f"2026-01-{day:02d}", 0.6, 1.0) for day in range(1, 11)]
+    journal = _journal(rows)
+    measured = skills(journal, min_settled=10)
+    assert measured[0].drift_rate == pytest.approx(1.0)
+    assert measured[0].hit_rate == pytest.approx(1.0)
+    assert not measured[0].decayed
+    assert decayed(measured) == []
+    assert "below their own drift" not in render_text(journal, measured, window=60, min_settled=10)
+
+
+def test_a_market_with_no_variance_is_still_decayed_when_it_calls_the_wrong_side():
+    # Every session opened up and the model said down every morning: the Brier
+    # leg cannot be computed, but direction alone says it has stopped reading.
+    rows = [_settled("^GSPC", f"2026-01-{day:02d}", 0.2, 1.0) for day in range(1, 11)]
+    journal = _journal(rows)
+    measured = skills(journal, min_settled=10)
+    assert measured[0].hit_rate == pytest.approx(0.0)
+    assert measured[0].decayed
+    text = render_text(journal, measured, window=60, min_settled=10)
+    assert "below their own drift" in text
+    # The unmeasurable Brier skill is left out of the alert rather than printed.
+    assert "Brier skill" not in text.rsplit("read here:", 1)[-1]
+
+
+def test_a_minimum_the_window_cannot_hold_is_refused():
+    rows = [_settled("^GSPC", f"2026-01-{day:02d}", 0.6, float(day % 2)) for day in range(1, 31)]
+    with pytest.raises(ValueError, match="cannot exceed window"):
+        skills(_journal(rows), window=10, min_settled=20)
+
+
+def test_a_short_window_narrows_the_default_minimum_instead_of_failing():
+    # A caller who asks for a shorter read never mentioned the 20-session
+    # default, so it is capped at the window rather than thrown back at them.
+    rows = [
+        _settled("^GSPC", f"2026-01-{day:02d}", 0.9 if day % 2 else 0.1, float(day % 2))
+        for day in range(1, 11)
+    ]
+    measured = skills(_journal(rows), window=10)
+    assert [s.settled for s in measured] == [10]
+    assert "no market has 10 settled sessions" in render_text(_journal(rows), [], window=10)
 
 
 def test_skills_are_sorted_with_the_worst_last():
