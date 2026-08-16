@@ -443,6 +443,18 @@ def test_the_two_stale_footers_do_not_contradict_each_other(panel):
     assert "behind the rest of that panel" in text
 
 
+def test_the_run_footer_claims_nothing_about_a_panel_it_was_not_given():
+    """Without a panel there was nothing to compare series against.
+
+    The age of the forecast is still known — it is read off the picks — but
+    "no series is behind the others" would be a finding about inputs the
+    renderer never saw.
+    """
+    text = render_text([pick("GOOD", 0.70, auc=0.62)], as_of=SESSION + pd.Timedelta(days=30))
+    assert "stale run" in text and "30 days before" in text
+    assert "no series is behind" not in text and "named above" not in text
+
+
 def test_the_worst_lag_is_named_first(panel):
     """Eight names are printed; they should be the eight furthest behind."""
     panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}

@@ -157,13 +157,26 @@ def test_half_a_paired_block_is_read_by_nothing_and_so_judges_nothing():
 def test_a_leg_that_arrived_empty_does_not_complete_its_pair():
     """A key with no bars is a partner in name only.
 
-    `load_panel` drops empty downloads rather than carrying the key, so this is
-    defensive: a frame with no rows builds no feature either way, and it must not
-    be what turns its partner's silence into a refusal.
+    A download that returned nothing builds no feature, so it must not be what
+    turns its partner's silence into a refusal.
     """
     loaded = panel(**{"^GSPC": 1, "ZQ=F": 20})
     loaded["^IRX"] = pd.DataFrame()
     guard(_shared_inputs(loaded, ["^GSPC"]), SESSION)
+
+
+def test_an_empty_leg_is_still_named_as_a_download_that_returned_nothing(caplog):
+    """Not judged for staleness, but not swallowed by the pair rule either.
+
+    Dropping the pair answers the freshness question — nothing was built from the
+    survivor — and that is a different question from whether the leg arrived at
+    all, which has its own remedy and is reported on its own line.
+    """
+    loaded = panel(**{"^GSPC": 1, "ZQ=F": 1})
+    loaded["^IRX"] = pd.DataFrame()
+    with caplog.at_level("WARNING"):
+        guard(_shared_inputs(loaded, ["^GSPC"]), SESSION)
+    assert "^IRX" in caplog.text and "no bars at all" in caplog.text
 
 
 def test_a_run_that_names_no_target_is_judged_on_everything_loaded():
