@@ -184,6 +184,17 @@ def _positive_int(value: str) -> int:
     return number
 
 
+def _port(value: str) -> int:
+    """A TCP port to bind, where 0 means "any free one"."""
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a whole number") from exc
+    if not 0 <= number <= 65535:
+        raise argparse.ArgumentTypeError("must be between 0 and 65535")
+    return number
+
+
 def _non_negative_float(value: str) -> float:
     try:
         number = float(value)
@@ -621,9 +632,19 @@ def _cmd_dashboard(args: argparse.Namespace) -> None:
 
 
 def _cmd_web(args: argparse.Namespace) -> None:
+    panel = _panel(args)
+    # Judged once, here, because the server renders for the life of the process
+    # from the bars downloaded now: a board served from a dead feed is the same
+    # claim `dashboard` refuses to print, and refusing it at startup says so
+    # before a browser is opened on it rather than once per request.
+    fresh = set(_fresh_enough(panel, args, [m.symbol for m in MARKETS]))
     serve_dashboard(
-        _panel(args),
+        panel,
         _hourly(args),
+        symbols={
+            region: [m.symbol for m in MARKETS if m.region == region and m.symbol in fresh]
+            for region in REGIONS
+        },
         host=args.host,
         port=args.port,
         region=args.region,
@@ -1128,8 +1149,10 @@ def build_parser() -> argparse.ArgumentParser:
     web.add_argument(
         "--at", type=_utc_time, help="UTC time of day to render for, e.g. 05:00 (default: now)"
     )
-    web.add_argument("--host", default="127.0.0.1", help="address to bind")
-    web.add_argument("--port", type=int, default=8000, help="port to bind")
+    web.add_argument(
+        "--host", default="127.0.0.1", help="address to bind (anything but loopback is unprotected)"
+    )
+    web.add_argument("--port", type=_port, default=8000, help="port to bind, or 0 for any free one")
     web.add_argument("--no-browser", action="store_true", help="do not auto-open a browser tab")
     web.add_argument(
         "--intraday",

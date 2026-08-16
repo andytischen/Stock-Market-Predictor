@@ -4,6 +4,8 @@ import pandas as pd
 import pytest
 
 from gapmodel.cli import _last_monday_5am, _since_timestamp, build_parser, main
+from gapmodel.markets import MARKETS
+from gapmodel.staleness import StaleInputs
 
 
 def test_unknown_market_is_rejected_at_parse_time(capsys):
@@ -40,6 +42,7 @@ def test_web_command_starts_server_with_expected_arguments(monkeypatch):
 
     monkeypatch.setattr("gapmodel.cli._panel", lambda _args: {"dummy": None})
     monkeypatch.setattr("gapmodel.cli._hourly", lambda _args: None)
+    monkeypatch.setattr("gapmodel.cli._fresh_enough", lambda _panel, _args, targets: list(targets))
 
     def fake_serve_dashboard(panel, hourly, **kwargs):
         called["panel"] = panel
@@ -55,12 +58,64 @@ def test_web_command_starts_server_with_expected_arguments(monkeypatch):
     assert called["kwargs"]["at"] == 5.0
     assert called["kwargs"]["port"] == 8123
     assert called["kwargs"]["launch_browser"] is False
+    assert called["kwargs"]["symbols"]["Europe"] == [
+        m.symbol for m in MARKETS if m.region == "Europe"
+    ]
+
+
+def test_web_serves_only_the_markets_that_passed_the_staleness_check(monkeypatch):
+    called = {}
+
+    monkeypatch.setattr("gapmodel.cli._panel", lambda _args: {"dummy": None})
+    monkeypatch.setattr("gapmodel.cli._hourly", lambda _args: None)
+    monkeypatch.setattr("gapmodel.cli._fresh_enough", lambda _panel, _args, _targets: ["^N225"])
+    monkeypatch.setattr(
+        "gapmodel.cli.serve_dashboard", lambda *_args, **kwargs: called.update(kwargs)
+    )
+    main(["web", "--no-browser"])
+
+    assert called["symbols"]["Asia"] == ["^N225"]
+    assert called["symbols"]["Europe"] == []
+
+
+def test_web_refuses_to_serve_a_panel_that_is_too_stale(monkeypatch):
+    monkeypatch.setattr("gapmodel.cli._panel", lambda _args: {"dummy": None})
+    monkeypatch.setattr("gapmodel.cli._hourly", lambda _args: None)
+
+    def stale(*_args, **_kwargs):
+        raise StaleInputs("^N225 is 9 days behind")
+
+    monkeypatch.setattr("gapmodel.cli._fresh_enough", stale)
+
+    def fail(*_args, **_kwargs):
+        raise AssertionError("no server should be started on stale inputs")
+
+    monkeypatch.setattr("gapmodel.cli.serve_dashboard", fail)
+    with pytest.raises(SystemExit) as exit_info:
+        main(["web", "--no-browser"])
+    assert "9 days behind" in str(exit_info.value)
+
+
+@pytest.mark.parametrize("port", ["-1", "65536", "http"])
+def test_a_port_outside_the_tcp_range_is_rejected_at_parse_time(port, capsys):
+    with pytest.raises(SystemExit):
+        main(["web", "--port", port])
+    assert "--port" in capsys.readouterr().err
+
+
+def test_port_zero_is_accepted_so_the_os_can_pick_one():
+    args = build_parser().parse_args(["web", "--port", "0"])
+    assert args.port == 0
 
 
 def test_at_rejects_anything_that_is_not_a_time_of_day(capsys):
     with pytest.raises(SystemExit):
         main(["dashboard", "--at", "2024-01-01"])
     assert "is not a time of day" in capsys.readouterr().err
+
+
+def test_at_accepts_a_single_digit_hour():
+    assert build_parser().parse_args(["dashboard", "--at", "5:00"]).at == 5.0
 
 
 def test_last_monday_5am_is_a_monday_at_5am():

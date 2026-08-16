@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import webbrowser
+from collections.abc import Mapping, Sequence
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -11,13 +13,19 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import pandas as pd
 
 from .dashboard import build_dashboard, render_html
-from .markets import MARKETS, REGIONS
+from .markets import REGIONS
 from .model import INTRADAY_MIN_TRAIN, MIN_TRAIN
 from .predict import forecast_all
-from .utctime import as_of, parse_utc_time
+from .utctime import as_of, format_utc_time, parse_utc_time
+
+log = logging.getLogger(__name__)
 
 # Bind addresses that mean "every interface": not reachable as a URL host.
 _WILDCARD_HOSTS = {"", "0.0.0.0", "::", "[::]"}
+
+# Addresses only this machine can reach. Anything else exposes an interface that
+# refits models on request, with no authentication in front of it.
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 
 def browser_url(host: str, port: int) -> str:
@@ -32,11 +40,11 @@ def browser_url(host: str, port: int) -> str:
 def dashboard_document(
     panel: dict[str, pd.DataFrame],
     hourly: dict[str, pd.Series] | None,
+    symbols: Sequence[str],
     region: str,
     hour: float | None,
     regularisation: float,
 ) -> str:
-    symbols = [m.symbol for m in MARKETS if m.region == region]
     forecasts = forecast_all(
         panel,
         symbols=symbols,
@@ -49,11 +57,7 @@ def dashboard_document(
 
 
 def _index_html(default_region: str, default_at: float | None) -> str:
-    time_value = ""
-    if default_at is not None:
-        h = int(default_at)
-        m = round((default_at - h) * 60)
-        time_value = f"{h:02d}:{m:02d}"
+    time_value = "" if default_at is None else format_utc_time(default_at)
     options = "".join(
         f'<option value="{escape(r, quote=True)}"'
         f"{' selected' if r == default_region else ''}>{escape(r)}</option>"
@@ -90,6 +94,7 @@ def _index_html(default_region: str, default_at: float | None) -> str:
 def _handler(
     panel: dict[str, pd.DataFrame],
     hourly: dict[str, pd.Series] | None,
+    symbols: Mapping[str, Sequence[str]],
     default_region: str,
     default_at: float | None,
     regularisation: float,
@@ -109,7 +114,7 @@ def _handler(
                 return
 
             region = query.get("region", [""])[0] or default_region
-            if region not in REGIONS:
+            if region not in symbols:
                 self._reply(400, f"<h1>Unknown region: {escape(region)}</h1>")
                 return
 
@@ -129,8 +134,18 @@ def _handler(
                         return
 
             try:
-                html = dashboard_document(panel, hourly, region, at, regularisation)
-            except (RuntimeError, ValueError, KeyError, OSError) as exc:
+                html = dashboard_document(
+                    panel, hourly, symbols[region], region, at, regularisation
+                )
+            # Every failure below the render is answered rather than raised: an
+            # exception out of `do_GET` closes the socket mid-response, so the
+            # browser reports a network error and the reason is lost. Catching
+            # `Exception` and not the types seen so far because the render walks
+            # third-party frames whose next failure will have a new type; the
+            # traceback goes to the log, where the request lines are suppressed
+            # but a broken server should still be diagnosable.
+            except Exception as exc:
+                log.exception("rendering %s failed", self.path)
                 self._reply(500, f"<h1>error: {escape(str(exc))}</h1>")
                 return
             self._reply(200, html)
@@ -153,6 +168,7 @@ def serve_dashboard(
     panel: dict[str, pd.DataFrame],
     hourly: dict[str, pd.Series] | None,
     *,
+    symbols: Mapping[str, Sequence[str]],
     host: str,
     port: int,
     region: str,
@@ -160,8 +176,17 @@ def serve_dashboard(
     regularisation: float,
     launch_browser: bool,
 ) -> None:
-    server = ThreadingHTTPServer((host, port), _handler(panel, hourly, region, at, regularisation))
+    handler = _handler(panel, hourly, symbols, region, at, regularisation)
+    server = ThreadingHTTPServer((host, port), handler)
     address = browser_url(host, server.server_port)
+    if host not in _LOOPBACK_HOSTS:
+        # Said once, at the point the choice is made: there is no login on this
+        # server, and each request it answers fits models, so a reachable one is
+        # both readable and expensive to anyone who can route to it.
+        print(
+            f"warning: bound to {host}, so anyone who can reach this machine can "
+            "load the dashboard and make it refit models; there is no authentication"
+        )
     print(f"serving dashboard at {address} (Ctrl+C to stop)")
     if launch_browser:
         webbrowser.open(address)
