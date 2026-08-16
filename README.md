@@ -301,7 +301,7 @@ read a session late like every other American bar.
 | --- | --- | --- | --- | --- |
 | Micron (MU) | 0.69 | 0.65 | 0.10 | 0.57 |
 | Western Digital (WDC) | 0.66 | 0.62 | 0.07 | 0.53 |
-| Seagate (STX) | 0.65 | 0.62 | 0.06 | 0.54 |
+| Seagate (STX) | 0.65 | 0.61 | 0.06 | 0.54 |
 | Nvidia (NVDA) | 0.67 | 0.64 | 0.08 | 0.57 |
 | AMD | 0.67 | 0.64 | 0.06 | 0.57 |
 | Broadcom (AVGO) | 0.64 | 0.62 | 0.05 | 0.56 |
