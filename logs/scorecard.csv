@@ -345,6 +345,7 @@ session,symbol,p_open_up,called,realised,gap_pct,hit
 2026-08-14,^BVSP,0.554,up,down,-0.001,False
 2026-08-14,^DJI,0.5805,up,up,0.005,True
 2026-08-14,^FCHI,0.8081,up,up,0.081,True
+2026-08-14,^FTSE,0.8648,up,up,0.228,True
 2026-08-14,^GDAXI,0.8711,up,up,0.556,True
 2026-08-14,^GSPC,0.5045,up,up,0.098,True
 2026-08-14,^GSPTSE,0.3341,down,up,0.051,False
@@ -356,3 +357,15 @@ session,symbol,p_open_up,called,realised,gap_pct,hit
 2026-08-14,^NSEI,0.5752,up,down,-0.139,False
 2026-08-14,^SSMI,0.6622,up,up,0.18,True
 2026-08-14,^STOXX50E,0.7219,up,down,-0.01,False
+2026-08-17,^AXJO,0.5084,up,down,-0.233,False
+2026-08-17,^BVSP,0.5118,up,down,-0.001,False
+2026-08-17,^DJI,0.5985,up,down,-0.129,False
+2026-08-17,^FCHI,0.7201,up,down,-0.095,False
+2026-08-17,^FTSE,0.8198,up,up,0.342,True
+2026-08-17,^GDAXI,0.8155,up,up,0.189,True
+2026-08-17,^GSPC,0.6017,up,up,0.063,True
+2026-08-17,^GSPTSE,0.4504,down,down,-0.117,True
+2026-08-17,^IBEX,0.6657,up,down,-0.158,False
+2026-08-17,^IXIC,0.6313,up,up,0.208,True
+2026-08-17,^SSMI,0.6026,up,down,-0.259,False
+2026-08-17,^STOXX50E,0.6698,up,up,0.131,True
