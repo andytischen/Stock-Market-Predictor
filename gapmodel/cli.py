@@ -817,23 +817,28 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     # bars are cheap and each walk-forward is not, so the mover pass narrows
     # after the panel exists rather than guessing which names moved beforehand.
     symbols = candidates
-    selection: str | None = None
+    moved: str | None = None
     if args.gainers:
         symbols = biggest_gainers(panel, candidates, args.gainers)
         if not symbols:
             raise SystemExit("error: no candidate had two closes to compare")
-        # The session is named, and so is the ranking rule: sorting descending
-        # and slicing gives the smallest fallers on a session where everything
-        # fell, and calling those gainers would assert a rise the data denies.
         moved = max(panel[symbol].index.max() for symbol in symbols).date().isoformat()
-        selection = (
-            f"the {len(symbols)} biggest gainers of session {moved}, out of "
-            f"{len(candidates)} candidates, ranked on their move in that session"
-        )
     # After the mover pass, so that a stale listing is judged only when it is one
     # of the names about to be fitted.
     symbols = _fresh_enough(panel, args, symbols)
     picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
+    # Counted off the picks, the last place names are dropped: a stale listing or
+    # one short of training rows leaves the report, and a count taken before
+    # either would claim movers the table does not hold. The session is named,
+    # and so is the ranking rule: sorting descending and slicing gives the
+    # smallest fallers on a session where everything fell, and calling those
+    # gainers would assert a rise the data denies.
+    selection = (
+        f"the {len(picks)} biggest gainers of session {moved}, out of "
+        f"{len(candidates)} candidates, ranked on their move in that session"
+        if moved is not None
+        else None
+    )
     print(
         render_shortlist_text(
             picks,
