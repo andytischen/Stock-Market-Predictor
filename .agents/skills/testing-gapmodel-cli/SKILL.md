@@ -109,6 +109,23 @@ Expect the same doctored series to be named twice — once by the mover-eligibil
 and once by the `stale inputs:` footer — which are different mechanisms; do not read one as the
 other.
 
+### With `--gainers`, the stale filter is all-or-nothing
+
+Worth knowing before designing a test around `_fresh_enough` dropping *some* of the chosen movers:
+`biggest_gainers` only keeps names whose own last bar **is** the panel's latest session, so every
+chosen mover shares one last-bar date and therefore one lag against `today()`. Either none of them
+is stale, or all of them are — and the all-stale case raises `StaleInputs`
+("every requested name has no bar within N days of ...", exit 1) before anything is printed. So a
+doctored cache cannot produce a partially-filtered mover set through the CLI; only a monkeypatched
+`cli._fresh_enough` (as `tests/test_cli.py` does) reaches that branch. Do not report "could not
+reproduce" as a bug: check whether the branch is reachable at all first.
+
+Also note the printed name count is smaller than any count taken from the selected symbols
+(the `--gainers` line is therefore counted off the returned picks), because `forecast_universe`
+drops names without `model.MIN_TRAIN` (500) labelled rows with
+only a stderr `WARNING no forecast for SYM: need more than 500 labelled rows` — synthesise it by
+keeping only the last ~120 rows of a candidate's CSV in a cache copy.
+
 ## Pandas `na_rep` only reaches a float column
 
 A missing numeric field rendered with `DataFrame.to_string(na_rep="")` prints blank only while the
@@ -227,6 +244,20 @@ No terminal emulator is installed and there is no GUI app to screenshot. `pip in
 into the venv and render the captured log to a PNG (monospace on a dark background) so the PR
 comment has an image; label it clearly as rendered CLI output. Pillow is for evidence only —
 do not add it to the project's dependencies.
+
+If the venv `pip install pillow` fails (PyPI has returned repeated 502s from this box), render with
+headless Chrome instead — it needs nothing installed: write the log into
+`<pre style="font:15px monospace;color:#e1e4e8;background:#14161a">` and run
+`google-chrome --headless=new --disable-gpu --hide-scrollbars --window-size=1150,900
+--screenshot=/tmp/evidence.png /tmp/x.html`. Wrap lines over ~110 chars yourself (the caveat
+paragraph is ~370 chars and otherwise runs off the image). ImageMagick `convert label:` is present
+but its security policy blocks `label:@file` and it rejected multi-line labels of this size, so it
+is not a reliable fallback.
+
+Do not assume `~/.cache/gapmodel` is warm: on a fresh box it can be missing entirely, in which case
+the first `shortlist` run downloads every candidate (~158 names ≈ 2 min of network before the fits).
+Warm it with the run you intend to compare, then run the origin/main worktree against the same cache
+so the comparison is offline and deterministic (the cached rerun took ~16 s).
 
 ## When CI fails a test that passes locally, suspect the merge, not the environment
 
