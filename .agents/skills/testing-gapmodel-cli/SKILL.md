@@ -307,19 +307,50 @@ model's label, not of the journal.
 - `stale` — usually occurs naturally; otherwise set a session's `Open` equal to the previous
   row's `Close` (tolerance is `features.STALE_GAP_TOLERANCE = 1e-9`).
 - `no-session` — drop a row whose date you have journalled, keeping later rows.
-- `pending` → `settled` — a trailing bar with `Close` NaN is dropped by `opening_bars`, so the
-  newest session stays pending; filling that `Close` in the copy settles it. This is exactly why
-  `^FTSE` can sit pending for a session the *index* already printed.
-- `late` — needs the forecast session to already be in the panel, which the model normally
-  prevents; `journal._already_printed(panel, symbol, session)` is the honest thing to probe
-  directly, and it must flip with the tracker's bars, not the index's.
+- `pending` → `settled` — a trailing bar with `Close` NaN is dropped by `opening_bars`, so it is
+  never settled while the close is missing; filling that `Close` in the copy settles it.
+- `late` — reachable **naturally**, which makes it the cheap end-to-end check.
+  `_already_printed` reads *every* tracker bar (`_gap_bars`, not `opening_bars`, which drops the
+  very row that matters — same prices, including the total-return basis for a company, only more
+  rows) and asks whether the forecast session carries a real opening print: a non-null
+  `Open` that differs from the previous close by more than `STALE_GAP_TOLERANCE`. Seen live:
+  a cache fetched *during* London hours holds `ISF.L 2026-08-14 Open=1056.0 Close=NaN`, so
+  `^FTSE` is journalled `late` while `^AXJO` (whose `STW.AX` bar is complete) forecasts the next
+  session and stays `pending` — recording both in one run isolates the rule from mere row
+  membership. Three counter-tests, all on a cache copy, and each one guards a hole that a passing
+  `late` case alone does not: blank that `Open` (leave `Close` empty) and the same session must
+  come back `pending`; set that `Open` equal to the previous close and it must *also* come back
+  `pending` (a placeholder open is not an auction — settlement retires it as `stale` later, and
+  filing it `late` instead would be terminal); and after filling a real `late` row's `Close`, it
+  must still never settle, because `settle` revisits `pending` rows only.
+
+  Add a **boundary probe** for the placeholder rule, because it guards the opposite defect: the
+  natural print clears the tolerance by six orders of magnitude (`|log(1056.0/1053.5999755859375)|
+  = 2.3e-3` against `1e-9`), so it cannot tell a correct `>` comparison from a guard so wide it
+  swallows genuine prints. Set the `Open` to `prev_close * math.exp(2e-9)` and require `late`
+  anyway; `prev_close * math.exp(5e-10)` is the under-tolerance twin. Both survive the cache CSV
+  round-trip exactly at these price magnitudes (~1e3, where float64 resolution is ~1e-13) — verify
+  that by re-reading the CSV and printing `abs(log(open/prev_close))` before trusting the result,
+  since the whole test lives inside the last few bits of the mantissa.
+
+  Run the four variants — real print, blanked `Open`, `Open == prev_close`, and the boundary — as
+  one table against the *same* market and session, since only the `Open` differs and everything
+  else (session `2026-08-14`, `p_open_up 0.8109`) must stay put. Reproducing the old rule inline
+  (`session in bars.dropna(["Open"]).index`) over the same four caches is a cheap way to show
+  which variant a change actually moves.
+
+A run after every market it forecasts has closed (the daily automation, 21:47 UTC) sees complete
+tracker bars and so journals `pending`, not `late`: `late` is what a run *during* a session gets,
+and it is the honest status there. Do not read a `late` `^FTSE` row from a mid-session cache as a
+regression — check when the cache was last fetched first.
 
 Assert unscorable rows never move the numbers: recompute the metrics over `status == "settled"`
 rows only and require an exact 4dp match to the printed table.
 
-### Decay has two legs — test them apart
+### Decay has three legs — test them apart
 
-`Skill.decayed` is `brier_skill <= 0 or hit_rate < drift_rate`, where
+`Skill.decayed` is `brier_skill <= 0 or hit_rate < drift_rate` when the Brier skill is finite,
+falling back to `hit_rate <= 0.5` when it is not, where
 `drift_rate = max(base_rate, 1 - base_rate)`. Comparing against `base_rate` alone is wrong: in a
 market that opens *down* 67% of the time, always saying "down" scores 67%, so a 60% hit rate
 with a healthy Brier skill is still no read. A journal that hits both legs proves nothing about
@@ -328,6 +359,14 @@ require it to be flagged anyway. A worked example that does it: 30 rows, 20 down
 (`base_rate` 0.333, `drift_rate` 0.667), probabilities `[0.15]*14 + [0.52]*6 + [0.55]*4 +
 [0.48]*6` → hit 0.60, Brier skill +0.345, and it must still be listed under "below their own
 drift" with `--fail-on-decay` exiting 1.
+
+The third leg is a market that opened the same way on *every* settled session: `brier_skill` is
+nan (no variance to explain) and `drift_rate` is 100%, so direction alone decides at a coin-flip
+bar. A one-way market called 100% right proves nothing here — it also passes under a rule that
+never flags a nan Brier skill — so test the wrong-called twin (all `p=0.2` against
+`outcome=1.0`) and require it listed, exit 1, and the alert line to carry **no** `Brier skill`
+clause (`grep '+nan'` must find nothing). The comparison is `<=`, deliberately stricter than the
+finite branch's `<`: hit exactly 0.5 is flagged, 16/30 is not.
 
 ### Append-only is the other thing worth attacking
 
@@ -340,13 +379,23 @@ seed row and a fresh forecast for the same session can differ (seen: `^GSPC` see
 fresh 0.6233) without anything being broken. `^FTSE` reproduces longer than the rest because
 `ISF.L` lags the index by a bar.
 
+### Window and minimum
+
+`--min-settled` has no parser default, and the difference is behavioural: omitted, it is capped
+at the window (`resolved_minimum` → `min(20, window)`), so `journal --window 10` reports a
+10-session record; *named* above the window it is a contradiction and refused. The discriminator
+is one 12-settled-row journal read twice — default window says `no market has 20 settled
+sessions yet`, `--window 10` prints the table — so assert both from the same file. The refusal is
+also a timing assertion: `--window 10 --min-settled 20` must exit 1 in ~1s (a fitting run is
+~48s) leaving the `--log` file's md5 *and* mtime untouched, never creating a missing one, and
+never writing to the cache. The library raises `ValueError` for the same pair.
+
 ## Testing `gapmodel web`
 
 `python -m gapmodel web [--region R] [--port N] [--at H:MM] [--host ...] [--intraday]
-[--no-browser]` serves an index page
-(region `<select>` + `<input type="time">` + Render button) whose form targets an `<iframe>` at
-`/dashboard?region=...&at=...`. Nothing is cached between requests: **every** `/dashboard` hit
-refits that region's models.
+[--no-browser]` serves an index page (region `<select>` + `<input type="time">` + Render button)
+whose form targets an `<iframe>` at `/dashboard?region=...&at=...`. Nothing is cached between
+requests: **every** `/dashboard` hit refits that region's models.
 
 `--region` (default `Asia`) only sets the *default*: it is what the dropdown pre-selects and what
 `/dashboard` renders when the query omits `region`, so it decides the cost of the first load — see

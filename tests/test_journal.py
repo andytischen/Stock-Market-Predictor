@@ -182,6 +182,45 @@ def test_a_session_whose_auction_has_not_run_yet_is_a_forecast_not_a_late_row():
     assert journal.at[0, "status"] == PENDING
 
 
+def test_an_open_repeating_the_previous_close_does_not_retire_the_forecast():
+    # The source publishes a placeholder open for a session it has no auction
+    # for. Reading that as an opening print would file the forecast late, and
+    # late is terminal, so the morning could never be scored once it arrives.
+    bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (100.0, 101.0)})
+    bars.loc[pd.Timestamp("2026-08-18"), "Close"] = float("nan")
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)], {"^GSPC": bars})
+    assert journal.at[0, "status"] == PENDING
+
+
+def test_a_placeholder_open_still_settles_as_stale_once_the_session_closes():
+    # The same row the late check declines to read: settlement is what retires
+    # it, and it does so as stale rather than never scoring it at all.
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
+    panel = {"^GSPC": _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (100.0, 101.0)})}
+    journal, filled, retired = settle(journal, panel)
+    assert (filled, retired) == (0, 1)
+    assert journal.at[0, "status"] == STALE
+
+
+def test_the_late_check_reads_a_company_on_the_same_basis_settlement_does():
+    # Going ex-dividend moves the raw open by the dividend, so a print that
+    # merely looks like a repeated close on raw bars is a real auction once both
+    # prints are on a total-return basis -- the basis settlement grades on.
+    bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (100.0, 101.0)})
+    bars["Adj Close"] = [99.0, 101.0]
+    journal, _ = record(empty_log(), [_forecast("MU", "2026-08-18", 0.61)], {"MU": bars})
+    assert journal.at[0, "status"] == LATE
+
+
+def test_a_print_with_no_earlier_session_to_measure_it_against_stays_pending():
+    # Nothing to compute a gap from, so the print is unverified; late is
+    # terminal, and retiring a forecast on it is the expensive way to be wrong.
+    bars = _bars({"2026-08-18": (100.0, 101.0)})
+    bars.loc[pd.Timestamp("2026-08-18"), "Close"] = float("nan")
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)], {"^GSPC": bars})
+    assert journal.at[0, "status"] == PENDING
+
+
 def test_a_bar_with_no_opening_print_is_not_mistaken_for_a_holiday():
     journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
     bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (101.0, 102.0)})
