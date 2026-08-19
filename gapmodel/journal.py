@@ -118,6 +118,22 @@ def _gap_symbol(symbol: str) -> str:
         return symbol
 
 
+def _gap_bars(panel: dict[str, pd.DataFrame] | None, symbol: str) -> pd.DataFrame | None:
+    """Every bar of a market's gap symbol, on the price basis the model labels on.
+
+    Kept apart from ``opening_bars`` so the two readers of these prices differ in
+    which rows they keep and in nothing else: a company's bars are put on a
+    total-return basis either way, so an ex-dividend morning cannot read as an
+    auction to one of them and as a repeated close to the other.
+    """
+    if not panel:
+        return None
+    bars = panel.get(_gap_symbol(symbol))
+    if bars is None:
+        return None
+    return dividend_adjusted(bars) if is_stock(symbol) else bars
+
+
 def opening_bars(panel: dict[str, pd.DataFrame] | None, symbol: str) -> pd.DataFrame | None:
     """The bars a market's opening auction is read from, as the model reads them.
 
@@ -128,19 +144,15 @@ def opening_bars(panel: dict[str, pd.DataFrame] | None, symbol: str) -> pd.DataF
     back ``stale`` -- so the journal follows the same symbol, and drops the
     unusable bars the way ``features`` does.
     """
-    if not panel:
-        return None
-    bars = panel.get(_gap_symbol(symbol))
-    if bars is None:
-        return None
-    bars = bars.dropna(subset=["Open", "Close"])
-    return dividend_adjusted(bars) if is_stock(symbol) else bars
+    bars = _gap_bars(panel, symbol)
+    return None if bars is None else bars.dropna(subset=["Open", "Close"])
 
 
 def _already_printed(panel: dict[str, pd.DataFrame] | None, symbol: str, session: str) -> bool:
     """Whether the source already holds a bar for the session being forecast.
 
-    Read from the raw bars rather than the ones ``opening_bars`` keeps. The
+    Read from every bar of the gap symbol rather than the ones ``opening_bars``
+    keeps, though on the same prices (``_gap_bars``). The
     session a model forecasts is the one after the last bar it has *complete*
     features for, so asking the filtered bars whether that session exists can
     only ever answer no. The row that matters is exactly the one the filter
@@ -156,11 +168,11 @@ def _already_printed(panel: dict[str, pd.DataFrame] | None, symbol: str, session
     project rejects. Being wrong here is expensive in one direction only --
     ``late`` is terminal, since ``settle`` revisits pending rows alone -- so an
     unconvincing print leaves the forecast pending, to be settled or retired once
-    the session really is in the file.
+    the session really is in the file. A print with no earlier session to measure
+    it against is unconvincing too, so it is left alone rather than retired on a
+    gap nobody can compute.
     """
-    if not panel:
-        return False
-    bars = panel.get(_gap_symbol(symbol))
+    bars = _gap_bars(panel, symbol)
     if bars is None or bars.empty:
         return False
     stamp = pd.Timestamp(session)
@@ -168,10 +180,12 @@ def _already_printed(panel: dict[str, pd.DataFrame] | None, symbol: str, session
     if stamp not in printed.index:
         return False
     opening = float(printed.loc[[stamp]]["Open"].iloc[-1])
-    earlier = bars.loc[bars.index < stamp, "Close"].dropna()
+    # The close settlement would measure this print against: the last session
+    # complete enough to carry a label, not merely the last close published.
+    complete = bars.dropna(subset=["Open", "Close"])
+    earlier = complete.loc[complete.index < stamp, "Close"]
     if earlier.empty:
-        # Nothing to compare the print against, so take it at face value.
-        return True
+        return False
     previous = float(earlier.iloc[-1])
     if not (opening > 0 and previous > 0):
         return False

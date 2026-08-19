@@ -306,8 +306,9 @@ model's label, not of the journal.
 - `pending` → `settled` — a trailing bar with `Close` NaN is dropped by `opening_bars`, so it is
   never settled while the close is missing; filling that `Close` in the copy settles it.
 - `late` — reachable **naturally**, which makes it the cheap end-to-end check.
-  `_already_printed` reads the *raw* tracker bars (not `opening_bars`, which drops the very row
-  that matters) and asks whether the forecast session carries a real opening print: a non-null
+  `_already_printed` reads *every* tracker bar (`_gap_bars`, not `opening_bars`, which drops the
+  very row that matters — same prices, including the total-return basis for a company, only more
+  rows) and asks whether the forecast session carries a real opening print: a non-null
   `Open` that differs from the previous close by more than `STALE_GAP_TOLERANCE`. Seen live:
   a cache fetched *during* London hours holds `ISF.L 2026-08-14 Open=1056.0 Close=NaN`, so
   `^FTSE` is journalled `late` while `^AXJO` (whose `STW.AX` bar is complete) forecasts the next
