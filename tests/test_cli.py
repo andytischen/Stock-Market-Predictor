@@ -233,6 +233,27 @@ def test_shock_moves_every_feature_derived_from_the_instrument():
     assert bumped["ind_cl_f_shock"].iloc[0] == pytest.approx(0.5 + 0.04 / 0.02)
 
 
+def test_the_gainers_line_counts_the_names_that_survived_the_stale_filter(monkeypatch, capsys):
+    """A count taken before the filter would claim movers the table does not hold."""
+    from gapmodel import cli
+    from tests.test_shortlist import pick
+
+    bars = pd.DataFrame(
+        {"Close": [100.0, 105.0]}, index=pd.to_datetime(["2026-08-13", "2026-08-14"])
+    )
+    monkeypatch.setattr(cli, "_panel", lambda _args: {})
+    monkeypatch.setattr(cli, "load_panel", lambda **_kwargs: {"AAPL": bars, "MSFT": bars})
+    monkeypatch.setattr(cli, "biggest_gainers", lambda *_args: ["AAPL", "MSFT"])
+    monkeypatch.setattr(cli, "_fresh_enough", lambda _panel, _args, targets: ["AAPL"])
+    monkeypatch.setattr(
+        cli, "forecast_universe", lambda *_args, **_kwargs: [pick("AAPL", 0.70, auc=0.62)]
+    )
+    main(["shortlist", "AAPL", "MSFT", "--gainers", "2"])
+
+    out = capsys.readouterr().out
+    assert "the 1 biggest gainers of session 2026-08-14, out of 2 candidates" in out
+
+
 def test_screen_flags_are_scaled_into_criteria(monkeypatch, tmp_path):
     from gapmodel import cli
     from gapmodel.screener import Screen
