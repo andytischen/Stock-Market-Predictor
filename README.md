@@ -424,10 +424,11 @@ policy signal a `ZQ=F`/`^IRX` premium — so when one leg fails to download the
 survivor is a series no feature was derived from, and it cannot fail the run
 alone.
 
-`--allow-stale` shifts the burden to disclosure, and a panel that stopped
-entirely needs a different sentence from one series lagging the rest: lags are
+`--allow-stale` shifts the burden to disclosure, and a panel that is old as a
+whole needs a different sentence from one series lagging the rest: lags are
 measured against the session being forecast, which is dated from the panel's own
-last bar, so a month-old cache has nothing lagging *within* it and the named
+last bar, so a month-old cache has nothing lagging *within* it beyond the
+tolerance — whether or not its series all stop on the same day — and the named
 list comes back empty. `shortlist` therefore says how far the forecast session
 itself sits behind today, so the reader knows the probabilities describe the
 market as it stood then.
