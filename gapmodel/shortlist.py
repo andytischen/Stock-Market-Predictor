@@ -390,6 +390,7 @@ def render_text(
             for note in pick.forecast.caveats:
                 lines.append(f"  {pick.symbol}: {note}")
     named: list[str] = []
+    counted = 0
     if panel is not None and picks:
         session = max(p.forecast.session for p in picks)
         # The threshold the run was given, not the default: a footer disagreeing
@@ -411,18 +412,26 @@ def render_text(
         session = max(p.forecast.session for p in picks)
         lag = int((as_of.normalize() - session.normalize()).days)
         if lag > max_stale_days:
+            # Three states, because the sentence should only claim what was looked
+            # at: names printed above, series compared and none behind, or nothing
+            # to compare — a panel of no measurable series says as little as none.
+            if named:
+                whose = (
+                    "The series named above are behind the rest of that panel, which "
+                    "is itself behind today, so these"
+                )
+            elif counted:
+                whose = (
+                    "The whole panel stops there, so no series is behind the others "
+                    "and none is named above: these"
+                )
+            else:
+                whose = "These"
             lines.append("")
             lines.append(
                 "stale run: the session forecast above follows the panel's last bar and "
                 f"is {lag} days before {as_of.date().isoformat()}. "
-                + (
-                    "The series named above are behind the rest of that panel, which is "
-                    "itself behind today: "
-                    if named
-                    else "The whole panel stops there, so no series is behind the others "
-                    "and none is named above: "
-                )
-                + "these probabilities are the model's read of the market as it stood "
+                f"{whose} probabilities are the model's read of the market as it stood "
                 "then, not this morning."
             )
     lines.append("")

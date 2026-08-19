@@ -234,6 +234,14 @@ def _model_inputs(
     # partner failed to download builds no feature, so its silence is nobody's.
     carried = {symbol for symbol, bars in panel.items() if not bars.empty}
     read = set().union(*(feature_symbols(symbol, carried) for symbol in targets))
+    # A leg that arrived with no bars is dropped from the pair above, but it is
+    # still a series this run asked for: kept so `missing` names it, which `lags`
+    # cannot, and which is a different failure with a different remedy.
+    read |= {
+        symbol
+        for symbol in set().union(*(feature_symbols(symbol) for symbol in targets))
+        if symbol not in carried
+    }
     return {symbol: bars for symbol, bars in panel.items() if symbol in read}
 
 

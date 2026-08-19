@@ -443,6 +443,21 @@ def test_the_two_stale_footers_do_not_contradict_each_other(panel):
     assert "behind the rest of that panel" in text
 
 
+@pytest.mark.parametrize("given", [None, {}])
+def test_the_run_footer_claims_nothing_about_series_it_did_not_compare(given):
+    """No panel and a panel of nothing measurable are the same evidence: none.
+
+    The age of the forecast is still known — it is read off the picks — but
+    "no series is behind the others" would be a finding about inputs that were
+    never compared.
+    """
+    text = render_text(
+        [pick("GOOD", 0.70, auc=0.62)], panel=given, as_of=SESSION + pd.Timedelta(days=30)
+    )
+    assert "stale run" in text and "30 days before" in text
+    assert "no series is behind" not in text and "named above" not in text
+
+
 def test_the_worst_lag_is_named_first(panel):
     """Eight names are printed; they should be the eight furthest behind."""
     panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}
