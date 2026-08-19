@@ -70,7 +70,7 @@ from .screener import render_text as render_screen_text
 from .screener import to_frame as screen_to_frame
 from .sectors import build_sector_board
 from .sectors import render_text as render_sector_text
-from .shortlist import biggest_gainers, forecast_universe
+from .shortlist import biggest_gainers, forecast_universe, last_close_session
 from .shortlist import discarded as discarded_shortlist
 from .shortlist import rank as rank_shortlist
 from .shortlist import render_text as render_shortlist_text
@@ -821,8 +821,12 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     if args.gainers:
         symbols = biggest_gainers(panel, candidates, args.gainers)
         if not symbols:
-            raise SystemExit("error: no candidate had two closes to compare")
-        moved = max(panel[symbol].index.max() for symbol in symbols).date().isoformat()
+            raise SystemExit(
+                "error: no candidate could be ranked: none loaded with two closes "
+                "to compare in its latest session"
+            )
+        sessions = [last_close_session(panel[symbol]) for symbol in symbols]
+        moved = max(session for session in sessions if session is not None).date().isoformat()
     # After the mover pass, so that a stale listing is judged only when it is one
     # of the names about to be fitted.
     symbols = _fresh_enough(panel, args, symbols)
@@ -831,11 +835,13 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     # one short of training rows leaves the report, and a count taken before
     # either would claim movers the table does not hold. The session is named,
     # and so is the ranking rule: sorting descending and slicing gives the
-    # smallest fallers on a session where everything fell, and calling those
-    # gainers would assert a rise the data denies.
+    # smallest fallers on a session where everything fell, so these are the
+    # largest movers of that session and calling them gainers would assert a rise
+    # the data may deny.
     selection = (
-        f"the {len(picks)} biggest gainers of session {moved}, out of "
-        f"{len(candidates)} candidates, ranked on their move in that session"
+        f"the {len(picks)} largest movers of session {moved}, out of "
+        f"{len(candidates)} candidates, ranked on their move in that session "
+        "(descending, so on a falling session these are the smallest fallers)"
         if moved is not None
         else None
     )

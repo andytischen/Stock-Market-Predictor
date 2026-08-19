@@ -324,7 +324,9 @@ def test_the_gainers_line_counts_the_names_the_report_holds(monkeypatch, capsys)
     main(["shortlist", "AAPL", "MSFT", "NVDA", "--gainers", "3"])
 
     out = capsys.readouterr().out
-    assert "the 1 biggest gainers of session 2026-08-14, out of 3 candidates" in out
+    assert "the 1 largest movers of session 2026-08-14, out of 3 candidates" in out
+    # The noun never asserts a rise: a descending sort can hand back fallers.
+    assert "gainers" not in out
 
 
 def test_screen_flags_are_scaled_into_criteria(monkeypatch, tmp_path):
