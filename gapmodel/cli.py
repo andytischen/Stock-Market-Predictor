@@ -787,18 +787,19 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     # After the mover pass, so that a stale listing is judged only when it is one
     # of the names about to be fitted.
     symbols = _fresh_enough(panel, args, symbols)
-    # Counted after the filter, so the sentence describes the table beneath it
-    # rather than the selection that preceded it. The session is named, and so is
-    # the ranking rule: sorting descending and slicing gives the smallest fallers
-    # on a session where everything fell, and calling those gainers would assert
-    # a rise the data denies.
+    picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
+    # Counted off the picks, the last place names are dropped: a stale listing or
+    # one short of training rows leaves the report, and a count taken before
+    # either would claim movers the table does not hold. The session is named,
+    # and so is the ranking rule: sorting descending and slicing gives the
+    # smallest fallers on a session where everything fell, and calling those
+    # gainers would assert a rise the data denies.
     selection = (
-        f"the {len(symbols)} biggest gainers of session {moved}, out of "
+        f"the {len(picks)} biggest gainers of session {moved}, out of "
         f"{len(candidates)} candidates, ranked on their move in that session"
         if moved is not None
         else None
     )
-    picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
     print(
         render_shortlist_text(
             picks,
