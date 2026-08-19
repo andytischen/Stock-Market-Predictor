@@ -443,6 +443,23 @@ def test_the_two_stale_footers_do_not_contradict_each_other(panel):
     assert "behind the rest of that panel" in text
 
 
+def test_an_old_panel_ragged_within_tolerance_is_not_called_uniform(panel):
+    """Nothing named is not the same fact as every series stopping together.
+
+    A panel can be a month old and still be a few days ragged inside that
+    month, which names nobody: what the footer knows is that no series lags
+    the forecast session by more than the tolerance, not that they all end on
+    the same bar.
+    """
+    panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}
+    panel["^GSPC"] = _ending(panel["^GSPC"], SESSION - pd.Timedelta(days=3))
+    text = render_text(
+        [pick("GOOD", 0.70, auc=0.62)], panel=panel, as_of=SESSION + pd.Timedelta(days=30)
+    )
+    assert "stale inputs" not in text
+    assert "No series is more than 5 days behind that session" in text
+
+
 @pytest.mark.parametrize("given", [None, {}])
 def test_the_run_footer_claims_nothing_about_series_it_did_not_compare(given):
     """No panel and a panel of nothing measurable are the same evidence: none.

@@ -422,8 +422,8 @@ def render_text(
                 )
             elif counted:
                 whose = (
-                    "The whole panel stops there, so no series is behind the others "
-                    "and none is named above: these"
+                    f"No series is more than {max_stale_days} days behind that session, "
+                    "so none is named above and the panel is old as a whole: these"
                 )
             else:
                 whose = "These"
