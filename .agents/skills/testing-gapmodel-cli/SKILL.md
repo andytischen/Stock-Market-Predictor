@@ -119,15 +119,20 @@ is stale, or all of them are — and the all-stale case raises `StaleInputs`
 doctored cache cannot produce a partially-filtered mover set through the CLI; only a monkeypatched
 `cli._fresh_enough` (as `tests/test_cli.py` does) reaches that branch. Do not report "could not
 reproduce" as a bug: check whether the branch is reachable at all first. With `--allow-stale` the
-all-stale case does not raise either — every mover is forecast on the old bars and the footer says so.
+all-stale case does not raise either — every mover is forecast on the old bars, and what discloses
+the age is the `stale run:` paragraph (measured against `as_of`), not the `stale inputs:` footer:
+that one measures each series against the forecast session, so it says nothing when the whole cache
+is equally old.
 
 The table can still be shorter than the mover set, by the other drop: `forecast_universe` skips a
 name without `model.MIN_TRAIN` (500) labelled rows, with only a stderr
-`WARNING no forecast for SYM: need more than 500 labelled rows`. Synthesise it by keeping only the
-*last* ~120 rows of a candidate's CSV in a cache copy — the final bar date has to survive or the
-name is dropped earlier, as mover-ineligible, and you are testing the wrong path. The `--gainers`
-selection line is written after the picks, so its count is the table's; a count that exceeds the
-rows beneath it is a bug worth reporting.
+`WARNING no forecast for SYM: need more than 500 labelled rows, got N` (the `, got N` suffix is part
+of the message — do not grep for the string without it). Synthesise it by keeping only the *last*
+~120 rows of a candidate's CSV in a cache copy — the final bar date has to survive or the name is
+dropped earlier, as mover-ineligible, and you are testing the wrong path. The `--gainers` selection
+line is written after the picks, so its count is the number of names forecast: with no `--top` limit
+that is exactly the rows beneath it, and a larger count is a bug worth reporting — but `--top N`
+cuts the ranked block deliberately, so compare against the picks rather than the printed rows.
 
 ## Pandas `na_rep` only reaches a float column
 
