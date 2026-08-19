@@ -131,19 +131,23 @@ name without `model.MIN_TRAIN` (500) labelled rows, with only a stderr
 of the message — do not grep for the string without it). Synthesise it by keeping only the *last*
 ~120 rows of a candidate's CSV in a cache copy — the final bar date has to survive or the name is
 dropped earlier, as mover-ineligible, and you are testing the wrong path. The `--gainers` selection
-line is written after the picks, so its count is the number of names forecast: with no `--top` limit
-that is exactly the rows beneath it, and a larger count is a bug worth reporting — but `--top N`
-cuts the ranked block deliberately, so compare against the picks rather than the printed rows.
+line is written after the picks, so its count is `len(picks)`, every name forecast — not the length
+of the ranked table. With no `--top` limit it equals the rows across **both** tables, the ranked one
+and the discarded-picks one `render_text` prints for names that missed the credibility hurdles, so
+count both before calling a mismatch a bug; `--top N` additionally cuts the ranked block on purpose.
+A count larger than the two tables together is the bug worth reporting.
 
-Since #100 the sentence also says *whether* anything was dropped, via `cli._mover_selection`, so
-assert the wording and not just the number: `the 3 biggest gainers of session ...` when every
-chosen mover survived, `2 of the 3 biggest gainers of session ...` when one was dropped, and the
-singular `the biggest gainer of session ...` whenever `biggest_gainers` returned one name (never
+Once the wording change of #100 lands (not yet merged as of this note; until then the line has one
+fixed shape, `the {len(picks)} biggest gainers of session ...`, including the ungrammatical `the 1
+biggest gainers`) the sentence also says *whether* anything was dropped, via `cli._mover_selection`,
+and you should assert the wording and not just the number: `the 3 biggest gainers of session ...`
+when every chosen mover survived, `2 of the 3 biggest gainers of session ...` when one dropped, and
+the singular `the biggest gainer of session ...` whenever `biggest_gainers` returned one name (never
 "the 1 biggest gainers"). The second count is what `biggest_gainers` returned, not `--gainers N`, so
 a run whose universe offers fewer movers than requested still reads honestly. A test that only
 greps for "biggest gainers" passes on all three and proves nothing.
 
-The all-dropped case cannot be observed: with no pick left, `forecast_universe` raises
+Either way the all-dropped case cannot be observed: with no pick left, `forecast_universe` raises
 `RuntimeError("no stock could be modelled")` and the CLI exits 1 printing only that `error:` line,
 so there is no "0 of the 1 biggest gainer" report to inspect (checked on both `main` and the branch).
 Expect the abort rather than filing the missing sentence as a bug.
