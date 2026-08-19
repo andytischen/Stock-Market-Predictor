@@ -280,7 +280,9 @@ def test_score_relative_compares_against_the_us_universe_by_default(monkeypatch,
     out = capsys.readouterr().out
     assert "IVZ" in out and "1.4" in out
     assert "universe: 150 names as of 2026-08-14" in out
-    assert "KHC" in out
+    # The count is the headline of the stale line, and one laggard exercises the
+    # short-list branch the long-list unit test never reaches.
+    assert "stale (1 of 150, still in the mean at an earlier close): KHC" in out
 
 
 def test_score_without_relative_prints_the_raw_table(monkeypatch, capsys):

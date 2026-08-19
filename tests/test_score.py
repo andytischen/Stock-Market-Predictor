@@ -196,6 +196,13 @@ def test_a_genuine_laggard_is_still_flagged_under_a_non_trading_asof(bars):
     assert reference.stale == ("EEE",)
 
 
+def test_the_session_never_runs_past_a_requested_trading_day(bars):
+    """The session is bounded by ``asof`` only because scoring trims to it first."""
+    _, reference = relative_scores(["AAA"], UNIVERSE, window=5, asof=pd.Timestamp("2026-08-12"))
+    assert reference.session == pd.Timestamp("2026-08-12")
+    assert reference.stale == ()
+
+
 def test_a_symbol_fresher_than_the_cross_section_is_named(bars):
     """A non-member cannot move the session, so say when it is dated past it."""
     for member in UNIVERSE:
