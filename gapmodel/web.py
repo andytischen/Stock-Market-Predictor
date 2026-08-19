@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import webbrowser
 from collections.abc import Mapping, Sequence
@@ -23,9 +24,20 @@ log = logging.getLogger(__name__)
 # Bind addresses that mean "every interface": not reachable as a URL host.
 _WILDCARD_HOSTS = {"", "0.0.0.0", "::", "[::]"}
 
-# Addresses only this machine can reach. Anything else exposes an interface that
-# refits models on request, with no authentication in front of it.
-_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
+
+def reachable_beyond_this_machine(host: str) -> bool:
+    """Whether binding ``host`` exposes the server to anything but this machine.
+
+    Asked of the address rather than of a list of spellings: ``127.0.0.2`` and
+    ``0:0:0:0:0:0:0:1`` are loopback too, and a name that is not an address at
+    all resolves to something unknown, which is the answer that warns.
+    """
+    if host == "localhost":
+        return False
+    try:
+        return not ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return True
 
 
 def browser_url(host: str, port: int) -> str:
@@ -117,6 +129,16 @@ def _handler(
             if region not in symbols:
                 self._reply(400, f"<h1>Unknown region: {escape(region)}</h1>")
                 return
+            if not symbols[region]:
+                # Said rather than rendered: every market here was dropped for
+                # stale data, and an empty request is not a request to forecast
+                # the ones that were dropped.
+                self._reply(
+                    503,
+                    f"<h1>No market in {escape(region)} has data recent enough to "
+                    "forecast; restart with --refresh</h1>",
+                )
+                return
 
             # An "at" that was submitted empty means "now"; only an absent one
             # falls back to the time the server was started with.
@@ -179,7 +201,7 @@ def serve_dashboard(
     handler = _handler(panel, hourly, symbols, region, at, regularisation)
     server = ThreadingHTTPServer((host, port), handler)
     address = browser_url(host, server.server_port)
-    if host not in _LOOPBACK_HOSTS:
+    if reachable_beyond_this_machine(host):
         # Said once, at the point the choice is made: there is no login on this
         # server, and each request it answers fits models, so a reachable one is
         # both readable and expensive to anyone who can route to it.

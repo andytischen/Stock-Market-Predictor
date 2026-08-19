@@ -65,6 +65,15 @@ def test_a_time_that_is_not_hh_mm_is_refused(served):
     assert seen == []
 
 
+def test_a_region_with_nothing_fresh_is_told_so_rather_than_rendered(served):
+    base, seen = served
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _get(f"{base}/dashboard?region=Europe")
+    assert error.value.code == 503
+    assert "recent enough" in error.value.read().decode()
+    assert seen == []
+
+
 def test_an_unexpected_rendering_failure_is_answered_as_a_500(served, monkeypatch):
     base, _ = served
 
@@ -125,12 +134,15 @@ def bound(monkeypatch):
     return serve
 
 
-def test_binding_beyond_loopback_warns_that_the_dashboard_is_unprotected(bound, capsys):
-    bound("0.0.0.0")
-    out = capsys.readouterr().out
-    assert "no authentication" in out
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.10", "example.internal"])
+def test_binding_beyond_loopback_warns_that_the_dashboard_is_unprotected(bound, capsys, host):
+    bound(host)
+    assert "no authentication" in capsys.readouterr().out
 
 
-def test_binding_loopback_serves_without_a_warning(bound, capsys):
-    bound("127.0.0.1")
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "127.0.0.2", "::1", "0:0:0:0:0:0:0:1"])
+def test_binding_an_address_only_this_machine_can_reach_serves_without_a_warning(
+    bound, capsys, host
+):
+    bound(host)
     assert "warning" not in capsys.readouterr().out
