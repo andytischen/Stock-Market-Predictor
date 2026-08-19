@@ -501,26 +501,36 @@ def _cmd_export(args: argparse.Namespace) -> None:
         print(text)
 
 
-def _last_monday_5am() -> pd.Timestamp:
-    """Most recent Monday at 05:00 UTC — the start of last week's trading window."""
+def _last_monday() -> pd.Timestamp:
+    """Most recent Monday at midnight UTC — the start of last week's sessions.
+
+    Midnight rather than the opening hour: daily bars are indexed on the
+    normalised session date, so any intra-day cutoff would drop the Monday
+    session itself from the window.
+    """
     now = pd.Timestamp.now("UTC").tz_localize(None)
     # weekday(): Mon=0 … Sun=6.  Roll back to the most recent Monday.
     days_back = now.weekday()  # 0 on Monday, 6 on Sunday
     if days_back == 0:
         days_back = 7  # today IS Monday — use the previous Monday
-    return now.normalize() - pd.Timedelta(days=days_back) + pd.Timedelta(hours=5)
+    return now.normalize() - pd.Timedelta(days=days_back)
 
 
 def _since_timestamp(args: argparse.Namespace) -> pd.Timestamp | None:
     """Return the ``since`` cutoff implied by ``--last-week`` or ``--since``."""
     if getattr(args, "last_week", False):
-        return _last_monday_5am()
+        return _last_monday()
     value = getattr(args, "since", None)
     if value is not None:
         try:
-            return pd.Timestamp(value)
+            stamp = pd.Timestamp(value)
         except ValueError as exc:
             raise SystemExit(f"error: --since {value!r} is not a valid date: {exc}") from exc
+        # The session index is tz-naive UTC; comparing it against an aware
+        # cutoff raises rather than filtering.
+        if stamp.tz is not None:
+            stamp = stamp.tz_convert("UTC").tz_localize(None)
+        return stamp
     return None
 
 
@@ -557,7 +567,7 @@ def _cmd_backtest(args: argparse.Namespace) -> None:
         raise SystemExit("nothing to back-test")
     print("\n" + pd.DataFrame(rows).round(4).to_string(index=False))
     if since is not None:
-        label = f"Window: {since.date()} 05:00 UTC → present"
+        label = f"Window: {since:%Y-%m-%d %H:%M} UTC → present"
         print(f"\n{label}")
         print(pd.DataFrame(window_rows).round(4).to_string(index=False))
 
@@ -1081,15 +1091,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="add pre-open futures moves (recent ~2 years only)",
     )
-    backtest.add_argument(
+    window = backtest.add_mutually_exclusive_group()
+    window.add_argument(
         "--since",
         metavar="DATE",
         help="show a second metrics table restricted to sessions on or after DATE (ISO format)",
     )
-    backtest.add_argument(
+    window.add_argument(
         "--last-week",
         action="store_true",
-        help="shorthand for --since last-Monday-05:00-UTC (the opening of last week)",
+        help="shorthand for --since the most recent Monday (00:00 UTC)",
     )
     backtest.set_defaults(func=_cmd_backtest)
 
