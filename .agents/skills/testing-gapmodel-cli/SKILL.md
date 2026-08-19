@@ -116,8 +116,13 @@ Worth knowing before designing a test around `_fresh_enough` dropping *some* of 
 symbols it was handed — not among the whole loaded panel, so doctoring an index or peer series does
 not move mover eligibility. Every chosen mover therefore shares one last-bar date, and one lag
 against `today()`: either none of them is stale, or all of them are — and the all-stale case raises
-`StaleInputs` ("every requested name has no bar within N days of ...", exit 1) before anything is
-printed. So a doctored cache cannot produce a partially-filtered mover set through the CLI; only a
+`StaleInputs` before anything is printed. Which message you get depends on what you doctored: the
+targets-only "every requested name has no bar within N days of ..." only appears while the shared
+inputs are still fresh, since the shared-input `guard` runs first and aborts a uniformly old cache
+with "N of M input series have no bar within ..." instead. Grep for whichever one your fixture
+earns.
+
+Either way, a doctored cache cannot produce a partially-filtered mover set through the CLI; only a
 monkeypatched `cli._fresh_enough` (as `tests/test_cli.py` does) reaches it. Do not report "could not
 reproduce" as a bug: check whether the branch is reachable at all first. With `--allow-stale` the
 all-stale case does not raise either — every mover is forecast on the old bars, and what discloses
@@ -144,12 +149,15 @@ and you should assert the wording and not just the number: `the 3 biggest gainer
 when every chosen mover survived, `2 of the 3 biggest gainers of session ...` when one dropped, and
 the singular `the biggest gainer of session ...` whenever `biggest_gainers` returned one name (never
 "the 1 biggest gainers"). The second count is what `biggest_gainers` returned, not `--gainers N`, so
-a run whose universe offers fewer movers than requested still reads honestly. A test that only
+a run whose universe offers fewer movers than requested still reads honestly — and it can offer
+fewer for a reason other than the latest-bar rule: `_changes` skips a name whose `last_change`
+raises (a single-bar series, say) with a stderr `no last move for SYM: ...`. A test that only
 greps for "biggest gainers" passes on all three and proves nothing.
 
-Either way the all-dropped case cannot be observed: with no pick left, `forecast_universe` raises
-`RuntimeError("no stock could be modelled")` and the CLI exits 1 printing only that `error:` line,
-so there is no "0 of the 1 biggest gainer" report to inspect (checked on both `main` and the branch).
+Before and after that change, the all-dropped case cannot be observed: with no pick left,
+`forecast_universe` raises `RuntimeError("no stock could be modelled")` and the CLI exits 1
+printing only that `error:` line, so there is no "0 of the 1 biggest gainer" report to inspect
+(checked on both `main` and the branch).
 Expect the abort rather than filing the missing sentence as a bug.
 
 ## Pandas `na_rep` only reaches a float column
