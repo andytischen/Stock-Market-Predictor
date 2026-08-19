@@ -627,6 +627,19 @@ def test_a_row_carrying_no_close_does_not_make_a_name_eligible(caplog):
     assert "BLANK" in caplog.text
 
 
+def test_a_series_that_never_closed_is_named_not_dropped_in_silence(caplog):
+    """A requested name leaving the report unremarked reads as a name with no view."""
+    blank = _closing([100.0, 140.0])
+    panel = {
+        "BLANK": blank.assign(Close=np.nan),
+        "UP": _closing([100.0, 105.0]),
+        "MID": _closing([100.0, 102.0]),
+    }
+    assert biggest_gainers(panel, list(panel), 2) == ["UP", "MID"]
+    assert "1 of 3 candidates have no close" in caplog.text
+    assert "BLANK" in caplog.text
+
+
 def test_the_table_reports_the_move_the_name_has_just_made(panel):
     entry = forecast_universe(panel, symbols=[TICKER], min_train=500)[0]
     expected = last_change(panel[TICKER])

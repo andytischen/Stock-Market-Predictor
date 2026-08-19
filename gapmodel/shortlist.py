@@ -234,23 +234,30 @@ def biggest_gainers(panel: dict[str, pd.DataFrame], symbols: list[str], count: i
     """
     if count < 1:
         raise ValueError(f"count must be at least 1, got {count}")
-    dated = {
-        symbol: session
-        for symbol in dict.fromkeys(symbols)
-        if (bars := panel.get(symbol)) is not None
-        and not bars.empty
-        and (session := last_close_session(bars)) is not None
-    }
+    dated: dict[str, pd.Timestamp] = {}
+    unpriced: list[str] = []
+    for symbol in dict.fromkeys(symbols):
+        bars = panel.get(symbol)
+        if bars is None or bars.empty:
+            continue
+        session = last_close_session(bars)
+        # A series that never closed is counted with the ones ranked out rather
+        # than dropped in silence: a requested name leaving the report unremarked
+        # reads as a name the model had no view on.
+        if session is None:
+            unpriced.append(symbol)
+        else:
+            dated[symbol] = session
     if not dated:
         return []
     latest = max(dated.values())
     eligible = [symbol for symbol, session in dated.items() if session == latest]
-    behind = [symbol for symbol in dated if symbol not in set(eligible)]
+    behind = [symbol for symbol in dated if symbol not in set(eligible)] + unpriced
     if behind:
         log.warning(
             "%d of %d candidates have no close for %s and cannot be ranked as movers: %s",
             len(behind),
-            len(dated),
+            len(dated) + len(unpriced),
             latest.date().isoformat(),
             ", ".join(behind[:8]) + (f" and {len(behind) - 8} more" if len(behind) > 8 else ""),
         )
