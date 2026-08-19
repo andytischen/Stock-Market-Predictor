@@ -11,9 +11,10 @@ except `web` collect stdout as text evidence — no browser, no screen recording
 `gapmodel web` is the exception: it serves the regional dashboard over HTTP and must be tested in
 a real browser with a recording. See "Testing `gapmodel web`" below.
 
-Subcommands on `main`: `markets, fetch, score, screen, predict, backtest, asia, dashboard,
-export, sectors, stock, shortlist`. The screener is invoked as `screen` even though the parser
-variable is named `screener`.
+Subcommands on `main`: `markets, fetch, score, screen, predict, stock, backtest, scorecard, asia,
+dashboard, web, export, shortlist, sectors, journal, social-arb`. The screener is invoked as
+`screen` even though the parser variable is named `screener`, and `social-arb` is hyphenated even
+though its module is `social_arb`.
 
 The two single-stock commands are easy to confuse, and testing one proves nothing about the other:
 
@@ -341,10 +342,16 @@ fresh 0.6233) without anything being broken. `^FTSE` reproduces longer than the 
 
 ## Testing `gapmodel web`
 
-`python -m gapmodel web [--port N] [--at H:MM] [--host ...] [--no-browser]` serves an index page
+`python -m gapmodel web [--region R] [--port N] [--at H:MM] [--host ...] [--intraday]
+[--no-browser]` serves an index page
 (region `<select>` + `<input type="time">` + Render button) whose form targets an `<iframe>` at
 `/dashboard?region=...&at=...`. Nothing is cached between requests: **every** `/dashboard` hit
 refits that region's models.
+
+`--region` (default `Asia`) only sets the *default*: it is what the dropdown pre-selects and what
+`/dashboard` renders when the query omits `region`, so it decides the cost of the first load — see
+the timings below before defaulting to `Europe`. `--intraday` splices hourly futures in, which
+changes the numbers on the board but not the shape of any test here.
 
 Timings measured on an 8-core box with a warm `~/.cache/gapmodel` (budget for them, they are not
 hangs):
