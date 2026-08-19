@@ -390,6 +390,7 @@ def render_text(
             for note in pick.forecast.caveats:
                 lines.append(f"  {pick.symbol}: {note}")
     named: list[str] = []
+    counted = 0
     if panel is not None and picks:
         session = max(p.forecast.session for p in picks)
         # The threshold the run was given, not the default: a footer disagreeing
@@ -412,14 +413,14 @@ def render_text(
         lag = int((as_of.normalize() - session.normalize()).days)
         if lag > max_stale_days:
             # Three states, because the sentence should only claim what was looked
-            # at: names printed above, a panel inspected and nothing behind in it,
-            # or no panel to say either about.
+            # at: names printed above, series compared and none behind, or nothing
+            # to compare — a panel of no measurable series says as little as none.
             if named:
                 whose = (
                     "The series named above are behind the rest of that panel, which "
                     "is itself behind today, so these"
                 )
-            elif panel is not None:
+            elif counted:
                 whose = (
                     "The whole panel stops there, so no series is behind the others "
                     "and none is named above: these"
