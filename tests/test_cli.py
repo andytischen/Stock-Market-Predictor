@@ -313,8 +313,10 @@ def test_the_gainers_line_counts_the_names_the_report_holds(monkeypatch, capsys)
         {"Close": [100.0, 105.0]}, index=pd.to_datetime(["2026-08-13", "2026-08-14"])
     )
     monkeypatch.setattr(cli, "_panel", lambda _args: {})
-    monkeypatch.setattr(cli, "load_panel", lambda **_kwargs: {"AAPL": bars, "MSFT": bars})
-    monkeypatch.setattr(cli, "biggest_gainers", lambda *_args: ["AAPL", "MSFT"])
+    monkeypatch.setattr(
+        cli, "load_panel", lambda **_kwargs: {"AAPL": bars, "MSFT": bars, "NVDA": bars}
+    )
+    monkeypatch.setattr(cli, "biggest_gainers", lambda *_args: ["AAPL", "MSFT", "NVDA"])
     # Both drop paths at once: MSFT is stale, and NVDA is fresh but too short to
     # train, so only the pick that forecast_universe returns reaches the table.
     monkeypatch.setattr(cli, "_fresh_enough", lambda _panel, _args, targets: ["AAPL", "NVDA"])
@@ -324,7 +326,18 @@ def test_the_gainers_line_counts_the_names_the_report_holds(monkeypatch, capsys)
     main(["shortlist", "AAPL", "MSFT", "NVDA", "--gainers", "3"])
 
     out = capsys.readouterr().out
-    assert "the 1 biggest gainers of session 2026-08-14, out of 3 candidates" in out
+    assert "1 of the 3 biggest gainers of session 2026-08-14, out of 3 candidates" in out
+
+
+def test_the_gainers_line_claims_the_ranking_only_when_it_kept_every_mover():
+    """The dropped mover can be the largest riser, so survivors are not the top K."""
+    from gapmodel.cli import _mover_selection
+
+    kept_all = _mover_selection(3, 3, 158, "2026-08-14")
+    assert kept_all.startswith("the 3 biggest gainers of session 2026-08-14, out of 158")
+    assert _mover_selection(2, 3, 158, "2026-08-14").startswith("2 of the 3 biggest gainers")
+    assert _mover_selection(0, 3, 158, "2026-08-14").startswith("0 of the 3 biggest gainers")
+    assert _mover_selection(1, 1, 158, "2026-08-14").startswith("the biggest gainer of session")
 
 
 def test_screen_flags_are_scaled_into_criteria(monkeypatch, tmp_path):
