@@ -1,6 +1,6 @@
 ---
 name: testing-gapmodel-cli
-description: How to runtime-test the gapmodel CLI (predict / screen / sectors / stock / shortlist) end to end - venv, cached price data, expected runtimes, and the checks that actually catch look-ahead and ranking bugs.
+description: How to runtime-test the gapmodel CLI (predict / screen / sectors / stock / shortlist) and the gapmodel web browser dashboard end to end - venv, cached price data, expected runtimes, and the checks that actually catch look-ahead and ranking bugs.
 ---
 
 # Testing the gapmodel CLI
