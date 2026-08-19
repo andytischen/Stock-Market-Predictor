@@ -479,7 +479,8 @@ markets that had just been excluded.
 "no authentication" warning. Verified by starting one server per host on its own port and reading
 the first log line (each start costs a full ~2 min panel load, so launch them in parallel):
 no warning for `127.0.0.1`, `127.0.0.2`, `localhost`; warning for `0.0.0.0`, a LAN IP
-(`hostname -I`), and a hostname. Note the server is IPv4-only (`ThreadingHTTPServer`), so any
+(`hostname -I`), and a hostname. Note the server is IPv4-only — `serve_dashboard` never overrides
+`socketserver`'s default `address_family = AF_INET` — so any
 IPv6 spelling (`::1`, `0:0:0:0:0:0:0:1`) dies at bind time with
 `error: [Errno -9] Address family for hostname not supported` — the loopback classification for
 those can only be checked by calling `reachable_beyond_this_machine` directly.
