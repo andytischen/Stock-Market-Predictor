@@ -173,10 +173,11 @@ def relative_scores(
     day, so the comparison session is the newest close any universe member
     reached at or before ``asof``, and members whose data stops earlier are
     reported in ``Reference.stale`` — they still count, at their own last close,
-    but the caller can say how many are lagging. The session is *not* ``asof``
-    itself: ask as of a weekend or a holiday and the cross-section is the Friday
-    every member was scored on, which keeps the stale list to the names actually
-    lagging instead of all of them.
+    but the caller can say how many are lagging — and it is worth saying, because
+    a lagging member still moves the mean and sd everything is divided by. The
+    session is *not* ``asof`` itself: ask as of a weekend or a holiday and the
+    cross-section is the Friday every member was scored on, which keeps the stale
+    list to the names actually lagging instead of all of them.
 
     ``symbols`` need not belong to ``universe``; names that do are scored once
     and appear in both. A non-member is deliberately kept out of the session it
@@ -205,8 +206,9 @@ def relative_scores(
     if spread == 0 or pd.isna(spread):
         raise ValueError("comparison universe has no spread to normalise against")
     mean = float(values.mean())
-    newest = max(m.asof for m in members)
-    session = min(asof, newest) if asof is not None else newest
+    # Not ``asof``: ``score_symbols`` already trimmed every series to it, so the
+    # newest member close is the latest session the whole cross-section reached.
+    session = max(m.asof for m in members)
     out = [
         RelativeScore(
             symbol=s.symbol,
@@ -274,7 +276,10 @@ def render_reference(reference: Reference) -> str:
         f"raw score mean {reference.mean:+.2f} sd {reference.stdev:.2f}"
     )
     if reference.stale:
-        line += f"\nstale (scored at an earlier close): {_names(reference.stale)}"
+        line += (
+            f"\nstale ({len(reference.stale)} of {reference.count}, "
+            f"still in the mean at an earlier close): {_names(reference.stale)}"
+        )
     if reference.ahead:
         line += f"\nahead of the comparison session: {_names(reference.ahead)}"
     return line

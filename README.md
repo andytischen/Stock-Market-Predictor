@@ -748,14 +748,20 @@ universe: 157 names as of 2026-08-14, raw score mean +0.69 sd 1.14
 `relative` is 0 for an average stock *today* whatever the market has done, which
 makes it comparable across dates and is the shape the ThinkorSwim column has.
 The footer states what was compared against, and names whose data stops before
-the session are listed as stale rather than silently dragging the mean. The
+the session are listed as stale, with a count, rather than silently dragging the
+mean — they stay in the distribution at their own last close, so on a day with a
+sharp market-wide move that count is how far to trust the yardstick. The
 session is the newest close the universe actually reached at or before `--asof`,
 not `--asof` itself, so asking as of a weekend prices the cross-section on the
 Friday rather than declaring every name stale. The
 comparison universe defaults to `us_universe()`; a symbol being scored need not
 belong to it, and does not join the distribution it is measured against — asking
 about a stock must not move its own benchmark, so a non-member with fresher data
-can be dated *after* the cross-section, and the footer names it when it is.
+can be dated *after* the cross-section, and the footer names it when it is. The
+same rule tilts `pct` by one place: a member is counted in its own percentile and
+a non-member is not, so two rows on an identical raw score can read one `100/N`
+apart. Worth knowing when reading a table that mixes the two; not worth two
+definitions of the same column to fix.
 
 What this does **not** do is agree with that column any better. Re-centring is an
 affine transform of the same number, so the correlation is unchanged by
