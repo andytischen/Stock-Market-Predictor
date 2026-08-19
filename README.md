@@ -656,7 +656,10 @@ session a model forecasts is the one after the last session it has *complete*
 features for, so a market still missing an indicator for yesterday is forecast
 for an auction that has already printed. Nothing is leaked — every feature is
 lagged either way — but it is not a call anybody could have acted on, so it is
-journalled as `late` and left out of the live record.
+journalled as `late` and left out of the live record. What makes that morning
+past is the opening print itself, not a row for it in the file: an empty open, or
+one that merely repeats the previous close, is the same non-event settlement
+refuses to score, so the forecast stays live until a real auction arrives.
 
 ```
 forecast journal: 320 rows  settled 288  pending 16  unscorable 16
