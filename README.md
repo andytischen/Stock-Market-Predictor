@@ -177,8 +177,13 @@ downloaded when the server started, so restart it to pick up newer prices:
 
 ```bash
 python -m gapmodel web --region Asia --at 05:00
-python -m gapmodel web --host 0.0.0.0 --port 8080 --no-browser
+python -m gapmodel web --port 8080 --no-browser
 ```
+
+It binds loopback for a reason: there is no authentication, and every request
+fits models, so `--host 0.0.0.0` hands anyone who can route to the machine both
+the board and a way to spend its CPU. Bind a wider address only behind something
+that authenticates, and expect a warning on startup when you do.
 
 ```
 Crude:

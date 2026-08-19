@@ -192,7 +192,12 @@ def forecast_all(
     shocks: dict[str, float] | None = None,
 ) -> list[Forecast]:
     results: list[Forecast] = []
-    for symbol in symbols or [m.symbol for m in MARKETS]:
+    # `None` is every market and `[]` is none of them: a caller that filtered its
+    # own list down to nothing — every candidate dropped for stale data — meant
+    # to forecast nothing, and reading that as "no restriction" forecast exactly
+    # the names it had just excluded.
+    requested = [m.symbol for m in MARKETS] if symbols is None else symbols
+    for symbol in requested:
         try:
             results.append(
                 forecast_market(
