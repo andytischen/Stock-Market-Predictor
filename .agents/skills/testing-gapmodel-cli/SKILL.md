@@ -118,13 +118,16 @@ is stale, or all of them are — and the all-stale case raises `StaleInputs`
 ("every requested name has no bar within N days of ...", exit 1) before anything is printed. So a
 doctored cache cannot produce a partially-filtered mover set through the CLI; only a monkeypatched
 `cli._fresh_enough` (as `tests/test_cli.py` does) reaches that branch. Do not report "could not
-reproduce" as a bug: check whether the branch is reachable at all first.
+reproduce" as a bug: check whether the branch is reachable at all first. With `--allow-stale` the
+all-stale case does not raise either — every mover is forecast on the old bars and the footer says so.
 
-Also note the printed name count is smaller than any count taken from the selected symbols
-(the `--gainers` line is therefore counted off the returned picks), because `forecast_universe`
-drops names without `model.MIN_TRAIN` (500) labelled rows with
-only a stderr `WARNING no forecast for SYM: need more than 500 labelled rows` — synthesise it by
-keeping only the last ~120 rows of a candidate's CSV in a cache copy.
+The table can still be shorter than the mover set, by the other drop: `forecast_universe` skips a
+name without `model.MIN_TRAIN` (500) labelled rows, with only a stderr
+`WARNING no forecast for SYM: need more than 500 labelled rows`. Synthesise it by keeping only the
+*last* ~120 rows of a candidate's CSV in a cache copy — the final bar date has to survive or the
+name is dropped earlier, as mover-ineligible, and you are testing the wrong path. The `--gainers`
+selection line is written after the picks, so its count is the table's; a count that exceeds the
+rows beneath it is a bug worth reporting.
 
 ## Pandas `na_rep` only reaches a float column
 
