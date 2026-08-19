@@ -502,11 +502,13 @@ def _cmd_export(args: argparse.Namespace) -> None:
 
 
 def _last_monday() -> pd.Timestamp:
-    """Most recent Monday at midnight UTC — the start of last week's sessions.
+    """Midnight UTC on the most recent Monday, or the one before on a Monday.
 
     Midnight rather than the opening hour: daily bars are indexed on the
     normalised session date, so any intra-day cutoff would drop the Monday
-    session itself from the window.
+    session itself from the window.  Stepping back a week on a Monday keeps a
+    run made before the open from reporting on a single session, at the cost of
+    a window that spans both Mondays.
     """
     now = pd.Timestamp.now("UTC").tz_localize(None)
     # weekday(): Mon=0 … Sun=6.  Roll back to the most recent Monday.
@@ -1105,7 +1107,8 @@ def build_parser() -> argparse.ArgumentParser:
     window.add_argument(
         "--last-week",
         action="store_true",
-        help="shorthand for --since the most recent Monday (00:00 UTC)",
+        help="shorthand for --since 00:00 UTC on the most recent Monday, "
+        "or the Monday before if today is one",
     )
     backtest.set_defaults(func=_cmd_backtest)
 
