@@ -3,7 +3,7 @@ import math
 import pandas as pd
 import pytest
 
-from gapmodel.cli import _last_monday_5am, _since_timestamp, build_parser, main
+from gapmodel.cli import _last_monday, _since_timestamp, build_parser, main
 from gapmodel.markets import MARKETS
 from gapmodel.staleness import StaleInputs
 
@@ -118,11 +118,11 @@ def test_at_accepts_a_single_digit_hour():
     assert build_parser().parse_args(["dashboard", "--at", "5:00"]).at == 5.0
 
 
-def test_last_monday_5am_is_a_monday_at_5am():
-
-    ts = _last_monday_5am()
+def test_last_monday_is_a_monday_at_midnight():
+    """Sessions are indexed on the normalised date, so the cutoff must be too."""
+    ts = _last_monday()
     assert ts.weekday() == 0, "should be a Monday"
-    assert ts.hour == 5 and ts.minute == 0
+    assert ts == ts.normalize()
 
 
 def test_since_timestamp_last_week():
@@ -151,6 +151,16 @@ def test_since_timestamp_none_when_neither_flag():
     assert _since_timestamp(args) is None
 
 
+def test_since_timestamp_drops_the_timezone():
+    """An aware cutoff cannot be compared against the tz-naive session index."""
+    import argparse
+
+    import pandas as pd
+
+    args = argparse.Namespace(last_week=False, since="2026-07-28T12:00:00+02:00")
+    assert _since_timestamp(args) == pd.Timestamp("2026-07-28 10:00:00")
+
+
 def test_backtest_last_week_in_parser():
     parser = build_parser()
     args = parser.parse_args(["backtest", "--last-week"])
@@ -163,6 +173,12 @@ def test_backtest_since_in_parser():
     args = parser.parse_args(["backtest", "--since", "2026-07-28"])
     assert args.since == "2026-07-28"
     assert not args.last_week
+
+
+def test_backtest_rejects_both_window_flags(capsys):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["backtest", "--since", "2026-07-28", "--last-week"])
+    assert "not allowed with" in capsys.readouterr().err
 
 
 def test_scorecard_accepts_a_window_a_stock_and_a_log():
