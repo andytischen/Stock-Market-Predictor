@@ -179,9 +179,18 @@ def last_change(bars: pd.DataFrame) -> float:
     return float(close.iloc[-1]) / previous - 1.0
 
 
-def _last_bar(bars: pd.DataFrame) -> pd.Timestamp:
-    """The session a series ends on, to the day."""
-    return bars.index.max().normalize()
+def last_close_session(bars: pd.DataFrame) -> pd.Timestamp | None:
+    """The last session a series has a close for, to the day.
+
+    Dated from the last row carrying a close rather than the last row, because a
+    row with no close is the session's placeholder and not its price: the move is
+    read from closes, so a name whose newest row is blank would otherwise be
+    ranked eligible on a move belonging to some older day, and a single such row
+    dated ahead of the rest would anchor the whole ranking on itself. ``None``
+    when nothing in the series closed.
+    """
+    closed = bars.index[bars["Close"].notna()] if "Close" in bars else bars.index[:0]
+    return closed.max().normalize() if len(closed) else None
 
 
 def _changes(panel: dict[str, pd.DataFrame], symbols: list[str]) -> dict[str, float]:
@@ -199,17 +208,17 @@ def _changes(panel: dict[str, pd.DataFrame], symbols: list[str]) -> dict[str, fl
 
 
 def biggest_gainers(panel: dict[str, pd.DataFrame], symbols: list[str], count: int) -> list[str]:
-    """The ``count`` names that moved up most in the panel's latest session.
+    """The ``count`` names that moved most in the panel's latest session.
 
     Selection is the cheap half of the work: bars are downloaded once for the
     whole universe, while each walk-forward fit costs seconds, so narrowing to
     the movers before fitting is what makes a wide universe usable in a briefing.
 
     Ranked on the descending move and sliced, so on a session where everything
-    fell these are the smallest fallers rather than risers — the report names the
-    session and says the ranking is on the move, which is true either way.
+    fell these are the smallest fallers rather than risers — which is why the
+    report calls them the largest movers of a named session rather than gainers.
 
-    Only names whose own last bar *is* that session are eligible. Every listing
+    Only names whose own last close *is* that session are eligible. Every listing
     here trades one clock, so a series ending earlier did not trade in the
     session being ranked, and its own last two closes describe some older day: a
     halted or delisted name would otherwise hold its final move for ever and
@@ -225,21 +234,30 @@ def biggest_gainers(panel: dict[str, pd.DataFrame], symbols: list[str], count: i
     """
     if count < 1:
         raise ValueError(f"count must be at least 1, got {count}")
-    dated = {
-        symbol: bars
-        for symbol in dict.fromkeys(symbols)
-        if (bars := panel.get(symbol)) is not None and not bars.empty
-    }
+    dated: dict[str, pd.Timestamp] = {}
+    unpriced: list[str] = []
+    for symbol in dict.fromkeys(symbols):
+        bars = panel.get(symbol)
+        if bars is None or bars.empty:
+            continue
+        session = last_close_session(bars)
+        # A series that never closed is counted with the ones ranked out rather
+        # than dropped in silence: a requested name leaving the report unremarked
+        # reads as a name the model had no view on.
+        if session is None:
+            unpriced.append(symbol)
+        else:
+            dated[symbol] = session
     if not dated:
         return []
-    latest = max(_last_bar(bars) for bars in dated.values())
-    eligible = [symbol for symbol, bars in dated.items() if _last_bar(bars) == latest]
-    behind = [symbol for symbol in dated if symbol not in set(eligible)]
+    latest = max(dated.values())
+    eligible = [symbol for symbol, session in dated.items() if session == latest]
+    behind = [symbol for symbol in dated if symbol not in set(eligible)] + unpriced
     if behind:
         log.warning(
-            "%d of %d candidates have no bar for %s and cannot be ranked as movers: %s",
+            "%d of %d candidates have no close for %s and cannot be ranked as movers: %s",
             len(behind),
-            len(dated),
+            len(dated) + len(unpriced),
             latest.date().isoformat(),
             ", ".join(behind[:8]) + (f" and {len(behind) - 8} more" if len(behind) > 8 else ""),
         )

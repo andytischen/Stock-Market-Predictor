@@ -567,14 +567,17 @@ restricting it to `NASDAQ` only cost coverage, leaving the banks, oils and
 industrials that lead whole sessions unreachable. `nasdaq_universe()` remains as
 a venue slice for a Nasdaq-only report.
 
-`--gainers N` forecasts the N names that moved up most in the panel's latest
-session, and names that session above the table. Only names whose own last bar
-*is* that session are eligible: these all trade one clock, so a series ending
-earlier did not trade in the session being ranked, and a halted or delisted name
-would otherwise hold its final move for ever and take a slot on every run. The
-ranking is a descending sort on the move, so on a session where everything fell
-these are the smallest fallers — which is why the line above the table says the
-selection was ranked on the move rather than asserting a rise. That is what makes a wide universe usable in
+`--gainers N` forecasts the N names that moved most in the panel's latest
+session, and names that session above the table. Only names whose own last
+*close* is that session are eligible: these all trade one clock, so a series
+ending earlier did not trade in the session being ranked, and a halted or
+delisted name would otherwise hold its final move for ever and take a slot on
+every run. Eligibility is dated from the last close rather than the last row,
+because a row carrying no close is the session's placeholder and not its price.
+The ranking is a descending sort on the move, so on a session where everything
+fell these are the smallest fallers — which is why the line above the table calls
+them the largest movers of a named session, and says so, rather than asserting a
+rise. That is what makes a wide universe usable in
 a morning briefing: bars for every candidate are downloaded either way and cost
 almost nothing, while each walk-forward fit costs seconds, so the movers are
 selected *after* the panel exists and only they are fitted. A name is chosen for
