@@ -142,22 +142,19 @@ and the discarded-picks one `render_text` prints for names that missed the credi
 count both before calling a mismatch a bug; `--top N` additionally cuts the ranked block on purpose.
 A count larger than the two tables together is the bug worth reporting.
 
-Once the wording change of #100 lands (not yet merged as of this note; until then the line has one
-fixed shape, `the {len(picks)} biggest gainers of session ...`, including the ungrammatical `the 1
-biggest gainers`) the sentence also says *whether* anything was dropped, via `cli._mover_selection`,
-and you should assert the wording and not just the number: `the 3 biggest gainers of session ...`
-when every chosen mover survived, `2 of the 3 biggest gainers of session ...` when one dropped, and
-the singular `the biggest gainer of session ...` whenever `biggest_gainers` returned one name (never
+The sentence also says *whether* anything was dropped, via `cli._mover_selection`, so assert the
+wording and not just the number: `the 3 biggest gainers of session ...` when every chosen mover
+survived, `2 of the 3 biggest gainers of session ...` when one dropped, and the singular
+`the biggest gainer of session ...` whenever `biggest_gainers` returned one name (never
 "the 1 biggest gainers"). The second count is what `biggest_gainers` returned, not `--gainers N`, so
 a run whose universe offers fewer movers than requested still reads honestly — and it can offer
 fewer for a reason other than the latest-bar rule: `_changes` skips a name whose `last_change`
 raises (a single-bar series, say) with a stderr `no last move for SYM: ...`. A test that only
 greps for "biggest gainers" passes on all three and proves nothing.
 
-Before and after that change, the all-dropped case cannot be observed: with no pick left,
-`forecast_universe` raises `RuntimeError("no stock could be modelled")` and the CLI exits 1
-printing only that `error:` line, so there is no "0 of the 1 biggest gainer" report to inspect
-(checked on both `main` and the branch).
+The all-dropped case cannot be observed at all: with no pick left, `forecast_universe` raises
+`RuntimeError("no stock could be modelled")` and the CLI exits 1 printing only that `error:` line,
+so there is no "0 of the 1 biggest gainer" report to inspect.
 Expect the abort rather than filing the missing sentence as a bug.
 
 ## Pandas `na_rep` only reaches a float column
