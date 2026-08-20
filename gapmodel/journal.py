@@ -42,7 +42,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .features import STALE_GAP_TOLERANCE, dividend_adjusted
+from .features import STALE_GAP_TOLERANCE, dividend_factor
 from .predict import Forecast
 from .stocks import is_stock, target_market
 
@@ -118,6 +118,34 @@ def _gap_symbol(symbol: str) -> str:
         return symbol
 
 
+def _gap_bars(panel: dict[str, pd.DataFrame] | None, symbol: str) -> pd.DataFrame | None:
+    """Every bar of a market's gap symbol, on the price basis the model labels on.
+
+    Kept apart from ``opening_bars`` so the two readers of these prices differ in
+    which rows they keep and in nothing else: a company's bars are put on a
+    total-return basis either way, so an ex-dividend morning cannot read as an
+    auction to one of them and as a repeated close to the other.
+
+    The basis is taken from the usable rows alone, because that is the frame
+    ``features`` adjusts and the dividend factor is carried across gaps in it: a
+    half-published session left in would lend its neighbours a factor the label
+    was never built with. The rows that survive the filter therefore come out of
+    here bit-for-bit as ``features`` has them, and the ones it drops inherit the
+    factor of the session beside them -- enough to tell an auction from a
+    repeated close, which is all they are read for.
+    """
+    if not panel:
+        return None
+    bars = panel.get(_gap_symbol(symbol))
+    if bars is None or not is_stock(symbol):
+        return bars
+    factor = dividend_factor(bars.dropna(subset=["Open", "Close"]))
+    if factor is None:
+        return bars
+    factor = factor.reindex(bars.index).ffill().bfill().fillna(1.0)
+    return bars.assign(Open=bars["Open"] * factor, Close=bars["Close"] * factor)
+
+
 def opening_bars(panel: dict[str, pd.DataFrame] | None, symbol: str) -> pd.DataFrame | None:
     """The bars a market's opening auction is read from, as the model reads them.
 
@@ -128,19 +156,15 @@ def opening_bars(panel: dict[str, pd.DataFrame] | None, symbol: str) -> pd.DataF
     back ``stale`` -- so the journal follows the same symbol, and drops the
     unusable bars the way ``features`` does.
     """
-    if not panel:
-        return None
-    bars = panel.get(_gap_symbol(symbol))
-    if bars is None:
-        return None
-    bars = bars.dropna(subset=["Open", "Close"])
-    return dividend_adjusted(bars) if is_stock(symbol) else bars
+    bars = _gap_bars(panel, symbol)
+    return None if bars is None else bars.dropna(subset=["Open", "Close"])
 
 
 def _already_printed(panel: dict[str, pd.DataFrame] | None, symbol: str, session: str) -> bool:
     """Whether the source already holds a bar for the session being forecast.
 
-    Read from the raw bars rather than the ones ``opening_bars`` keeps. The
+    Read from every bar of the gap symbol rather than the ones ``opening_bars``
+    keeps, though on the same prices (``_gap_bars``). The
     session a model forecasts is the one after the last bar it has *complete*
     features for, so asking the filtered bars whether that session exists can
     only ever answer no. The row that matters is exactly the one the filter
@@ -150,14 +174,34 @@ def _already_printed(panel: dict[str, pd.DataFrame] | None, symbol: str, session
     An opening print is what makes a session past, not a row in the file. This
     source also publishes a bar for a session before its auction, so a row whose
     ``Open`` is still missing is a morning yet to come and stays a real forecast.
+    An ``Open`` that merely repeats the previous close is the same non-event:
+    ``_settle_row`` refuses to score it as an auction, and this refuses to read
+    it as one, so the journal cannot retire a forecast on a price the rest of the
+    project rejects. Being wrong here is expensive in one direction only --
+    ``late`` is terminal, since ``settle`` revisits pending rows alone -- so an
+    unconvincing print leaves the forecast pending, to be settled or retired once
+    the session really is in the file. A print with no earlier session to measure
+    it against is unconvincing too, so it is left alone rather than retired on a
+    gap nobody can compute.
     """
-    if not panel:
-        return False
-    bars = panel.get(_gap_symbol(symbol))
+    bars = _gap_bars(panel, symbol)
     if bars is None or bars.empty:
         return False
+    stamp = pd.Timestamp(session)
     printed = bars.dropna(subset=["Open"])
-    return bool(pd.Timestamp(session) in printed.index)
+    if stamp not in printed.index:
+        return False
+    opening = float(printed.loc[[stamp]]["Open"].iloc[-1])
+    # The close settlement would measure this print against: the last session
+    # complete enough to carry a label, not merely the last close published.
+    complete = bars.dropna(subset=["Open", "Close"])
+    earlier = complete.loc[complete.index < stamp, "Close"]
+    if earlier.empty:
+        return False
+    previous = float(earlier.iloc[-1])
+    if not (opening > 0 and previous > 0):
+        return False
+    return abs(float(np.log(opening / previous))) > STALE_GAP_TOLERANCE
 
 
 def record(
@@ -302,7 +346,10 @@ class Skill:
         direction alone: its drift is a perfect 100% by construction, so no
         forecast can clear it and there is no variance for a Brier score to
         explain, but a model calling the wrong side of a one-way market is still
-        a model that has stopped reading it. The bar there is a coin flip.
+        a model that has stopped reading it. The bar there is a coin flip, and
+        deliberately the stricter of the two comparisons: a market read no
+        better than a coin is not being read at all, while a record that merely
+        equals a lopsided (not total) drift is left alone.
         """
         if not np.isfinite(self.brier_skill):
             return self.hit_rate <= 0.5

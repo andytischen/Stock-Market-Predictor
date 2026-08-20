@@ -109,6 +109,57 @@ Expect the same doctored series to be named twice — once by the mover-eligibil
 and once by the `stale inputs:` footer — which are different mechanisms; do not read one as the
 other.
 
+### With `--gainers`, the stale filter is all-or-nothing
+
+Worth knowing before designing a test around `_fresh_enough` dropping *some* of the chosen movers:
+`biggest_gainers` only keeps names whose own last bar **is** the latest bar among the candidate
+symbols it was handed — not among the whole loaded panel, so doctoring an index or peer series does
+not move mover eligibility. Every chosen mover therefore shares one last-bar date, and one lag
+against `today()`: either none of them is stale, or all of them are — and the all-stale case raises
+`StaleInputs` before anything is printed. Which message you get depends on what you doctored: the
+targets-only "every requested name has no bar within N days of ..." only appears while the shared
+inputs are still fresh, since the shared-input `guard` runs first and aborts a uniformly old cache
+with "N of M input series have no bar within ..." instead. Grep for whichever one your fixture
+earns.
+
+Either way, a doctored cache cannot produce a partially-filtered mover set through the CLI; only a
+monkeypatched `cli._fresh_enough` (as `tests/test_cli.py` does) reaches it. Do not report "could not
+reproduce" as a bug: check whether the branch is reachable at all first. With `--allow-stale` the
+all-stale case does not raise either — every mover is forecast on the old bars, and what discloses
+the age is the `stale run:` paragraph (measured against `as_of`), not the `stale inputs:` footer:
+that one measures each series against the forecast session, so it says nothing when the whole cache
+is equally old.
+
+The table can still be shorter than the mover set, by the other drop: `forecast_universe` skips a
+name without `model.MIN_TRAIN` (500) labelled rows, with only a stderr
+`WARNING no forecast for SYM: need more than 500 labelled rows, got N` (the `, got N` suffix is part
+of the message — do not grep for the string without it). Synthesise it by keeping only the *last*
+~120 rows of a candidate's CSV in a cache copy — the final bar date has to survive or the name is
+dropped earlier, as mover-ineligible, and you are testing the wrong path. The `--gainers` selection
+line is written after the picks, so its count is `len(picks)`, every name forecast — not the length
+of the ranked table. With no `--top` limit it equals the rows across **both** tables, the ranked one
+and the discarded-picks one `render_text` prints for names that missed the credibility hurdles, so
+count both before calling a mismatch a bug; `--top N` additionally cuts the ranked block on purpose.
+A count larger than the two tables together is the bug worth reporting.
+
+Once the wording change of #100 lands (not yet merged as of this note; until then the line has one
+fixed shape, `the {len(picks)} biggest gainers of session ...`, including the ungrammatical `the 1
+biggest gainers`) the sentence also says *whether* anything was dropped, via `cli._mover_selection`,
+and you should assert the wording and not just the number: `the 3 biggest gainers of session ...`
+when every chosen mover survived, `2 of the 3 biggest gainers of session ...` when one dropped, and
+the singular `the biggest gainer of session ...` whenever `biggest_gainers` returned one name (never
+"the 1 biggest gainers"). The second count is what `biggest_gainers` returned, not `--gainers N`, so
+a run whose universe offers fewer movers than requested still reads honestly — and it can offer
+fewer for a reason other than the latest-bar rule: `_changes` skips a name whose `last_change`
+raises (a single-bar series, say) with a stderr `no last move for SYM: ...`. A test that only
+greps for "biggest gainers" passes on all three and proves nothing.
+
+Before and after that change, the all-dropped case cannot be observed: with no pick left,
+`forecast_universe` raises `RuntimeError("no stock could be modelled")` and the CLI exits 1
+printing only that `error:` line, so there is no "0 of the 1 biggest gainer" report to inspect
+(checked on both `main` and the branch).
+Expect the abort rather than filing the missing sentence as a bug.
+
 ## Pandas `na_rep` only reaches a float column
 
 A missing numeric field rendered with `DataFrame.to_string(na_rep="")` prints blank only while the
@@ -228,6 +279,20 @@ into the venv and render the captured log to a PNG (monospace on a dark backgrou
 comment has an image; label it clearly as rendered CLI output. Pillow is for evidence only —
 do not add it to the project's dependencies.
 
+If the venv `pip install pillow` fails (PyPI has returned repeated 502s from this box), render with
+headless Chrome instead — it needs nothing installed: write the log into
+`<pre style="font:15px monospace;color:#e1e4e8;background:#14161a">` and run
+`google-chrome --headless=new --disable-gpu --hide-scrollbars --window-size=1150,900
+--screenshot=/tmp/evidence.png /tmp/x.html`. Wrap lines over ~110 chars yourself (the caveat
+paragraph is ~370 chars and otherwise runs off the image). ImageMagick `convert label:` is present
+but its security policy blocks `label:@file` and it rejected multi-line labels of this size, so it
+is not a reliable fallback.
+
+Do not assume `~/.cache/gapmodel` is warm: on a fresh box it can be missing entirely, in which case
+the first `shortlist` run downloads every candidate (~158 names ≈ 2 min of network before the fits).
+Warm it with the run you intend to compare, then run the origin/main worktree against the same cache
+so the comparison is offline and deterministic (the cached rerun took ~16 s).
+
 ## When CI fails a test that passes locally, suspect the merge, not the environment
 
 CI is `.github/workflows/ci.yml` (job `check`: Python 3.12, `pip install -e . ruff pytest`, then
@@ -303,19 +368,50 @@ model's label, not of the journal.
 - `stale` — usually occurs naturally; otherwise set a session's `Open` equal to the previous
   row's `Close` (tolerance is `features.STALE_GAP_TOLERANCE = 1e-9`).
 - `no-session` — drop a row whose date you have journalled, keeping later rows.
-- `pending` → `settled` — a trailing bar with `Close` NaN is dropped by `opening_bars`, so the
-  newest session stays pending; filling that `Close` in the copy settles it. This is exactly why
-  `^FTSE` can sit pending for a session the *index* already printed.
-- `late` — needs the forecast session to already be in the panel, which the model normally
-  prevents; `journal._already_printed(panel, symbol, session)` is the honest thing to probe
-  directly, and it must flip with the tracker's bars, not the index's.
+- `pending` → `settled` — a trailing bar with `Close` NaN is dropped by `opening_bars`, so it is
+  never settled while the close is missing; filling that `Close` in the copy settles it.
+- `late` — reachable **naturally**, which makes it the cheap end-to-end check.
+  `_already_printed` reads *every* tracker bar (`_gap_bars`, not `opening_bars`, which drops the
+  very row that matters — same prices, including the total-return basis for a company, only more
+  rows) and asks whether the forecast session carries a real opening print: a non-null
+  `Open` that differs from the previous close by more than `STALE_GAP_TOLERANCE`. Seen live:
+  a cache fetched *during* London hours holds `ISF.L 2026-08-14 Open=1056.0 Close=NaN`, so
+  `^FTSE` is journalled `late` while `^AXJO` (whose `STW.AX` bar is complete) forecasts the next
+  session and stays `pending` — recording both in one run isolates the rule from mere row
+  membership. Three counter-tests, all on a cache copy, and each one guards a hole that a passing
+  `late` case alone does not: blank that `Open` (leave `Close` empty) and the same session must
+  come back `pending`; set that `Open` equal to the previous close and it must *also* come back
+  `pending` (a placeholder open is not an auction — settlement retires it as `stale` later, and
+  filing it `late` instead would be terminal); and after filling a real `late` row's `Close`, it
+  must still never settle, because `settle` revisits `pending` rows only.
+
+  Add a **boundary probe** for the placeholder rule, because it guards the opposite defect: the
+  natural print clears the tolerance by six orders of magnitude (`|log(1056.0/1053.5999755859375)|
+  = 2.3e-3` against `1e-9`), so it cannot tell a correct `>` comparison from a guard so wide it
+  swallows genuine prints. Set the `Open` to `prev_close * math.exp(2e-9)` and require `late`
+  anyway; `prev_close * math.exp(5e-10)` is the under-tolerance twin. Both survive the cache CSV
+  round-trip exactly at these price magnitudes (~1e3, where float64 resolution is ~1e-13) — verify
+  that by re-reading the CSV and printing `abs(log(open/prev_close))` before trusting the result,
+  since the whole test lives inside the last few bits of the mantissa.
+
+  Run the four variants — real print, blanked `Open`, `Open == prev_close`, and the boundary — as
+  one table against the *same* market and session, since only the `Open` differs and everything
+  else (session `2026-08-14`, `p_open_up 0.8109`) must stay put. Reproducing the old rule inline
+  (`session in bars.dropna(["Open"]).index`) over the same four caches is a cheap way to show
+  which variant a change actually moves.
+
+A run after every market it forecasts has closed (the daily automation, 21:47 UTC) sees complete
+tracker bars and so journals `pending`, not `late`: `late` is what a run *during* a session gets,
+and it is the honest status there. Do not read a `late` `^FTSE` row from a mid-session cache as a
+regression — check when the cache was last fetched first.
 
 Assert unscorable rows never move the numbers: recompute the metrics over `status == "settled"`
 rows only and require an exact 4dp match to the printed table.
 
-### Decay has two legs — test them apart
+### Decay has three legs — test them apart
 
-`Skill.decayed` is `brier_skill <= 0 or hit_rate < drift_rate`, where
+`Skill.decayed` is `brier_skill <= 0 or hit_rate < drift_rate` when the Brier skill is finite,
+falling back to `hit_rate <= 0.5` when it is not, where
 `drift_rate = max(base_rate, 1 - base_rate)`. Comparing against `base_rate` alone is wrong: in a
 market that opens *down* 67% of the time, always saying "down" scores 67%, so a 60% hit rate
 with a healthy Brier skill is still no read. A journal that hits both legs proves nothing about
@@ -324,6 +420,14 @@ require it to be flagged anyway. A worked example that does it: 30 rows, 20 down
 (`base_rate` 0.333, `drift_rate` 0.667), probabilities `[0.15]*14 + [0.52]*6 + [0.55]*4 +
 [0.48]*6` → hit 0.60, Brier skill +0.345, and it must still be listed under "below their own
 drift" with `--fail-on-decay` exiting 1.
+
+The third leg is a market that opened the same way on *every* settled session: `brier_skill` is
+nan (no variance to explain) and `drift_rate` is 100%, so direction alone decides at a coin-flip
+bar. A one-way market called 100% right proves nothing here — it also passes under a rule that
+never flags a nan Brier skill — so test the wrong-called twin (all `p=0.2` against
+`outcome=1.0`) and require it listed, exit 1, and the alert line to carry **no** `Brier skill`
+clause (`grep '+nan'` must find nothing). The comparison is `<=`, deliberately stricter than the
+finite branch's `<`: hit exactly 0.5 is flagged, 16/30 is not.
 
 ### Append-only is the other thing worth attacking
 
@@ -335,6 +439,17 @@ Beware that a seeded journal's probabilities stop reproducing once the cache is 
 seed row and a fresh forecast for the same session can differ (seen: `^GSPC` seed 0.6206 vs
 fresh 0.6233) without anything being broken. `^FTSE` reproduces longer than the rest because
 `ISF.L` lags the index by a bar.
+
+### Window and minimum
+
+`--min-settled` has no parser default, and the difference is behavioural: omitted, it is capped
+at the window (`resolved_minimum` → `min(20, window)`), so `journal --window 10` reports a
+10-session record; *named* above the window it is a contradiction and refused. The discriminator
+is one 12-settled-row journal read twice — default window says `no market has 20 settled
+sessions yet`, `--window 10` prints the table — so assert both from the same file. The refusal is
+also a timing assertion: `--window 10 --min-settled 20` must exit 1 in ~1s (a fitting run is
+~48s) leaving the `--log` file's md5 *and* mtime untouched, never creating a missing one, and
+never writing to the cache. The library raises `ValueError` for the same pair.
 
 ## Devin Secrets Needed
 

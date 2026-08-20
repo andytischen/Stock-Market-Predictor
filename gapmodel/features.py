@@ -52,6 +52,23 @@ def opening_gap(bars: pd.DataFrame) -> pd.Series:
     return np.log(bars["Open"] / bars["Close"].shift(1))
 
 
+def dividend_factor(bars: pd.DataFrame) -> pd.Series | None:
+    """The per-session factor putting bars on a total-return basis, if published.
+
+    Separated from ``dividend_adjusted`` for the reader that needs the factor of
+    rows outside the frame it was measured on, so the basis is defined in one
+    place and cannot drift between them.
+
+    The factor is cumulative and rises towards 1, so a gap in it is carried both
+    ways: filling leading rows with 1.0 instead of the first factor published
+    would put a made-up gap of the whole accumulated discount at the boundary.
+    """
+    if "Adj Close" not in bars:
+        return None
+    factor = bars["Adj Close"] / bars["Close"].where(bars["Close"] > 0)
+    return factor.replace([np.inf, -np.inf], np.nan).ffill().bfill().fillna(1.0)
+
+
 def dividend_adjusted(bars: pd.DataFrame) -> pd.DataFrame:
     """Bars on a total-return basis, so going ex-dividend is not a down gap.
 
@@ -63,15 +80,10 @@ def dividend_adjusted(bars: pd.DataFrame) -> pd.DataFrame:
     same session leaves that session's own returns untouched and corrects only
     the previous-close-to-open step. An index pays nothing, so it is left alone,
     and a cache written before the column was collected simply is not corrected.
-
-    The factor is cumulative and rises towards 1, so a gap in it is carried both
-    ways: filling leading rows with 1.0 instead of the first factor published
-    would put a made-up gap of the whole accumulated discount at the boundary.
     """
-    if "Adj Close" not in bars:
+    factor = dividend_factor(bars)
+    if factor is None:
         return bars
-    factor = bars["Adj Close"] / bars["Close"].where(bars["Close"] > 0)
-    factor = factor.replace([np.inf, -np.inf], np.nan).ffill().bfill().fillna(1.0)
     return bars.assign(Open=bars["Open"] * factor, Close=bars["Close"] * factor)
 
 

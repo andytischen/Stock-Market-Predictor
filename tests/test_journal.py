@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from gapmodel.features import dividend_adjusted
 from gapmodel.journal import (
     LATE,
     NO_SESSION,
@@ -10,6 +11,7 @@ from gapmodel.journal import (
     STALE,
     decayed,
     empty_log,
+    opening_bars,
     read_log,
     record,
     render_text,
@@ -178,6 +180,65 @@ def test_a_session_whose_auction_has_not_run_yet_is_a_forecast_not_a_late_row():
     # is a morning still to come, so the forecast stays scoreable.
     bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (101.0, 102.0)})
     bars.loc[pd.Timestamp("2026-08-18"), ["Open", "Close"]] = float("nan")
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)], {"^GSPC": bars})
+    assert journal.at[0, "status"] == PENDING
+
+
+def test_an_open_repeating_the_previous_close_does_not_retire_the_forecast():
+    # The source publishes a placeholder open for a session it has no auction
+    # for. Reading that as an opening print would file the forecast late, and
+    # late is terminal, so the morning could never be scored once it arrives.
+    bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (100.0, 101.0)})
+    bars.loc[pd.Timestamp("2026-08-18"), "Close"] = float("nan")
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)], {"^GSPC": bars})
+    assert journal.at[0, "status"] == PENDING
+
+
+def test_a_placeholder_open_still_settles_as_stale_once_the_session_closes():
+    # The same row the late check declines to read: settlement is what retires
+    # it, and it does so as stale rather than never scoring it at all.
+    journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)])
+    panel = {"^GSPC": _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (100.0, 101.0)})}
+    journal, filled, retired = settle(journal, panel)
+    assert (filled, retired) == (0, 1)
+    assert journal.at[0, "status"] == STALE
+
+
+def test_the_late_check_reads_a_company_on_the_same_basis_settlement_does():
+    # Going ex-dividend moves the raw open by the dividend, so a print that
+    # merely looks like a repeated close on raw bars is a real auction once both
+    # prints are on a total-return basis -- the basis settlement grades on.
+    bars = _bars({"2026-08-17": (99.0, 100.0), "2026-08-18": (100.0, 101.0)})
+    bars["Adj Close"] = [99.0, 101.0]
+    journal, _ = record(empty_log(), [_forecast("MU", "2026-08-18", 0.61)], {"MU": bars})
+    assert journal.at[0, "status"] == LATE
+
+
+def test_settlement_prices_a_company_exactly_as_the_features_build_does():
+    # features drops the unusable rows before adjusting, so the factor is carried
+    # across them; adjusting first would let a half-published session hand its
+    # neighbours a factor no label was ever built with.
+    bars = _bars(
+        {
+            "2026-08-17": (99.0, 100.0),
+            "2026-08-18": (100.0, 101.0),
+            "2026-08-19": (101.5, 103.0),
+        }
+    )
+    # A session with no opening print but a published factor of its own, and a
+    # later one whose factor has to be filled from somewhere.
+    bars["Adj Close"] = [99.0, 90.9, np.nan]
+    bars.loc[pd.Timestamp("2026-08-18"), "Open"] = np.nan
+    expected = dividend_adjusted(bars.dropna(subset=["Open", "Close"]))
+    assert expected.at[pd.Timestamp("2026-08-19"), "Close"] == pytest.approx(101.97)
+    pd.testing.assert_frame_equal(opening_bars({"MU": bars}, "MU"), expected)
+
+
+def test_a_print_with_no_earlier_session_to_measure_it_against_stays_pending():
+    # Nothing to compute a gap from, so the print is unverified; late is
+    # terminal, and retiring a forecast on it is the expensive way to be wrong.
+    bars = _bars({"2026-08-18": (100.0, 101.0)})
+    bars.loc[pd.Timestamp("2026-08-18"), "Close"] = float("nan")
     journal, _ = record(empty_log(), [_forecast("^GSPC", "2026-08-18", 0.61)], {"^GSPC": bars})
     assert journal.at[0, "status"] == PENDING
 

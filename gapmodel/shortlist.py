@@ -340,10 +340,10 @@ def render_text(
     would look like a market where every name had just risen.
 
     ``as_of`` is the day the report is being read on, and is what catches a panel
-    that is uniformly old. The stale-input footer measures each series against the
+    that is old as a whole. The stale-input footer measures each series against the
     session being forecast, which is dated from the panel's own last bar, so a
-    cache that stopped a month ago has nothing lagging within itself and says
-    nothing — the one run where the reader most needs telling.
+    cache that stopped a month ago has nothing lagging within itself beyond the
+    tolerance and names nobody — the one run where the reader most needs telling.
     """
     ranked = rank(picks)
     # `top is not None`, not `if top`: asking for the strongest zero names is a
