@@ -1,16 +1,20 @@
 ---
 name: testing-gapmodel-cli
-description: How to runtime-test the gapmodel CLI (predict / screen / sectors / stock / shortlist) end to end - venv, cached price data, expected runtimes, and the checks that actually catch look-ahead and ranking bugs.
+description: How to runtime-test the gapmodel CLI (predict / screen / sectors / stock / shortlist) and the gapmodel web browser dashboard end to end - venv, cached price data, expected runtimes, and the checks that actually catch look-ahead and ranking bugs.
 ---
 
 # Testing the gapmodel CLI
 
-Terminal-only project: a Python library + `python -m gapmodel` CLI. There is no web UI or
-server, so do **not** start a browser or a screen recording — collect stdout as text evidence.
+Mostly a terminal project: a Python library + `python -m gapmodel` CLI, so for every command
+except `web` collect stdout as text evidence — no browser, no screen recording.
 
-Subcommands on `main`: `markets, fetch, score, screen, predict, backtest, asia, dashboard,
-export, sectors, stock, shortlist`. The screener is invoked as `screen` even though the parser
-variable is named `screener`.
+`gapmodel web` is the exception: it serves the regional dashboard over HTTP and must be tested in
+a real browser with a recording. See "Testing `gapmodel web`" below.
+
+Subcommands on `main`: `markets, fetch, score, screen, predict, stock, backtest, scorecard, asia,
+dashboard, web, export, shortlist, sectors, journal, social-arb`. The screener is invoked as
+`screen` even though the parser variable is named `screener`, and `social-arb` is hyphenated even
+though its module is `social_arb`.
 
 The two single-stock commands are easy to confuse, and testing one proves nothing about the other:
 
@@ -450,6 +454,106 @@ sessions yet`, `--window 10` prints the table — so assert both from the same f
 also a timing assertion: `--window 10 --min-settled 20` must exit 1 in ~1s (a fitting run is
 ~48s) leaving the `--log` file's md5 *and* mtime untouched, never creating a missing one, and
 never writing to the cache. The library raises `ValueError` for the same pair.
+
+## Testing `gapmodel web`
+
+`python -m gapmodel web [--region R] [--port N] [--at H:MM] [--host ...] [--intraday]
+[--no-browser]` serves an index page (region `<select>` + `<input type="time">` + Render button)
+whose form targets an `<iframe>` at `/dashboard?region=...&at=...`. Nothing is cached between
+requests: **every** `/dashboard` hit refits that region's models.
+
+`--region` (default `Asia`) only sets the *default*: it is what the dropdown pre-selects and what
+`/dashboard` renders when the query omits `region`, so it decides the cost of the first load — see
+the timings below before defaulting to `Europe`. `--intraday` splices hourly futures in, which
+changes the numbers on the board but not the shape of any test here.
+
+Timings measured on an 8-core box with a warm `~/.cache/gapmodel` (budget for them, they are not
+hangs):
+
+- startup (panel load + the startup freshness guard): ~90-110 s before the port is even bound, so
+  poll the port instead of assuming a fast boot;
+- `region=Asia` render: ~20 s;
+- `region=Europe` render: **~5 min 40 s alone**, and far longer with anything else running. Two
+  impatient clicks on Render queue two full refits (`ThreadingHTTPServer`), the aborted one keeps
+  burning CPU, and the visible one then takes 15 min+. Click Render **once** and wait, and do not
+  `curl` the same region alongside a browser test.
+- `region=Americas` render: ~30 s.
+
+Redirect the server's stdout through `python -u`, otherwise `print()` output (the
+`serving dashboard at ...` line and the non-loopback "no authentication" warning) sits in the
+buffer and the log file looks empty while the server works fine.
+
+Chrome renders `<input type="time">` in a 12-hour locale (`05:00 AM`), and the value is
+per-segment: `Delete` on one segment leaves the others set, and submitting a half-cleared field is
+blocked by Chrome's own "Please enter a valid value" bubble, not by the server. To exercise the
+"empty time means now" path, clear all three segments (`Delete`, `Right`, `Delete`, `Right`,
+`Delete`) and then submit; the board heading must show the current UTC time, not `00:00`.
+
+Cheap ways to force the paths that are otherwise hard to reach:
+
+- **stale panel** — copy the cache and truncate each CSV by line (`l[:10] <= "YYYY-MM-DD"`), then
+  run with `--cache /tmp/stalecache`. Do *not* rewrite the dates via pandas: a reparsed
+  `Date` column becomes tz-aware and the loader fails with `Invalid comparison between
+  dtype=datetime64[us, UTC] and Timestamp` / `error: no symbols could be loaded`, which is a load
+  failure and proves nothing about the freshness guard. Correct evidence is
+  `error: N of N input series have no bar within 5 days of ...` plus no listener on the port.
+- **render-time 500** — a small harness beats editing the repo: import `gapmodel.web`, replace
+  `web.forecast_all` with a function that raises (e.g. `IndexError("<script>boom</script>")`), then
+  call `web.serve_dashboard({}, None, symbols={"Asia": ["^N225"], ...}, host="127.0.0.1", port=8001,
+  region="Asia", at=5.0, regularisation=1.0, launch_browser=False)`. The page must show the escaped
+  message and the log must hold the traceback; a dropped connection (ERR_EMPTY_RESPONSE) is the bug.
+
+Parse-time rejections are instant (no panel load), so test them in the shell: `--at 2024-01-01`
+and `--port 70000` must exit 2 from `argparse` before anything downloads.
+
+### The "no fresh market in this region" (503) path is not reachable from the CLI
+
+A region whose startup fresh-symbol list is empty is answered `503 No market in <region> has data
+recent enough to forecast; restart with --refresh`. Trying to produce that by truncating one
+region's index CSVs does **not** work: the Asian indices are read as cross-market features by the
+other regions, so `_shared_inputs` sees them and the startup guard aborts the whole run
+(`error: 6 of 61 input series have no bar within 5 days ...`) instead of dropping a region. And
+`--allow-stale` makes `fresh_targets` keep the stale names, so nothing is dropped either. The path
+is only reachable synthetically — wrap the real command and empty one region's list:
+
+```python
+import gapmodel.cli as cli
+
+real = cli.serve_dashboard
+
+
+def patched(panel, hourly, *, symbols, **kw):
+    symbols = dict(symbols)
+    symbols["Asia"] = []
+    return real(panel, hourly, symbols=symbols, **kw)
+
+
+cli.serve_dashboard = patched
+cli.main(["web", "--port", "8050", "--at", "5:00", "--no-browser"])
+```
+
+Say in the report that it was forced. Check the *other* regions still render on that same server —
+a blanket 503 and a correct per-region 503 look identical if you only load the broken one.
+`forecast_all(panel, symbols=[])` raises `RuntimeError("no market could be modelled")`, so without
+the 503 the symptom is a 500, and before the `symbols is None` fix it was a full board of the
+markets that had just been excluded.
+
+### Startup host warning matrix
+
+`reachable_beyond_this_machine` (via `ipaddress.ip_address(...).is_loopback`) decides the
+"no authentication" warning. Verified by starting one server per host on its own port and reading
+the first log line (each start costs a full ~2 min panel load, so launch them in parallel):
+no warning for `127.0.0.1`, `127.0.0.2`, `localhost`; warning for `0.0.0.0`, a LAN IP
+(`hostname -I`), and a hostname. Note the server is IPv4-only — `serve_dashboard` never overrides
+`socketserver`'s default `address_family = AF_INET` — so any
+IPv6 spelling (`::1`, `0:0:0:0:0:0:0:1`) dies at bind time with
+`error: [Errno -9] Address family for hostname not supported` — the loopback classification for
+those can only be checked by calling `reachable_beyond_this_machine` directly.
+
+### Background servers get killed with the shell that spawned them
+
+`nohup ... &` inside a shell call that later hits the tool's timeout dies with it (the log file can
+end up never created). Use `setsid nohup ... > /tmp/log 2>&1 < /dev/null &` and poll the log.
 
 ## Devin Secrets Needed
 
