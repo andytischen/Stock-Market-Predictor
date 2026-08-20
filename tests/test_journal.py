@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from gapmodel.features import dividend_adjusted
 from gapmodel.journal import (
     LATE,
     NO_SESSION,
@@ -10,6 +11,7 @@ from gapmodel.journal import (
     STALE,
     decayed,
     empty_log,
+    opening_bars,
     read_log,
     record,
     render_text,
@@ -210,6 +212,26 @@ def test_the_late_check_reads_a_company_on_the_same_basis_settlement_does():
     bars["Adj Close"] = [99.0, 101.0]
     journal, _ = record(empty_log(), [_forecast("MU", "2026-08-18", 0.61)], {"MU": bars})
     assert journal.at[0, "status"] == LATE
+
+
+def test_settlement_prices_a_company_exactly_as_the_features_build_does():
+    # features drops the unusable rows before adjusting, so the factor is carried
+    # across them; adjusting first would let a half-published session hand its
+    # neighbours a factor no label was ever built with.
+    bars = _bars(
+        {
+            "2026-08-17": (99.0, 100.0),
+            "2026-08-18": (100.0, 101.0),
+            "2026-08-19": (101.5, 103.0),
+        }
+    )
+    # A session with no opening print but a published factor of its own, and a
+    # later one whose factor has to be filled from somewhere.
+    bars["Adj Close"] = [99.0, 90.9, np.nan]
+    bars.loc[pd.Timestamp("2026-08-18"), "Open"] = np.nan
+    expected = dividend_adjusted(bars.dropna(subset=["Open", "Close"]))
+    assert expected.at[pd.Timestamp("2026-08-19"), "Close"] == pytest.approx(101.97)
+    pd.testing.assert_frame_equal(opening_bars({"MU": bars}, "MU"), expected)
 
 
 def test_a_print_with_no_earlier_session_to_measure_it_against_stays_pending():
