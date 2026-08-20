@@ -798,6 +798,25 @@ def _shortlist_equities(symbols: list[str]) -> list[str]:
     return list(dict.fromkeys(symbols + peers))
 
 
+def _mover_selection(kept: int, chosen: int, candidates: int, moved: str) -> str:
+    """How a ``--gainers`` shortlist reached the names printed beneath it.
+
+    Both counts are named because a dropped mover is not the smallest one: a
+    stale listing or a name short of training rows can be the largest riser of
+    the session, so calling what is left "the 3 biggest gainers" would promote
+    the survivors into a ranking they did not earn. The session is named, and so
+    is the ranking rule: sorting descending and slicing gives the smallest
+    fallers on a session where everything fell, and calling those gainers would
+    assert a rise the data denies.
+    """
+    movers = "biggest gainer" if chosen == 1 else f"{chosen} biggest gainers"
+    held = f"the {movers}" if kept == chosen else f"{kept} of the {movers}"
+    return (
+        f"{held} of session {moved}, out of {candidates} candidates, "
+        "ranked on their move in that session"
+    )
+
+
 def _cmd_shortlist(args: argparse.Namespace) -> None:
     """Rank the universe by how much edge each name's own record supports."""
     candidates = args.symbols or modelled_universe()
@@ -819,9 +838,10 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     # bars are cheap and each walk-forward is not, so the mover pass narrows
     # after the panel exists rather than guessing which names moved beforehand.
     symbols = candidates
+    chosen: list[str] = []
     moved: str | None = None
     if args.gainers:
-        symbols = biggest_gainers(panel, candidates, args.gainers)
+        symbols = chosen = biggest_gainers(panel, candidates, args.gainers)
         if not symbols:
             raise SystemExit("error: no candidate had two closes to compare")
         moved = max(panel[symbol].index.max() for symbol in symbols).date().isoformat()
@@ -829,15 +849,11 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     # of the names about to be fitted.
     symbols = _fresh_enough(panel, args, symbols)
     picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
-    # Counted off the picks, the last place names are dropped: a stale listing or
-    # one short of training rows leaves the report, and a count taken before
-    # either would claim movers the table does not hold. The session is named,
-    # and so is the ranking rule: sorting descending and slicing gives the
-    # smallest fallers on a session where everything fell, and calling those
-    # gainers would assert a rise the data denies.
+    # Described once the picks are in, the last place names are dropped: a stale
+    # listing or one short of training rows leaves the report, and a sentence
+    # written before either would claim movers the table does not hold.
     selection = (
-        f"the {len(picks)} biggest gainers of session {moved}, out of "
-        f"{len(candidates)} candidates, ranked on their move in that session"
+        _mover_selection(len(picks), len(chosen), len(candidates), moved)
         if moved is not None
         else None
     )
