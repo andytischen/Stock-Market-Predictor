@@ -42,6 +42,10 @@ MAX_STALE_FRACTION = 0.5
 PAIRED_INPUTS = ((CURVE_FRONT, CURVE_STRIP), (FUNDS_FUTURE, BILL_YIELD))
 
 
+def _enough_history(series: pd.Series, rows: int = MIN_HISTORY) -> bool:
+    return int(series.notna().sum()) >= rows
+
+
 def log_return(close: pd.Series, periods: int = 1) -> pd.Series:
     positive = close.where(close > 0)
     return np.log(positive / positive.shift(periods))
@@ -132,6 +136,8 @@ def curve_features(
         return {}
     front = panel[CURVE_FRONT]["Close"].dropna()
     strip = panel[CURVE_STRIP]["Close"].dropna()
+    if not _enough_history(front) or not _enough_history(strip):
+        return {}
     lag = _lag_days(CURVE_CLOSE_UTC, target)
     daily = log_return(front) - log_return(strip)
     slow = log_return(front, CURVE_WINDOW) - log_return(strip, CURVE_WINDOW)
@@ -159,6 +165,8 @@ def peer_features(
         if peer.symbol not in panel:
             continue
         close = total_return_close(panel[peer.symbol])
+        if not _enough_history(close):
+            continue
         lag = _lag_days(peer.close_utc, target)
         name = _column_name(peer.symbol)
         built[f"peer_{name}_return"] = as_of(log_return(close), dates, lag)
@@ -191,7 +199,7 @@ def policy_features(
         return {}
     price = panel[FUNDS_FUTURE]["Close"].dropna()
     bill = panel[BILL_YIELD]["Close"].dropna()
-    if price.empty or bill.empty:
+    if not _enough_history(price) or not _enough_history(bill):
         return {}
     implied = 100.0 - price
     lag = _lag_days(max(FUNDS_CLOSE_UTC, BILL_CLOSE_UTC), target)
@@ -281,6 +289,8 @@ def build_features(
         if other.symbol == target_symbol or other.symbol not in panel:
             continue
         close = panel[other.symbol]["Close"].dropna()
+        if not _enough_history(close):
+            continue
         lag = _lag_days(other.close_utc, target)
         name = _column_name(other.symbol)
         features[f"mkt_{name}_return"] = as_of(log_return(close), dates, lag)
@@ -295,6 +305,8 @@ def build_features(
         if indicator.symbol in SECTOR_SYMBOLS and target.region != "Europe":
             continue
         close = panel[indicator.symbol]["Close"].dropna()
+        if not _enough_history(close):
+            continue
         lag = _lag_days(indicator.close_utc, target)
         name = _column_name(indicator.symbol)
         returns = log_return(close)

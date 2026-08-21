@@ -105,6 +105,14 @@ def test_build_features_is_aligned_and_finite(panel):
     assert any(col.startswith("ind_") for col in features.columns)
 
 
+def test_a_short_indicator_history_is_skipped_rather_than_collapsing_the_sample(panel):
+    short = panel.copy()
+    short["^VIX"] = short["^VIX"].iloc[-24:]
+    features, _ = build_features("^GSPC", short)
+    assert len(features) >= 60
+    assert "ind_vix_level" not in features.columns
+
+
 def test_oil_carries_shock_features(panel):
     features, _ = build_features("^GSPC", panel)
     assert {
