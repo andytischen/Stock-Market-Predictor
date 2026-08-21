@@ -107,7 +107,9 @@ def test_build_features_is_aligned_and_finite(panel):
 
 def test_a_short_indicator_history_is_skipped_rather_than_collapsing_the_sample(panel):
     short = panel.copy()
-    short["^VIX"] = short["^VIX"].tail(24).copy()
+    vix = short["^VIX"].copy()
+    vix.iloc[:-24] = np.nan
+    short["^VIX"] = vix
     features, _ = build_features("^GSPC", short)
     assert len(features) >= 60
     assert "ind_vix_level" not in features.columns
