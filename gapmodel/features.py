@@ -43,7 +43,7 @@ PAIRED_INPUTS = ((CURVE_FRONT, CURVE_STRIP), (FUNDS_FUTURE, BILL_YIELD))
 
 
 def _enough_history(series: pd.Series, rows: int = MIN_HISTORY) -> bool:
-    return int(series.notna().sum()) >= rows
+    return len(series) >= rows
 
 
 def log_return(close: pd.Series, periods: int = 1) -> pd.Series:
