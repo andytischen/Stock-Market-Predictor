@@ -151,6 +151,34 @@ def test_the_named_inputs_are_the_ones_the_model_reads(panel, target):
         assert set(without.columns) < set(whole.columns), f"{symbol} is named but unread"
 
 
+def test_a_series_that_arrived_with_no_bars_is_read_as_one_that_never_arrived(panel):
+    """A frame with no rows is not a feed the model can take a value from.
+
+    A download that returns nothing leaves a symbol in the panel with an empty
+    frame, which has no first date to carry values forward from: reaching the
+    arithmetic with it fails the whole run on a series that contributes nothing.
+    The staleness guard already reports it on its own line, so the build treats
+    it exactly as it treats an absent symbol.
+    """
+    whose = {symbol: b for symbol, b in panel.items() if symbol != "CL=F"}
+    without, _ = build_features("^GSPC", whose)
+    for nothing in (pd.DataFrame(), panel["CL=F"].iloc[:0]):
+        empty, _ = build_features("^GSPC", {**whose, "CL=F": nothing})
+        pd.testing.assert_frame_equal(without, empty)
+        assert not any(col.startswith("ind_cl_f_") for col in empty.columns)
+
+
+def test_an_empty_leg_does_not_break_the_pair_it_belongs_to(panel):
+    """The surviving leg of a spread is unread whether its partner is empty or gone."""
+    front = {**panel, "USO": synthetic_bars(seed=20)}
+    both_ways = [
+        build_features("^GSPC", front)[0],
+        build_features("^GSPC", {**front, "USL": pd.DataFrame()})[0],
+    ]
+    pd.testing.assert_frame_equal(*both_ways)
+    assert not any("curve" in col for col in both_ways[1].columns)
+
+
 def test_a_sector_tracker_is_an_input_in_europe_and_not_elsewhere():
     """The asymmetry `build_features` applies, in the form a guard can check."""
     assert "EXH8.DE" in feature_symbols("^GDAXI")

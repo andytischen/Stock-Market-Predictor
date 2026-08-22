@@ -436,6 +436,9 @@ market as it stood then.
 A series that arrived with no bars at all has no lag to measure, so it is named
 on stderr separately rather than counted among the series the refusal judges: a
 download that returned nothing is a different failure with a different remedy.
+Having said so, the run continues without it — an empty frame is read exactly as
+an absent symbol is, since a feature cannot be taken from a series with no first
+bar to carry forward.
 
 `backtest` is not guarded, and deliberately: it scores history, where the bars
 in question are the data rather than forward-filled stand-ins for missing data.
