@@ -7,6 +7,7 @@ from gapmodel.screener import (
     average_true_range,
     last_us_session,
     read_metrics,
+    render_html,
     render_text,
     to_frame,
 )
@@ -189,6 +190,26 @@ def test_render_reports_the_funnel_and_says_so_when_empty(monkeypatch):
     text = render_text(run_screen(["FLAT"], criteria=CRITERIA))
     assert "universe" in text and "moving" in text
     assert "nothing cleared every filter" in text
+
+
+def test_render_html_reports_the_funnel_and_says_so_when_empty(monkeypatch):
+    def fake_load(symbol, start, cache_dir, refresh, require=()):
+        return _bars([100.0] * 7, [8e6] * 7)
+
+    monkeypatch.setattr("gapmodel.screener.load_symbol", fake_load)
+    html = render_html(run_screen(["FLAT"], criteria=CRITERIA))
+    assert "<caption>Screen funnel</caption>" in html
+    assert "nothing cleared every filter" in html
+
+
+def test_render_html_lists_survivors(monkeypatch):
+    def fake_load(symbol, start, cache_dir, refresh, require=()):
+        return _bars([100.0] * 6 + [102.0], [8e6] * 6 + [20e6], 0.03)
+
+    monkeypatch.setattr("gapmodel.screener.load_symbol", fake_load)
+    html = render_html(run_screen(["MOVER"], criteria=CRITERIA))
+    assert "<caption>Survivors</caption>" in html
+    assert "<td>MOVER</td>" in html
 
 
 def test_stale_cache_is_redownloaded_for_the_session_being_screened(monkeypatch):

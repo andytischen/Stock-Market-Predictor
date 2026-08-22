@@ -66,6 +66,7 @@ from .screener import (
     screen,
 )
 from .screener import DEFAULT_START as SCREEN_START
+from .screener import render_html as render_screen_html
 from .screener import render_text as render_screen_text
 from .screener import to_frame as screen_to_frame
 from .sectors import build_sector_board
@@ -777,6 +778,9 @@ def _cmd_screen(args: argparse.Namespace) -> None:
     if args.csv:
         screen_to_frame(result.readings).to_csv(args.csv, index=False)
         print(f"\nwrote {args.csv}")
+    if args.html:
+        Path(args.html).write_text(render_screen_html(result), encoding="utf-8")
+        print(f"\nwrote {args.html}")
 
 
 def _cmd_sectors(args: argparse.Namespace) -> None:
@@ -1048,6 +1052,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"first date to download for the screen (default {SCREEN_START})",
     )
     screener.add_argument("--csv", help="also write the surviving names to this path")
+    screener.add_argument("--html", help="also write the screener view as an HTML page")
     screener.set_defaults(func=_cmd_screen)
 
     predict = sub.add_parser("predict", help="probability that the next open is up")

@@ -789,6 +789,7 @@ US universe  ->  liquid  ->  unusually active  ->  actually moving
 ```bash
 python -m gapmodel screen                        # the default US universe
 python -m gapmodel screen --etfs --csv movers.csv
+python -m gapmodel screen --html screener.html   # same screen as a standalone page
 python -m gapmodel screen --asof 2026-08-07      # screen a completed session
 python -m gapmodel screen AAPL NVDA PLTR         # or just these names
 python -m gapmodel screen --universe my_list.txt --min-rel-volume 2
@@ -819,6 +820,7 @@ symbol   last  change  volume_m  avg_volume_m  rel_volume  atr_pct       asof
 
 Survivors are ranked by relative volume, since that is what separates a real
 move from a name that happens to be up on its usual turnover.
+`--html` writes the same funnel and table as a single-file page.
 
 Two details decide what the numbers mean. **Relative volume** is measured against
 the 30 sessions *before* the one being screened: including today would put the

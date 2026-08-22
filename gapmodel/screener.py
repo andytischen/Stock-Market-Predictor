@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 
 import pandas as pd
@@ -312,3 +313,76 @@ def render_text(result: Screen) -> str:
     else:
         lines.append("nothing cleared every filter")
     return "\n".join(lines) + "\n"
+
+
+def render_html(result: Screen) -> str:
+    """An HTML view of the funnel and surviving names."""
+
+    def funnel_row(stage: Stage) -> str:
+        return (
+            "<tr>"
+            f"<td>{escape(stage.name)}</td>"
+            f"<td>{stage.kept}</td>"
+            f"<td>{escape(stage.description)}</td>"
+            "</tr>"
+        )
+
+    def reading_row(reading: Reading) -> str:
+        return (
+            "<tr>"
+            f"<td>{escape(reading.symbol)}</td>"
+            f"<td>{reading.last:.2f}</td>"
+            f"<td>{reading.change * 100:.2f}</td>"
+            f"<td>{reading.volume / 1e6:.2f}</td>"
+            f"<td>{reading.avg_volume / 1e6:.2f}</td>"
+            f"<td>{reading.rel_volume:.2f}</td>"
+            f"<td>{reading.atr * 100:.2f}</td>"
+            f"<td>{reading.asof.date().isoformat()}</td>"
+            "</tr>"
+        )
+
+    heading_date = (
+        result.asof.date().isoformat()
+        if result.asof is not None
+        else pd.Timestamp.now("UTC").tz_convert(None).date().isoformat()
+    )
+    survivor_rows = "".join(reading_row(reading) for reading in result.readings)
+    survivor_table = (
+        "<p>nothing cleared every filter</p>"
+        if not result.readings
+        else (
+            "<table>"
+            "<caption>Survivors</caption>"
+            "<tr>"
+            "<th>symbol</th><th>last</th><th>change</th><th>volume_m</th>"
+            "<th>avg_volume_m</th><th>rel_volume</th><th>atr_pct</th><th>asof</th>"
+            "</tr>"
+            f"{survivor_rows}"
+            "</table>"
+        )
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stock screener — {escape(heading_date)}</title>
+<style>
+ body {{ font: 15px/1.5 system-ui, sans-serif; margin: 2rem; color: #222; }}
+ h1 {{ font-size: 1.3rem; }}
+ table {{ border-collapse: collapse; margin-bottom: 2rem; }}
+ th, td {{ padding: .35rem .8rem; border-bottom: 1px solid #ddd; text-align: right; }}
+ th:first-child, td:first-child {{ text-align: left; }}
+ caption {{ text-align: left; font-weight: 600; padding-bottom: .4rem; }}
+</style>
+</head>
+<body>
+<h1>Stock screener — {escape(heading_date)}</h1>
+<table>
+<caption>Screen funnel</caption>
+<tr><th>stage</th><th>kept</th><th>filter</th></tr>
+{"".join(funnel_row(stage) for stage in result.stages)}
+</table>
+{survivor_table}
+</body>
+</html>
+"""

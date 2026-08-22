@@ -395,6 +395,34 @@ def test_screen_defaults_to_the_us_universe(monkeypatch, tmp_path):
     assert "AAPL" in seen["symbols"] and "SPY" not in seen["symbols"]
 
 
+def test_screen_can_write_html(monkeypatch, tmp_path):
+    from gapmodel import cli
+    from gapmodel.screener import Reading, Screen
+
+    html_path = tmp_path / "screen.html"
+
+    def fake_screen(symbols, **kwargs):
+        reading = Reading(
+            symbol=symbols[0],
+            last=100.0,
+            change=0.02,
+            volume=10e6,
+            avg_volume=6e6,
+            rel_volume=1.67,
+            atr=0.03,
+            asof=pd.Timestamp("2026-08-07"),
+        )
+        return Screen(
+            criteria=kwargs["criteria"], stages=(), readings=(reading,), asof=reading.asof
+        )
+
+    monkeypatch.setattr(cli, "screen", fake_screen)
+    main(["--cache", str(tmp_path), "screen", "AAPL", "--html", str(html_path)])
+    html = html_path.read_text(encoding="utf-8")
+    assert "<title>Stock screener" in html
+    assert "AAPL" in html
+
+
 def test_screen_rejects_combining_the_universe_forms(tmp_path):
     path = tmp_path / "u.txt"
     path.write_text("AAPL\n", encoding="utf-8")
