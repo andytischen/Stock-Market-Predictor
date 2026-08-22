@@ -210,7 +210,9 @@ deviations or more is flagged as a shock.
 2. **Features** — every other index read in deviations of its own 60-day
    realised volatility rather than in percent (a 6% Kospi session is a shock in
    a calm quarter and an ordinary day in a violent one, and the fit cannot tell
-   them apart from the raw number), log returns of every indicator, plus the
+   them apart from the raw number; the weekly read is quoted against that same
+   daily volatility grown over five sessions, so both are in the units of the
+   one volatility the frame publishes), log returns of every indicator, plus the
    target's own recent gaps, returns and realised gap volatility.
 3. **Model** — standardised L2 logistic regression, which yields probabilities
    that are close to calibrated out of the box and coefficients you can read.
