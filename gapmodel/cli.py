@@ -12,6 +12,9 @@ import pandas as pd
 
 from .asia import ACTIVITY_WINDOW, REGRESSION_WINDOW, build_asia_dashboard
 from .asia_report import render_asia_html, render_asia_text
+from .brief import HORIZON_DAYS, Commentary, build_brief, read_commentary
+from .brief import render_html as render_brief_html
+from .brief import render_text as render_brief_text
 from .dashboard import build_dashboard, oil_readings, render_html, render_text
 from .data import DEFAULT_CACHE, load_panel
 from .events import SCHEDULES, unmaintained_on
@@ -651,6 +654,47 @@ def _cmd_dashboard(args: argparse.Namespace) -> None:
         print(f"\nwrote {args.html}")
 
 
+def _cmd_brief(args: argparse.Namespace) -> None:
+    """The customer-facing brief: the calls with the tape and the caveats beside them.
+
+    Written commentary is read from a file rather than composed here, because a
+    week-ahead view on crude is somebody's opinion and nothing in this
+    repository forecasts a commodity. Refused up front when the file cannot be
+    read: a brief that silently drops the section it was run to publish would go
+    out looking complete.
+    """
+    commentary: tuple[Commentary, ...] = ()
+    if args.notes:
+        try:
+            commentary = read_commentary(Path(args.notes))
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"error: --notes {args.notes}: {exc}") from exc
+    panel = _panel(args)
+    wanted = args.market or [
+        m.symbol for m in MARKETS if not args.region or m.region in args.region
+    ]
+    symbols = _fresh_enough(panel, args, wanted)
+    hourly = _hourly(args)
+    forecasts = forecast_all(
+        panel,
+        symbols=symbols,
+        c=args.regularisation,
+        hourly=hourly,
+        min_train=INTRADAY_MIN_TRAIN if hourly else MIN_TRAIN,
+    )
+    brief = build_brief(
+        panel,
+        forecasts,
+        as_of=_as_of(args.at),
+        commentary=commentary,
+        horizon_days=args.days,
+    )
+    print(render_brief_text(brief), end="")
+    if args.html:
+        Path(args.html).write_text(render_brief_html(brief), encoding="utf-8")
+        print(f"\nwrote {args.html}")
+
+
 def _cmd_web(args: argparse.Namespace) -> None:
     panel = _panel(args)
     # Judged once, here, because the server renders for the life of the process
@@ -1186,6 +1230,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     dashboard.set_defaults(func=_cmd_dashboard)
+
+    brief = sub.add_parser(
+        "brief",
+        help="customer-facing week-ahead page: the open calls, the tape and the caveats",
+    )
+    brief.add_argument(
+        "--market", action="append", type=_market_symbol, help="restrict to a symbol"
+    )
+    brief.add_argument(
+        "--region",
+        action="append",
+        choices=REGIONS,
+        help="restrict to a region, repeatable (default: every market)",
+    )
+    brief.add_argument(
+        "--notes",
+        metavar="FILE",
+        help="written commentary to publish alongside the calls, as '## Heading' blocks",
+    )
+    brief.add_argument("--html", help="also write the customer-facing page here")
+    brief.add_argument(
+        "--days",
+        type=_positive_int,
+        default=HORIZON_DAYS,
+        help=f"calendar days of scheduled releases to list (default {HORIZON_DAYS})",
+    )
+    brief.add_argument(
+        "--at", type=_utc_time, help="UTC time of day to stamp the page with (default: now)"
+    )
+    brief.add_argument(
+        "--intraday",
+        action="store_true",
+        help="add pre-open futures moves (recent ~2 years only)",
+    )
+    brief.set_defaults(func=_cmd_brief)
 
     web = sub.add_parser("web", help="serve the dashboard in a local browser interface")
     web.add_argument("--region", choices=REGIONS, default="Asia")

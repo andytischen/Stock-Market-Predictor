@@ -143,6 +143,7 @@ python -m gapmodel backtest --reliability
 python -m gapmodel scorecard          # the last 21 sessions: called, realised, hit
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
 python -m gapmodel web --region Asia --at 05:00             # local browser interface
+python -m gapmodel brief --html brief.html   # the calls, the tape and the caveats, for a reader
 python -m gapmodel screen             # US stocks: liquid, unusually active, moving
 python -m gapmodel shortlist --top 10 # rank the US universe by demonstrated edge
 python -m gapmodel shortlist --gainers 10  # only the ten biggest movers of the latest session
@@ -202,6 +203,36 @@ divided by the volatility known beforehand) — and `oil log-odds` is the net
 amount those features add to, or take off, each market's probability, with the
 single largest oil driver listed underneath. A crude move of two standard
 deviations or more is flagged as a shock.
+
+### Customer-facing brief
+
+`predict` and `dashboard` are written for whoever fitted the model: they print
+standardised log-odds. `brief` is written for the person the call is sent to,
+and its job is to make three things impossible to confuse:
+
+```bash
+python -m gapmodel brief --region Europe --notes week-ahead.md --html brief.html
+```
+
+- **model output** — a probability per index, each with the out-of-sample AUC of
+  the model behind it, and any scheduled release the call is exposed to;
+- **market data** — crude, metals, the VIX, yields and the dollar, each stamped
+  with the session its close came from, so a feed that stopped printing shows up
+  as a date and a `stale` mark rather than as a suspiciously quiet week. Yields
+  move in basis points, not percent, because "+0.1%" on a 4.7% ten-year reads as
+  ten basis points and means five;
+- **written view** — the week-ahead commentary, read from `--notes` and labelled
+  as somebody's opinion. Nothing here forecasts a commodity, so a paragraph on
+  crude cannot be allowed to read as though it came out of the model. The file
+  is a `## Heading` per block, `- ` for bullets, anything else a paragraph, and
+  its text is escaped rather than rendered, so notes can never emit markup.
+
+The page also lists what is *not* forecast — the session after the auction, the
+close, a multi-day move, anything derived from a price target — and the
+categories with no feature behind them at all: headlines, results, guidance,
+sanctions, positioning and a stale overnight print. Those are output rather than
+small print, because an opening-gap probability sent without them is routinely
+read as a view on the day.
 
 ## How it works
 
