@@ -45,6 +45,15 @@ there is no name that one command models and the other refuses.
 - Runs hit the network only for symbols missing from the cache (a garbage ticker therefore
   produces yfinance `ERROR` lines before the CLI's own `error:` message — expected, not a
   traceback).
+- **A cache left warm by an earlier session goes stale as the box's clock advances.** Once its last
+  bar is more than 5 days old, `predict`/`stock`/`scorecard` abort with
+  `error: N of N input series have no bar within 5 days of <today>`. That is the guard working, not
+  a regression from the branch under test. Keep the run offline and deterministic by adding the
+  **global** `--allow-stale` (or `--max-stale-days`) flag — it belongs *before* the subcommand
+  (`python -m gapmodel --cache ... --allow-stale predict ...`); placed after it, argparse rejects it
+  with `unrecognized arguments`. `journal` does not trip the guard, so an unflagged journal run and
+  a flagged `predict` run can disagree about whether the cache is usable. Apply the same flags to
+  both trees in a branch-vs-main comparison.
 - `python -m pytest tests -q` takes ~1 min (237 tests); `ruff check . && ruff format --check .`
   is instant.
 
@@ -158,10 +167,16 @@ fewer for a reason other than the latest-bar rule: `_changes` skips a name whose
 raises (a single-bar series, say) with a stderr `no last move for SYM: ...`. A test that only
 greps for "largest movers" passes on all three and proves nothing.
 
-The all-dropped case cannot be observed at all: with no pick left, `forecast_universe` raises
-`RuntimeError("no stock could be modelled")` and the CLI exits 1 printing only that `error:` line,
-so there is no "0 of the 1 largest mover" report to inspect.
-Expect the abort rather than filing the missing sentence as a bug.
+The all-dropped case has no report to inspect: with no pick left, `forecast_universe` raises
+`RuntimeError("no stock could be modelled")` and the CLI exits 1, so there is no
+"0 of the 1 largest mover" sentence. Expect the abort, but assert the `error:` line names the
+chosen movers — `all 3 largest movers of session DATE were dropped (AAPL, MSFT, NVDA)`, or the
+singular `the largest mover of session DATE was dropped` — since the bare universe-wide message
+survives only for a run that never selected movers. Reach it by clipping every chosen mover below
+`MIN_TRAIN` (keep the mover-session bar); staleness is not another way in, because all-stale movers
+hit `StaleInputs` ("every requested name has no bar within N days of ...") before
+`forecast_universe` is called at all, which is why that message blames training rows and not the
+cache's age.
 
 ## Pandas `na_rep` only reaches a float column
 
@@ -363,6 +378,65 @@ the score stops measuring the model. Note the trackers distribute, and leaving t
 flips the gap sign on ~4% of `STW.AX` and ~0.7% of `ISF.L` sessions; that is a property of the
 model's label, not of the journal.
 
+### Company targets in the journal
+
+`journal --market MU` takes a modelled single stock, and a run also widens its download to
+`_stock_panel` when a company row is already `pending` in the log — otherwise the index panel
+would leave that row behind `WARNING <SYM> is not in the panel: leaving its rows pending` for
+ever. Test the dividend basis on a company: an index symbol returns early from `_gap_bars` and
+cannot exercise the adjustment at all.
+
+**Prove the two-sided behaviour, not just the happy path.** The panel choice has to widen for a
+company *and* stay narrow for indices, so run both halves:
+
+- *must widen:* leave `pending` company rows in a temp log and run `journal --settle-only` with
+  **no `--market` at all** — the flags are gone, only the log can widen the download. They must
+  settle, with no `not in the panel` warning. Run the same log and cache on the base commit for the
+  before-picture: it prints that warning and settles 0. Checking only `journal --market MU` cannot
+  distinguish an implementation that looks at `args.market` alone.
+- *must not widen:* copy the real cache, delete every company file (`{sym}.csv/.fields/.start` for
+  `stock_symbols()`), then run an index-only journal and `diff` a listing of that cache dir before
+  and after. `all_symbols()` and `stock_symbols()` are disjoint, so a stray `_stock_panel` call has
+  to re-create those files — the deleted-file trick turns "did it download the companies?" into a
+  cheap, offline, byte-level assertion.
+
+**Getting a company into a temp cache.** Check first — the warm `~/.cache/gapmodel` now carries all
+20 `stock_symbols()` (81 CSVs), so a company run is usually offline and needs no fetch at all. If a
+name really is missing, fetch it into a temp dir: `load_panel(["KO"], start="2005-01-01",
+cache_dir=Path("/tmp/cache-stock"), require=("Adj Close",))`, then copy `KO.*` into a copy of the
+real cache. **Match the start date the CLI will ask for** (the CLI default is `2005-01-01`): the
+cached `.start` sidecar is compared against the requested start, and a mismatch silently
+re-downloads and *overwrites your planted bars* mid-test. The tell is a row count that disagrees
+with the CSV on disk — print both before trusting a run. `KO` is a good subject: ~5440 rows and ~46
+real ex-dividend factor steps (`Adj Close / Close` from ~0.70 to 1.0).
+
+**Pick sessions where the adjustment is visible, or the basis assertion is vacuous.** Most recent
+sessions have factor exactly `1.0`, where adjusted and raw prices are equal and a run settling on
+the *wrong* basis still passes. Scan for a window with `Adj Close / Close != 1` first and journal
+those sessions (e.g. `MU` over `2026-06-26..2026-07-02` sits at `0.999846`, which moves a ~1082 open
+by ~0.17 — far above the log's stored precision). Then assert both directions: the settled `open`
+equals `dividend_adjusted(bars.dropna(subset=["Open","Close"]))` **and** does *not* equal the raw
+cache `Open`.
+
+### The dividend basis: how to make old and new visibly disagree
+
+The factor is `Adj Close / Close`, `ffill().bfill()`-ed. Measuring it on the *unfiltered* frame
+versus on `dropna(subset=["Open","Close"])` differs in exactly one situation, so build that
+situation deliberately in a cache copy:
+
+1. session **A**: blank `Open`, keep `Close`, and set `Adj Close = 0.9 * Close` (a half-published
+   row carrying an anomalous factor);
+2. session **B** (the next one): blank `Adj Close` so B's factor must be inherited.
+
+`opening_bars` drops A in both versions, so only B's *basis* moves: the old code hands B A's 0.9,
+the new code hands it the last complete session's factor. Pick B so its raw gap is **positive**
+(`Open` above the previous complete `Close`) — then the 0.9 scaling pushes the old gap negative
+and the two trees disagree on `outcome`, not merely on a price, which is far harder to dismiss.
+Assert the branch's settled `prev_close`/`open` equal
+`dividend_adjusted(bars.dropna(subset=["Open","Close"]))` to the last stored digit, and assert
+both halves of the intent at once: the half-published row is still present in `_gap_bars` (the
+late-check view) yet absent from `opening_bars` (the settlement view).
+
 ### Forcing the statuses without touching the real cache
 
 `cp -r ~/.cache/gapmodel /tmp/cache-mod` and pass `--cache /tmp/cache-mod`. Then, editing the
@@ -543,11 +617,11 @@ markets that had just been excluded.
 "no authentication" warning. Verified by starting one server per host on its own port and reading
 the first log line (each start costs a full ~2 min panel load, so launch them in parallel):
 no warning for `127.0.0.1`, `127.0.0.2`, `localhost`; warning for `0.0.0.0`, a LAN IP
-(`hostname -I`), and a hostname. Note the server is IPv4-only — `serve_dashboard` never overrides
-`socketserver`'s default `address_family = AF_INET` — so any
-IPv6 spelling (`::1`, `0:0:0:0:0:0:0:1`) dies at bind time with
-`error: [Errno -9] Address family for hostname not supported` — the loopback classification for
-those can only be checked by calling `reachable_beyond_this_machine` directly.
+(`hostname -I`), and a hostname. IPv6 spellings bind too — `serve_dashboard` picks
+`address_family` from the host via `bind_family`, so `--host ::1` and `--host [::1]` both serve at
+`http://[::1]:PORT/` and are classified loopback. Only a *name* is assumed IPv4, so an IPv6-only
+hostname still dies at bind time with
+`error: [Errno -9] Address family for hostname not supported`.
 
 ### Background servers get killed with the shell that spawned them
 

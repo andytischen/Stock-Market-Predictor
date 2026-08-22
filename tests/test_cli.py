@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from gapmodel.cli import _last_monday, _since_timestamp, build_parser, main
+from gapmodel.journal import read_log
 from gapmodel.markets import MARKETS
 from gapmodel.staleness import StaleInputs
 
@@ -217,6 +218,52 @@ def test_journal_and_scorecard_are_separate_commands():
     assert live.log.endswith("forecast-log.csv")
 
 
+def test_journal_accepts_a_modelled_single_stock_like_the_other_scored_commands():
+    # backtest and scorecard both grade a company; a journal that refused one at
+    # parse time could never hold the live record of a call `stock` printed.
+    assert build_parser().parse_args(["journal", "--market", "mu"]).market == ["MU"]
+
+
+def test_journal_loads_the_peer_panel_for_a_company_it_still_owes_a_settlement(
+    tmp_path, monkeypatch, capsys
+):
+    """A company row waits on bars the index panel does not carry.
+
+    The log outlives the flags, so the download is widened by the rows already
+    pending and not only by ``--market``: on the index panel alone MU's bars are
+    never loaded and the row sits pending for ever behind "not in the panel".
+    """
+    from gapmodel import cli
+
+    bars = pd.DataFrame(
+        {"Open": [99.0, 101.0], "Close": [100.0, 103.0], "Adj Close": [100.0, 103.0]},
+        index=pd.to_datetime(["2026-08-13", "2026-08-14"]),
+    )
+    monkeypatch.setattr(
+        cli, "_panel", lambda _args: pytest.fail("a pending company needs the peer panel")
+    )
+    monkeypatch.setattr(cli, "_stock_panel", lambda _args: {"MU": bars})
+    log_path = tmp_path / "forecast-log.csv"
+    pd.DataFrame(
+        [
+            {
+                "recorded": "2026-08-13T20:00:00Z",
+                "session": "2026-08-14",
+                "symbol": "MU",
+                "market": "Micron Technology",
+                "region": "US",
+                "p_open_up": 0.61,
+                "status": "pending",
+            }
+        ]
+    ).to_csv(log_path, index=False)
+
+    main(["journal", "--settle-only", "--log", str(log_path)])
+
+    assert "settled 1 session(s)" in capsys.readouterr().out
+    assert read_log(log_path).at[0, "status"] == "settled"
+
+
 def test_a_shorter_journal_window_leaves_the_minimum_to_be_narrowed():
     # Unset rather than 20: a caller narrowing the window never named the
     # default, so it is capped at the window instead of refused.
@@ -263,12 +310,22 @@ def test_shock_moves_only_the_features_of_that_symbol():
     from gapmodel.predict import shocked_row
 
     live = pd.DataFrame(
-        {"mkt_ks11_return": [0.01], "mkt_ks11_return_5": [0.02], "mkt_n225_return": [0.03]}
+        {
+            "mkt_ks11_shock": [0.5],
+            "mkt_ks11_shock_5": [0.2],
+            "mkt_ks11_vol_60": [0.05],
+            "mkt_n225_shock": [0.3],
+            "mkt_n225_vol_60": [0.05],
+        }
     )
     bumped = shocked_row(live, {"^KS11": 0.1})
-    assert bumped["mkt_ks11_return"].iloc[0] == pytest.approx(0.11)
-    assert bumped["mkt_ks11_return_5"].iloc[0] == pytest.approx(0.12)
-    assert bumped["mkt_n225_return"].iloc[0] == pytest.approx(0.03)
+    # The move arrives in deviations of the volatility already realised, and in
+    # the weekly column in deviations of that volatility over five sessions.
+    assert bumped["mkt_ks11_shock"].iloc[0] == pytest.approx(0.5 + 0.1 / 0.05)
+    assert bumped["mkt_ks11_shock_5"].iloc[0] == pytest.approx(0.2 + 0.1 / (math.sqrt(5) * 0.05))
+    # The denominator is measured to the previous bar, so it stays.
+    assert bumped["mkt_ks11_vol_60"].iloc[0] == pytest.approx(0.05)
+    assert bumped["mkt_n225_shock"].iloc[0] == pytest.approx(0.3)
 
 
 def test_shock_accepts_symbols_containing_equals():
@@ -341,6 +398,61 @@ def test_the_gainers_line_claims_the_ranking_only_when_it_kept_every_mover():
     assert _mover_selection(2, 3, 158, "2026-08-14").startswith("2 of the 3 largest movers")
     assert _mover_selection(0, 3, 158, "2026-08-14").startswith("0 of the 3 largest movers")
     assert _mover_selection(1, 1, 158, "2026-08-14").startswith("the largest mover of session")
+
+
+def _all_dropped_shortlist(monkeypatch, movers):
+    """A ``--gainers`` run whose every chosen mover leaves before the forecast."""
+    from gapmodel import cli
+
+    bars = pd.DataFrame(
+        {"Close": [100.0, 105.0]}, index=pd.to_datetime(["2026-08-13", "2026-08-14"])
+    )
+    monkeypatch.setattr(cli, "_panel", lambda _args: {})
+    monkeypatch.setattr(cli, "load_panel", lambda **_kwargs: {name: bars for name in movers})
+    monkeypatch.setattr(cli, "biggest_gainers", lambda *_args: list(movers))
+    monkeypatch.setattr(cli, "_fresh_enough", lambda _panel, _args, targets: list(targets))
+
+    def no_model(*_args, **_kwargs):
+        raise RuntimeError("no stock could be modelled")
+
+    monkeypatch.setattr(cli, "forecast_universe", no_model)
+
+
+def test_losing_every_mover_names_them_instead_of_blaming_the_universe(monkeypatch):
+    """ "No stock could be modelled" reads as a broken cache; the movers dropped."""
+    _all_dropped_shortlist(monkeypatch, ["AAPL", "MSFT", "NVDA"])
+    with pytest.raises(SystemExit) as excinfo:
+        main(["shortlist", "AAPL", "MSFT", "NVDA", "--gainers", "3"])
+
+    message = str(excinfo.value)
+    assert "all 3 largest movers of session 2026-08-14 were dropped" in message
+    assert "AAPL, MSFT, NVDA" in message
+    # The reader is told how to get a report, not just that there isn't one.
+    assert "--refresh" in message and "--gainers" in message
+    # A stale mover is stopped by _fresh_enough before the fit, so offering
+    # staleness here would send the reader after a cause this path cannot have.
+    assert "stale" not in message
+
+
+def test_losing_the_only_mover_is_singular(monkeypatch):
+    """ "All 1 largest movers were dropped" would be a plural about one name."""
+    _all_dropped_shortlist(monkeypatch, ["AAPL"])
+    with pytest.raises(SystemExit) as excinfo:
+        main(["shortlist", "AAPL", "--gainers", "1"])
+
+    message = str(excinfo.value)
+    assert "the largest mover of session 2026-08-14 was dropped" in message
+    # The tail is singular too: "none of them" about one name is the same slip.
+    assert "(AAPL), not fittable; the warning says why" in message
+
+
+def test_a_run_without_gainers_keeps_the_universe_wide_error(monkeypatch):
+    """Without a mover pass there are no chosen names to blame, so nothing is claimed."""
+    _all_dropped_shortlist(monkeypatch, ["AAPL", "MSFT"])
+    with pytest.raises(SystemExit) as excinfo:
+        main(["shortlist", "AAPL", "MSFT"])
+
+    assert str(excinfo.value) == "error: no stock could be modelled"
 
 
 def test_screen_flags_are_scaled_into_criteria(monkeypatch, tmp_path):

@@ -21,6 +21,7 @@ from .intraday import load_hourly_panel
 from .journal import (
     DEFAULT_LOG,
     MIN_SETTLED,
+    PENDING,
     decayed,
     read_log,
     record,
@@ -502,7 +503,7 @@ def _cmd_export(args: argparse.Namespace) -> None:
 
 
 def _last_monday() -> pd.Timestamp:
-    """Midnight UTC on the most recent Monday, or the one before on a Monday.
+    """Midnight UTC on the most recent Monday, or the Monday before if today is one.
 
     Midnight rather than the opening hour: daily bars are indexed on the
     normalised session date, so any intra-day cutoff would drop the Monday
@@ -819,6 +820,29 @@ def _mover_selection(kept: int, chosen: int, candidates: int, moved: str) -> str
     )
 
 
+def _all_movers_dropped(chosen: Sequence[str], moved: str) -> str:
+    """Why a ``--gainers`` run has nothing to print, in its own terms.
+
+    ``forecast_universe`` speaks for the universe it was handed ("no stock could
+    be modelled"), which reads as a broken cache when the run in fact chose its
+    movers and then lost every one of them to too little history. Naming them
+    says which request came back empty, and how wide it was. Staleness is not
+    offered as a cause: a stale mover never reaches the fit, because
+    ``_fresh_enough`` has already raised on it.
+    """
+    if len(chosen) == 1:
+        dropped = f"the largest mover of session {moved} was dropped"
+        unfittable = "not fittable; the warning says why"
+    else:
+        dropped = f"all {len(chosen)} largest movers of session {moved} were dropped"
+        unfittable = "none of them fittable; the warning for each name says why"
+    return (
+        f"{dropped} ({', '.join(chosen)}), {unfittable}, usually too few labelled "
+        "rows to train on. Re-run with --refresh for more history, or a wider "
+        "--gainers to reach further down the movers"
+    )
+
+
 def _cmd_shortlist(args: argparse.Namespace) -> None:
     """Rank the universe by how much edge each name's own record supports."""
     candidates = args.symbols or modelled_universe()
@@ -854,7 +878,12 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     # After the mover pass, so that a stale listing is judged only when it is one
     # of the names about to be fitted.
     symbols = _fresh_enough(panel, args, symbols)
-    picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
+    try:
+        picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
+    except RuntimeError as exc:
+        if not chosen or moved is None:
+            raise
+        raise SystemExit(f"error: {_all_movers_dropped(chosen, moved)}") from exc
     # Described once the picks are in, the last place names are dropped: a stale
     # listing or one short of training rows leaves the report, and a sentence
     # written before either would claim movers the table does not hold.
@@ -902,7 +931,14 @@ def _cmd_journal(args: argparse.Namespace) -> None:
     min_settled = resolved_minimum(args.window, args.min_settled)
     path = Path(args.log)
     journal = read_log(path)
-    panel = _panel(args)
+    # A company needs its peers and its ``Adj Close`` loaded, and the log
+    # outlives the flags: a name journalled by an earlier run is still owed a
+    # settlement, so the rows waiting for one widen the download as much as
+    # ``--market`` does. Left to the index panel those rows would sit pending
+    # for ever behind "not in the panel".
+    wanted = args.market or [m.symbol for m in MARKETS]
+    owed = journal.loc[journal["status"] == PENDING, "symbol"]
+    panel = _stock_panel(args) if any(is_stock(s) for s in [*wanted, *owed]) else _panel(args)
     if not args.settle_only:
         forecasts = _forecast(panel, args, _hourly(args))
         journal, added = record(journal, forecasts, panel)
@@ -1258,7 +1294,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="journal today's forecasts and score the ones whose opens have printed",
     )
     journal.add_argument(
-        "--market", action="append", type=_market_symbol, help="restrict to a symbol"
+        "--market",
+        action="append",
+        type=_target_symbol,
+        help="restrict to a symbol; a modelled single stock is accepted too",
     )
     journal.add_argument(
         "--log", default=str(DEFAULT_LOG), help=f"journal CSV (default {DEFAULT_LOG})"

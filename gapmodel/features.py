@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Collection
 
 import numpy as np
@@ -33,6 +34,17 @@ OIL_VOL_WINDOW = 20
 # the oil window so both shock series share a comparable normalisation scale,
 # but defined separately so it can be tuned independently.
 FX_VOL_WINDOW = 20
+# Cross-market moves are read in standard deviations of the volatility regime
+# the target already knew about, not in raw percent.
+MKT_VOL_WINDOW = 60
+# A move beyond this many deviations is held at the edge: past it the linear
+# model is extrapolating out of every sample it was ever fitted on.
+MKT_SHOCK_CLIP = 4.0
+# The weekly cross-market read spans this many sessions, and is scaled by the
+# daily volatility grown over that span, so both shock columns are quoted
+# against the single volatility the feature frame publishes.
+MKT_SHOCK_5_DAYS = 5
+MKT_SHOCK_5_SCALE = math.sqrt(MKT_SHOCK_5_DAYS)
 # A gap of exactly zero means the source repeated the previous close instead of
 # publishing a real opening print; such sessions cannot be labelled.
 STALE_GAP_TOLERANCE = 1e-9
@@ -112,9 +124,33 @@ def _column_name(symbol: str) -> str:
     return cleaned.lower()
 
 
+def _shock(returns: pd.Series, vol: pd.Series, dates: pd.DatetimeIndex, lag: int) -> pd.Series:
+    """``returns`` in deviations of ``vol``, clipped.
+
+    ``vol`` is measured up to the previous bar, so the session being scaled is
+    not part of the scale it is judged by. It is passed in rather than measured
+    here so that the caller can quote every shock column against a denominator
+    it also publishes: a what-if move can only be converted into these units by
+    a reader who knows which volatility the column was divided by.
+    """
+    scaled = (returns / vol.where(vol > 0)).clip(-MKT_SHOCK_CLIP, MKT_SHOCK_CLIP)
+    return as_of(scaled, dates, lag)
+
+
 def _lag_days(source_close_utc: float, target: Market) -> int:
     """0 if the source bar closes before the target opens, otherwise 1."""
     return lag_days(source_close_utc, target.open_utc)
+
+
+def carried(panel: dict[str, pd.DataFrame], symbol: str) -> bool:
+    """Whether ``symbol`` arrived with bars, as opposed to a frame with none.
+
+    A download that returned nothing leaves a series a feature cannot be taken
+    from at all: it has no first date to carry values forward from, so it is
+    read exactly as an absent symbol is rather than reaching the arithmetic.
+    """
+    bars = panel.get(symbol)
+    return bars is not None and not bars.empty
 
 
 def curve_features(
@@ -128,7 +164,7 @@ def curve_features(
     — the front lagging, supply comfortable — and positive is backwardation.
     Absent from the panel, the features are simply not built.
     """
-    if CURVE_FRONT not in panel or CURVE_STRIP not in panel:
+    if not carried(panel, CURVE_FRONT) or not carried(panel, CURVE_STRIP):
         return {}
     front = panel[CURVE_FRONT]["Close"].dropna()
     strip = panel[CURVE_STRIP]["Close"].dropna()
@@ -156,7 +192,7 @@ def peer_features(
     """
     built: dict[str, pd.Series] = {}
     for peer in peers_of(target_symbol):
-        if peer.symbol not in panel:
+        if not carried(panel, peer.symbol):
             continue
         close = total_return_close(panel[peer.symbol])
         lag = _lag_days(peer.close_utc, target)
@@ -187,7 +223,7 @@ def policy_features(
     The two legs close an hour apart, so both are read on the later of the two
     clocks and the bill is carried forward onto the future's sessions.
     """
-    if FUNDS_FUTURE not in panel or BILL_YIELD not in panel:
+    if not carried(panel, FUNDS_FUTURE) or not carried(panel, BILL_YIELD):
         return {}
     price = panel[FUNDS_FUTURE]["Close"].dropna()
     bill = panel[BILL_YIELD]["Close"].dropna()
@@ -278,23 +314,41 @@ def build_features(
     }
 
     for other in MARKETS:
-        if other.symbol == target_symbol or other.symbol not in panel:
+        if other.symbol == target_symbol or not carried(panel, other.symbol):
             continue
         close = panel[other.symbol]["Close"].dropna()
         lag = _lag_days(other.close_utc, target)
         name = _column_name(other.symbol)
-        features[f"mkt_{name}_return"] = as_of(log_return(close), dates, lag)
-        features[f"mkt_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
+        # In percent a cross-market move is not comparable across regimes: a 6%
+        # Kospi session is a four-sigma event in a calm sample and an ordinary
+        # one in a violent month. Fitted on the calm years, the model reads the
+        # violent month as certainty and states 0.01 for opens that then come up
+        # small, which costs far more than being merely wrong. Each move is
+        # therefore divided by the volatility the source had already shown -
+        # measured to the previous bar, as the oil and FX shocks are - and held
+        # at the edge of the range any fit has seen.
+        returns = log_return(close)
+        vol = returns.rolling(MKT_VOL_WINDOW).std().shift(1)
+        features[f"mkt_{name}_shock"] = _shock(returns, vol, dates, lag)
+        features[f"mkt_{name}_shock_5"] = _shock(
+            log_return(close, MKT_SHOCK_5_DAYS), vol * MKT_SHOCK_5_SCALE, dates, lag
+        )
+        features[f"mkt_{name}_vol_{MKT_VOL_WINDOW}"] = as_of(vol, dates, lag)
 
     for indicator in INDICATORS:
-        if indicator.symbol not in panel:
+        if not carried(panel, indicator.symbol):
             continue
         # European sector read-across is a European story: outside the region it
         # measurably dilutes the fit, so those markets keep the whole-index and
         # cross-asset indicators only.
         if indicator.symbol in SECTOR_SYMBOLS and target.region != "Europe":
             continue
-        close = panel[indicator.symbol]["Close"].dropna()
+        # The sector read-across is carried by iShares trackers, which are
+        # funds and distribute: on an ex-distribution morning every one of the
+        # eighteen prints a fall of up to 3% that the sectors never made, and
+        # European targets read all of them at once. The dividend factor makes
+        # those sessions total-return, as it does for a single stock's peers.
+        close = total_return_close(panel[indicator.symbol])
         lag = _lag_days(indicator.close_utc, target)
         name = _column_name(indicator.symbol)
         returns = log_return(close)
