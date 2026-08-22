@@ -45,6 +45,15 @@ there is no name that one command models and the other refuses.
 - Runs hit the network only for symbols missing from the cache (a garbage ticker therefore
   produces yfinance `ERROR` lines before the CLI's own `error:` message — expected, not a
   traceback).
+- **A cache left warm by an earlier session goes stale as the box's clock advances.** Once its last
+  bar is more than 5 days old, `predict`/`stock`/`scorecard` abort with
+  `error: N of N input series have no bar within 5 days of <today>`. That is the guard working, not
+  a regression from the branch under test. Keep the run offline and deterministic by adding the
+  **global** `--allow-stale` (or `--max-stale-days`) flag — it belongs *before* the subcommand
+  (`python -m gapmodel --cache ... --allow-stale predict ...`); placed after it, argparse rejects it
+  with `unrecognized arguments`. `journal` does not trip the guard, so an unflagged journal run and
+  a flagged `predict` run can disagree about whether the cache is usable. Apply the same flags to
+  both trees in a branch-vs-main comparison.
 - `python -m pytest tests -q` takes ~1 min (237 tests); `ruff check . && ruff format --check .`
   is instant.
 
@@ -369,14 +378,37 @@ would leave that row behind `WARNING <SYM> is not in the panel: leaving its rows
 ever. Test the dividend basis on a company: an index symbol returns early from `_gap_bars` and
 cannot exercise the adjustment at all.
 
-**Getting a company into a temp cache.** No company CSV ships in `~/.cache/gapmodel`, so fetch one
-into a temp dir: `load_panel(["KO"], start="2005-01-01", cache_dir=Path("/tmp/cache-stock"),
-require=("Adj Close",))`, then copy `KO.*` into a copy of the real cache. **Match the start date
-the CLI will ask for** (the CLI default is `2005-01-01`): the cached `.start` sidecar is compared
-against the requested start, and a mismatch silently re-downloads and *overwrites your planted
-bars* mid-test. The tell is a row count that disagrees with the CSV on disk — print both before
-trusting a run. `KO` is a good subject: ~5440 rows and ~46 real ex-dividend factor steps
-(`Adj Close / Close` from ~0.70 to 1.0).
+**Prove the two-sided behaviour, not just the happy path.** The panel choice has to widen for a
+company *and* stay narrow for indices, so run both halves:
+
+- *must widen:* leave `pending` company rows in a temp log and run `journal --settle-only` with
+  **no `--market` at all** — the flags are gone, only the log can widen the download. They must
+  settle, with no `not in the panel` warning. Run the same log and cache on the base commit for the
+  before-picture: it prints that warning and settles 0. Checking only `journal --market MU` cannot
+  distinguish an implementation that looks at `args.market` alone.
+- *must not widen:* copy the real cache, delete every company file (`{sym}.csv/.fields/.start` for
+  `stock_symbols()`), then run an index-only journal and `diff` a listing of that cache dir before
+  and after. `all_symbols()` and `stock_symbols()` are disjoint, so a stray `_stock_panel` call has
+  to re-create those files — the deleted-file trick turns "did it download the companies?" into a
+  cheap, offline, byte-level assertion.
+
+**Getting a company into a temp cache.** Check first — the warm `~/.cache/gapmodel` now carries all
+20 `stock_symbols()` (81 CSVs), so a company run is usually offline and needs no fetch at all. If a
+name really is missing, fetch it into a temp dir: `load_panel(["KO"], start="2005-01-01",
+cache_dir=Path("/tmp/cache-stock"), require=("Adj Close",))`, then copy `KO.*` into a copy of the
+real cache. **Match the start date the CLI will ask for** (the CLI default is `2005-01-01`): the
+cached `.start` sidecar is compared against the requested start, and a mismatch silently
+re-downloads and *overwrites your planted bars* mid-test. The tell is a row count that disagrees
+with the CSV on disk — print both before trusting a run. `KO` is a good subject: ~5440 rows and ~46
+real ex-dividend factor steps (`Adj Close / Close` from ~0.70 to 1.0).
+
+**Pick sessions where the adjustment is visible, or the basis assertion is vacuous.** Most recent
+sessions have factor exactly `1.0`, where adjusted and raw prices are equal and a run settling on
+the *wrong* basis still passes. Scan for a window with `Adj Close / Close != 1` first and journal
+those sessions (e.g. `MU` over `2026-06-26..2026-07-02` sits at `0.999846`, which moves a ~1082 open
+by ~0.17 — far above the log's stored precision). Then assert both directions: the settled `open`
+equals `dividend_adjusted(bars.dropna(subset=["Open","Close"]))` **and** does *not* equal the raw
+cache `Open`.
 
 ### The dividend basis: how to make old and new visibly disagree
 
