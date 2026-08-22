@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import socket
 import webbrowser
 from collections.abc import Mapping, Sequence
 from html import escape
@@ -38,6 +39,21 @@ def reachable_beyond_this_machine(host: str) -> bool:
         return not ipaddress.ip_address(host.strip("[]")).is_loopback
     except ValueError:
         return True
+
+
+def bind_family(host: str) -> int:
+    """The socket family ``host`` has to be bound in.
+
+    ``socketserver`` defaults to IPv4 for every host, which leaves the IPv6
+    spellings this module otherwise accepts failing at bind time.
+    """
+    try:
+        version = ipaddress.ip_address(host.strip("[]")).version
+    except ValueError:
+        # A name, resolved by the bind itself: IPv4 is the family it has always
+        # been resolved in here.
+        return socket.AF_INET
+    return socket.AF_INET6 if version == 6 else socket.AF_INET
 
 
 def browser_url(host: str, port: int) -> str:
@@ -198,8 +214,15 @@ def serve_dashboard(
     regularisation: float,
     launch_browser: bool,
 ) -> None:
+    # Brackets are a URL spelling, not an address: they are taken off before
+    # anything is classified or bound, and put back by `browser_url`.
+    host = host.strip("[]")
     handler = _handler(panel, hourly, symbols, region, at, regularisation)
-    server = ThreadingHTTPServer((host, port), handler)
+
+    class Server(ThreadingHTTPServer):
+        address_family = bind_family(host)
+
+    server = Server((host, port), handler)
     address = browser_url(host, server.server_port)
     if reachable_beyond_this_machine(host):
         # Said once, at the point the choice is made: there is no login on this
