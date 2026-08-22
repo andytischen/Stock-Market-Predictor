@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Collection
 
 import numpy as np
@@ -39,6 +40,11 @@ MKT_VOL_WINDOW = 60
 # A move beyond this many deviations is held at the edge: past it the linear
 # model is extrapolating out of every sample it was ever fitted on.
 MKT_SHOCK_CLIP = 4.0
+# The weekly cross-market read spans this many sessions, and is scaled by the
+# daily volatility grown over that span, so both shock columns are quoted
+# against the single volatility the feature frame publishes.
+MKT_SHOCK_5_DAYS = 5
+MKT_SHOCK_5_SCALE = math.sqrt(MKT_SHOCK_5_DAYS)
 # A gap of exactly zero means the source repeated the previous close instead of
 # publishing a real opening print; such sessions cannot be labelled.
 STALE_GAP_TOLERANCE = 1e-9
@@ -118,13 +124,15 @@ def _column_name(symbol: str) -> str:
     return cleaned.lower()
 
 
-def _shock(returns: pd.Series, dates: pd.DatetimeIndex, lag: int) -> pd.Series:
-    """``returns`` in deviations of their own trailing volatility, clipped.
+def _shock(returns: pd.Series, vol: pd.Series, dates: pd.DatetimeIndex, lag: int) -> pd.Series:
+    """``returns`` in deviations of ``vol``, clipped.
 
-    The denominator is measured up to the previous bar, so the session being
-    scaled is not part of the scale it is judged by.
+    ``vol`` is measured up to the previous bar, so the session being scaled is
+    not part of the scale it is judged by. It is passed in rather than measured
+    here so that the caller can quote every shock column against a denominator
+    it also publishes: a what-if move can only be converted into these units by
+    a reader who knows which volatility the column was divided by.
     """
-    vol = returns.rolling(MKT_VOL_WINDOW).std().shift(1)
     scaled = (returns / vol.where(vol > 0)).clip(-MKT_SHOCK_CLIP, MKT_SHOCK_CLIP)
     return as_of(scaled, dates, lag)
 
@@ -319,11 +327,13 @@ def build_features(
         # therefore divided by the volatility the source had already shown -
         # measured to the previous bar, as the oil and FX shocks are - and held
         # at the edge of the range any fit has seen.
-        features[f"mkt_{name}_shock"] = _shock(log_return(close), dates, lag)
-        features[f"mkt_{name}_shock_5"] = _shock(log_return(close, 5), dates, lag)
-        features[f"mkt_{name}_vol_{MKT_VOL_WINDOW}"] = as_of(
-            log_return(close).rolling(MKT_VOL_WINDOW).std().shift(1), dates, lag
+        returns = log_return(close)
+        vol = returns.rolling(MKT_VOL_WINDOW).std().shift(1)
+        features[f"mkt_{name}_shock"] = _shock(returns, vol, dates, lag)
+        features[f"mkt_{name}_shock_5"] = _shock(
+            log_return(close, MKT_SHOCK_5_DAYS), vol * MKT_SHOCK_5_SCALE, dates, lag
         )
+        features[f"mkt_{name}_vol_{MKT_VOL_WINDOW}"] = as_of(vol, dates, lag)
 
     for indicator in INDICATORS:
         if not carried(panel, indicator.symbol):

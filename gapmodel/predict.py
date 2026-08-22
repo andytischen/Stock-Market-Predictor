@@ -10,7 +10,13 @@ import pandas as pd
 
 from . import model as model_mod
 from .events import caveats
-from .features import MKT_SHOCK_CLIP, _column_name, build_features, live_feature_row
+from .features import (
+    MKT_SHOCK_5_SCALE,
+    MKT_SHOCK_CLIP,
+    _column_name,
+    build_features,
+    live_feature_row,
+)
 from .markets import CURVE_FRONT, CURVE_STRIP, CURVE_WINDOW, MARKETS
 from .stocks import target_market
 
@@ -103,10 +109,17 @@ def shocked_row(live: pd.DataFrame, shocks: dict[str, float]) -> pd.DataFrame:
             if not vol:
                 continue
             sigma = bumped[vol[0]]
-            for column in (f"{prefix}_shock", f"{prefix}_shock_5"):
+            # The weekly column is quoted against that same daily volatility
+            # grown over its span, so the move has to be divided by the wider
+            # denominator: converted with the daily one it would enter the week
+            # at over twice the size it belongs there at.
+            for column, span in (
+                (f"{prefix}_shock", 1.0),
+                (f"{prefix}_shock_5", MKT_SHOCK_5_SCALE),
+            ):
                 if column not in bumped:
                     continue
-                scaled = bumped[column] + move / sigma.where(sigma > 0)
+                scaled = bumped[column] + move / (span * sigma.where(sigma > 0))
                 # Cross-market reads are held inside the range they are built
                 # in, so a hypothetical cannot be pushed where no fit has been.
                 if prefix.startswith("mkt_"):

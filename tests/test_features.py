@@ -411,3 +411,33 @@ def test_a_cross_market_move_is_read_in_deviations_of_its_own_regime(panel):
     # small one after a hundred sessions of ten-fold volatility.
     assert read.loc[calm] > 3.0
     assert 0.0 < read.loc[wild] < 1.0
+
+
+def test_both_cross_market_shocks_are_quoted_against_the_published_volatility(panel):
+    """A reader can convert a move into either column with the frame's own sigma.
+
+    Divided by its own five-day-return volatility, the weekly column would sit
+    on a scale the frame never publishes, and a what-if built from the daily
+    volatility would enter it more than twice too large.
+    """
+    from gapmodel.features import (
+        MKT_SHOCK_5_DAYS,
+        MKT_SHOCK_5_SCALE,
+        MKT_SHOCK_CLIP,
+        log_return,
+    )
+
+    features, _ = build_features("^GDAXI", panel)
+    dates = pd.DatetimeIndex(features.index)
+    lag = _lag_days(market("^N225").close_utc, market("^GDAXI"))
+    close = panel["^N225"]["Close"].dropna()
+    sigma = features["mkt_n225_vol_60"]
+
+    daily = log_return(close).rolling(60).std().shift(1)
+    assert sigma.to_numpy() == pytest.approx(as_of(daily, dates, lag).to_numpy(), nan_ok=True)
+
+    weekly = as_of(log_return(close, MKT_SHOCK_5_DAYS), dates, lag)
+    implied = features["mkt_n225_shock_5"] * MKT_SHOCK_5_SCALE * sigma
+    unclipped = (features["mkt_n225_shock_5"].abs() < MKT_SHOCK_CLIP - 1e-9) & implied.notna()
+    assert implied[unclipped].to_numpy() == pytest.approx(weekly[unclipped].to_numpy(), abs=1e-12)
+    assert unclipped.sum() > 100

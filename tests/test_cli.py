@@ -319,9 +319,10 @@ def test_shock_moves_only_the_features_of_that_symbol():
         }
     )
     bumped = shocked_row(live, {"^KS11": 0.1})
-    # The move arrives in deviations of the volatility already realised.
+    # The move arrives in deviations of the volatility already realised, and in
+    # the weekly column in deviations of that volatility over five sessions.
     assert bumped["mkt_ks11_shock"].iloc[0] == pytest.approx(0.5 + 0.1 / 0.05)
-    assert bumped["mkt_ks11_shock_5"].iloc[0] == pytest.approx(0.2 + 0.1 / 0.05)
+    assert bumped["mkt_ks11_shock_5"].iloc[0] == pytest.approx(0.2 + 0.1 / (math.sqrt(5) * 0.05))
     # The denominator is measured to the previous bar, so it stays.
     assert bumped["mkt_ks11_vol_60"].iloc[0] == pytest.approx(0.05)
     assert bumped["mkt_n225_shock"].iloc[0] == pytest.approx(0.3)
