@@ -387,6 +387,61 @@ def test_the_gainers_line_claims_the_ranking_only_when_it_kept_every_mover():
     assert _mover_selection(1, 1, 158, "2026-08-14").startswith("the biggest gainer of session")
 
 
+def _all_dropped_shortlist(monkeypatch, movers):
+    """A ``--gainers`` run whose every chosen mover leaves before the forecast."""
+    from gapmodel import cli
+
+    bars = pd.DataFrame(
+        {"Close": [100.0, 105.0]}, index=pd.to_datetime(["2026-08-13", "2026-08-14"])
+    )
+    monkeypatch.setattr(cli, "_panel", lambda _args: {})
+    monkeypatch.setattr(cli, "load_panel", lambda **_kwargs: {name: bars for name in movers})
+    monkeypatch.setattr(cli, "biggest_gainers", lambda *_args: list(movers))
+    monkeypatch.setattr(cli, "_fresh_enough", lambda _panel, _args, targets: list(targets))
+
+    def no_model(*_args, **_kwargs):
+        raise RuntimeError("no stock could be modelled")
+
+    monkeypatch.setattr(cli, "forecast_universe", no_model)
+
+
+def test_losing_every_mover_names_them_instead_of_blaming_the_universe(monkeypatch):
+    """ "No stock could be modelled" reads as a broken cache; the movers dropped."""
+    _all_dropped_shortlist(monkeypatch, ["AAPL", "MSFT", "NVDA"])
+    with pytest.raises(SystemExit) as excinfo:
+        main(["shortlist", "AAPL", "MSFT", "NVDA", "--gainers", "3"])
+
+    message = str(excinfo.value)
+    assert "all 3 biggest gainers of session 2026-08-14 were dropped" in message
+    assert "AAPL, MSFT, NVDA" in message
+    # The reader is told how to get a report, not just that there isn't one.
+    assert "--refresh" in message and "--gainers" in message
+    # A stale mover is stopped by _fresh_enough before the fit, so offering
+    # staleness here would send the reader after a cause this path cannot have.
+    assert "stale" not in message
+
+
+def test_losing_the_only_mover_is_singular(monkeypatch):
+    """ "All 1 biggest gainers were dropped" would be a plural about one name."""
+    _all_dropped_shortlist(monkeypatch, ["AAPL"])
+    with pytest.raises(SystemExit) as excinfo:
+        main(["shortlist", "AAPL", "--gainers", "1"])
+
+    message = str(excinfo.value)
+    assert "the biggest gainer of session 2026-08-14 was dropped" in message
+    # The tail is singular too: "none of them" about one name is the same slip.
+    assert "(AAPL), not fittable; the warning says why" in message
+
+
+def test_a_run_without_gainers_keeps_the_universe_wide_error(monkeypatch):
+    """Without a mover pass there are no chosen names to blame, so nothing is claimed."""
+    _all_dropped_shortlist(monkeypatch, ["AAPL", "MSFT"])
+    with pytest.raises(SystemExit) as excinfo:
+        main(["shortlist", "AAPL", "MSFT"])
+
+    assert str(excinfo.value) == "error: no stock could be modelled"
+
+
 def test_screen_flags_are_scaled_into_criteria(monkeypatch, tmp_path):
     from gapmodel import cli
     from gapmodel.screener import Screen

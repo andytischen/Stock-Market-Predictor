@@ -818,6 +818,29 @@ def _mover_selection(kept: int, chosen: int, candidates: int, moved: str) -> str
     )
 
 
+def _all_movers_dropped(chosen: Sequence[str], moved: str) -> str:
+    """Why a ``--gainers`` run has nothing to print, in its own terms.
+
+    ``forecast_universe`` speaks for the universe it was handed ("no stock could
+    be modelled"), which reads as a broken cache when the run in fact chose its
+    movers and then lost every one of them to too little history. Naming them
+    says which request came back empty, and how wide it was. Staleness is not
+    offered as a cause: a stale mover never reaches the fit, because
+    ``_fresh_enough`` has already raised on it.
+    """
+    if len(chosen) == 1:
+        dropped = f"the biggest gainer of session {moved} was dropped"
+        unfittable = "not fittable; the warning says why"
+    else:
+        dropped = f"all {len(chosen)} biggest gainers of session {moved} were dropped"
+        unfittable = "none of them fittable; the warning for each name says why"
+    return (
+        f"{dropped} ({', '.join(chosen)}), {unfittable}, usually too few labelled "
+        "rows to train on. Re-run with --refresh for more history, or a wider "
+        "--gainers to reach further down the movers"
+    )
+
+
 def _cmd_shortlist(args: argparse.Namespace) -> None:
     """Rank the universe by how much edge each name's own record supports."""
     candidates = args.symbols or modelled_universe()
@@ -849,7 +872,12 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     # After the mover pass, so that a stale listing is judged only when it is one
     # of the names about to be fitted.
     symbols = _fresh_enough(panel, args, symbols)
-    picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
+    try:
+        picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
+    except RuntimeError as exc:
+        if not chosen or moved is None:
+            raise
+        raise SystemExit(f"error: {_all_movers_dropped(chosen, moved)}") from exc
     # Described once the picks are in, the last place names are dropped: a stale
     # listing or one short of training rows leaves the report, and a sentence
     # written before either would claim movers the table does not hold.
