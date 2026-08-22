@@ -31,6 +31,16 @@ def served(monkeypatch):
         server.server_close()
 
 
+def _ipv6_loopback_is_bindable():
+    """Whether `::1` can be bound here: not every CI host has IPv6 at all."""
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as sock:
+            sock.bind(("::1", 0))
+    except OSError:
+        return False
+    return True
+
+
 def _get(url):
     with urllib.request.urlopen(url) as response:
         return response.status, response.read().decode()
@@ -116,6 +126,7 @@ def test_the_bind_family_follows_the_spelling_of_the_host(host, family):
     assert web.bind_family(host) == family
 
 
+@pytest.mark.skipif(not _ipv6_loopback_is_bindable(), reason="no IPv6 loopback on this host")
 @pytest.mark.parametrize("host", ["::1", "[::1]"])
 def test_an_ipv6_host_is_bound_and_advertised_bracketed(monkeypatch, capsys, host):
     class OneShot(ThreadingHTTPServer):
