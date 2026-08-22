@@ -817,6 +817,27 @@ def _mover_selection(kept: int, chosen: int, candidates: int, moved: str) -> str
     )
 
 
+def _all_movers_dropped(chosen: Sequence[str], moved: str) -> str:
+    """Why a ``--gainers`` run has nothing to print, in its own terms.
+
+    ``forecast_universe`` speaks for the universe it was handed ("no stock could
+    be modelled"), which reads as a broken cache when the run in fact chose its
+    movers and then lost every one of them to a stale listing or to too little
+    history. Naming them says which request came back empty, and how wide it was.
+    """
+    movers = (
+        f"the biggest gainer of session {moved} was dropped"
+        if len(chosen) == 1
+        else f"all {len(chosen)} biggest gainers of session {moved} were dropped"
+    )
+    return (
+        f"{movers} ({', '.join(chosen)}), as a stale listing or short of training "
+        "rows; the warning for each name says which. Re-run with --refresh to "
+        "update the cache, a wider --gainers to reach further down the movers, or "
+        "--allow-stale to forecast the old bars anyway"
+    )
+
+
 def _cmd_shortlist(args: argparse.Namespace) -> None:
     """Rank the universe by how much edge each name's own record supports."""
     candidates = args.symbols or modelled_universe()
@@ -848,7 +869,12 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     # After the mover pass, so that a stale listing is judged only when it is one
     # of the names about to be fitted.
     symbols = _fresh_enough(panel, args, symbols)
-    picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
+    try:
+        picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
+    except RuntimeError as exc:
+        if not chosen or moved is None:
+            raise
+        raise SystemExit(f"error: {_all_movers_dropped(chosen, moved)}") from exc
     # Described once the picks are in, the last place names are dropped: a stale
     # listing or one short of training rows leaves the report, and a sentence
     # written before either would claim movers the table does not hold.

@@ -156,10 +156,12 @@ fewer for a reason other than the latest-bar rule: `_changes` skips a name whose
 raises (a single-bar series, say) with a stderr `no last move for SYM: ...`. A test that only
 greps for "biggest gainers" passes on all three and proves nothing.
 
-The all-dropped case cannot be observed at all: with no pick left, `forecast_universe` raises
-`RuntimeError("no stock could be modelled")` and the CLI exits 1 printing only that `error:` line,
-so there is no "0 of the 1 biggest gainer" report to inspect.
-Expect the abort rather than filing the missing sentence as a bug.
+The all-dropped case has no report to inspect: with no pick left, `forecast_universe` raises
+`RuntimeError("no stock could be modelled")` and the CLI exits 1, so there is no
+"0 of the 1 biggest gainer" sentence. Expect the abort, but assert the `error:` line names the
+chosen movers — `all 3 biggest gainers of session DATE were dropped (AAPL, MSFT, NVDA)`, or the
+singular `the biggest gainer of session DATE was dropped` — since the bare universe-wide message
+survives only for a run that never selected movers.
 
 ## Pandas `na_rep` only reaches a float column
 
