@@ -1,3 +1,4 @@
+import socket
 import threading
 import urllib.error
 import urllib.request
@@ -98,6 +99,44 @@ def test_an_unexpected_rendering_failure_is_answered_as_a_500(served, monkeypatc
 )
 def test_browser_url_is_always_reachable(host, expected):
     assert web.browser_url(host, 8000) == expected
+
+
+@pytest.mark.parametrize(
+    ("host", "family"),
+    [
+        ("127.0.0.1", socket.AF_INET),
+        ("0.0.0.0", socket.AF_INET),
+        ("example.internal", socket.AF_INET),
+        ("::1", socket.AF_INET6),
+        ("[::1]", socket.AF_INET6),
+        ("::", socket.AF_INET6),
+    ],
+)
+def test_the_bind_family_follows_the_spelling_of_the_host(host, family):
+    assert web.bind_family(host) == family
+
+
+@pytest.mark.parametrize("host", ["::1", "[::1]"])
+def test_an_ipv6_host_is_bound_and_advertised_bracketed(monkeypatch, capsys, host):
+    class OneShot(ThreadingHTTPServer):
+        def serve_forever(self, poll_interval=0.5):
+            return None
+
+    monkeypatch.setattr(web, "ThreadingHTTPServer", OneShot)
+    web.serve_dashboard(
+        {},
+        None,
+        symbols={"Asia": []},
+        host=host,
+        port=0,
+        region="Asia",
+        at=None,
+        regularisation=0.1,
+        launch_browser=False,
+    )
+    out = capsys.readouterr().out
+    assert "http://[::1]:" in out
+    assert "warning" not in out
 
 
 @pytest.fixture
