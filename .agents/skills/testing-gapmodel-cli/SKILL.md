@@ -626,6 +626,85 @@ hostname still dies at bind time with
 `nohup ... &` inside a shell call that later hits the tool's timeout dies with it (the log file can
 end up never created). Use `setsid nohup ... > /tmp/log 2>&1 < /dev/null &` and poll the log.
 
+## Cross-market features are in sigmas, not percent
+
+The cross-market block is `mkt_<name>_shock`, `mkt_<name>_shock_5` and `mkt_<name>_vol_60`
+(a daily / 5-day log return divided by its own trailing `MKT_VOL_WINDOW`-session realised
+volatility measured **to the previous bar**, then clipped to `±MKT_SHOCK_CLIP`). `mkt_*_return`
+and `mkt_*_return_5` no longer exist anywhere in `gapmodel/`; a few tests still use the old
+names inside *synthetic* contribution dicts (`tests/test_export.py`, `tests/test_dashboard.py`,
+`tests/test_shortlist.py`), which is harmless — grep `gapmodel/` rather than the whole repo
+before filing a stale-name finding.
+
+Two consequences when testing shocks:
+
+- `predict --shock '^SYM=-4%'` converts the move into sigmas via the companion `*_vol_*`
+  column, so a shock's effect scales with the *current* volatility regime. Asserting "a -4%
+  Kospi lowers European p(open up)" is not enough — also assert it does **not** collapse to
+  ~0, which is the bug the scaling fixes. Contrast is cheap and worth printing: adding the raw
+  log return to a sigma-scaled column (the old path) barely moves the probability at all
+  (measured: -4% gave 0.4085 raw-add vs 0.3326 scaled, from a 0.4127 baseline).
+- The `±4` clip does **not** bind at realistic moves. With `^KS11` 60-day vol near 5% daily,
+  even a ±10% hypothetical only reaches ~3.3 sigma. To exercise the clip you must ask for
+  something extreme (±30%, ±50%) and then assert the shock column equals exactly ±4.0 and that
+  two different saturated moves give an identical probability.
+
+### Verify the lag-safe denominator, not just the column
+
+The strong check is to recompute the column from the source series at *both* candidate
+denominators and require a match at exactly one: `r.rolling(60).std().shift(1)` matched all
+4682 sessions exactly, while the unshifted `r.rolling(60).std()` differed on 4673 of them —
+so the test is demonstrably capable of failing.
+
+## Testing `calibrated()` / the scorecard's published probabilities
+
+`scorecard.score()` runs `calibrated(walk_forward(...))`, so the printed probability is the one
+`predict` publishes, not the raw walk-forward number. Useful facts:
+
+- `calibrated` drops the first `MIN_CALIBRATION` (250) predictions and refits the Platt map
+  every `REFIT_EVERY` (21) sessions. For a 4179-session record you get 3929 rows, and the
+  index must be exactly `raw.index[250:]`.
+- **The leakage probe that actually proves the claim**: flip a single outcome deep in the record
+  and re-run `calibrated`. The calibrated probability at that same position must be *unchanged*,
+  and the first position that moves must be exactly the next block boundary
+  (`((pos // 21) + 1) * 21`). Anything earlier is self-outcome leakage. Comparing metrics before
+  and after proves nothing here.
+- Reproduce block 0 by hand: `calibrator(Backtest(p[:250], y[:250]))(p[250:271])` must match to
+  0.0.
+- The raw walk-forward does reach a flat `1.0` probability while the calibrated series tops out
+  near 0.999 — a good demonstration of why the calibrated number is the honest one to score.
+- Cross-check the CLI against the library: the last N `scorecard --csv` probabilities must equal
+  `calibrated(walk_forward(...))` at those sessions to 1e-9.
+
+## Runtime budget for the index commands (matters more than it looks)
+
+On this 8-core box a *single* market's `predict` is ~2 min wall (BLAS saturates all cores), so
+the all-market commands are long and must be started in the background first:
+`predict` / `scorecard` / `export` over all 17 markets each take ~30-50 min, and worse when they
+run concurrently. `backtest --market X`, `sectors`, `dashboard`, `score`, `screen`, `social-arb`
+and `asia` are minutes at most.
+
+To test many shocks without paying 2 min per CLI invocation, reuse one fit in a throwaway
+script: `build_features(sym, panel, forecast_row=True)` → `walk_forward` → `fit` →
+`live_feature_row` → `calibrator(backtest)`, then loop `shocked_row(live, {sym: move})`. Confirm
+the sweep against **one** real CLI run per sign; the numbers match to 4dp.
+
+## CLI argument gotchas that cost a run
+
+- `export` takes `--out PATH`; a positional path is rejected with `unrecognized arguments`
+  (exit 2). `score` is the *z-score screener* and needs positional tickers (`score MU AAPL JPM`),
+  not a market.
+- The committed `docs/forecast-log.csv` may be **header-only**. `journal --settle-only` against a
+  copy of it then reports `0 rows / settled 0` and passes vacuously — to exercise recording and
+  append-only behaviour you need a real forecast run (`journal --market ^GDAXI --log /tmp/x.csv`,
+  ~2 min) and a byte-identical `diff` after the second run (second run prints
+  `recorded 0 of 1 forecasts`).
+- `scorecard --log` idempotence: re-running with the same window must leave the file
+  byte-identical, and a *narrower* `--window` must not shrink it (the merge keeps every logged
+  session). Check with `diff` plus a pandas duplicate count on `(session, symbol)`.
+- Beware `cd repo && nohup A & cp file /tmp` in one shell line: everything after the `&` runs in
+  the original cwd, so the `cp` silently fails. Use separate calls.
+
 ## Devin Secrets Needed
 
 None. Yahoo Finance is reachable unauthenticated from the test box.
