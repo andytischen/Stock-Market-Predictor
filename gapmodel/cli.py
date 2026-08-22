@@ -827,16 +827,16 @@ def _all_movers_dropped(chosen: Sequence[str], moved: str) -> str:
     offered as a cause: a stale mover never reaches the fit, because
     ``_fresh_enough`` has already raised on it.
     """
-    movers = (
-        f"the biggest gainer of session {moved} was dropped"
-        if len(chosen) == 1
-        else f"all {len(chosen)} biggest gainers of session {moved} were dropped"
-    )
+    if len(chosen) == 1:
+        dropped = f"the biggest gainer of session {moved} was dropped"
+        unfittable = "not fittable; the warning says why"
+    else:
+        dropped = f"all {len(chosen)} biggest gainers of session {moved} were dropped"
+        unfittable = "none of them fittable; the warning for each name says why"
     return (
-        f"{movers} ({', '.join(chosen)}), none of them fittable; the warning for "
-        "each name says why, usually too few labelled rows to train on. Re-run "
-        "with --refresh for more history, or a wider --gainers to reach further "
-        "down the movers"
+        f"{dropped} ({', '.join(chosen)}), {unfittable}, usually too few labelled "
+        "rows to train on. Re-run with --refresh for more history, or a wider "
+        "--gainers to reach further down the movers"
     )
 
 

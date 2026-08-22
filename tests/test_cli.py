@@ -380,7 +380,10 @@ def test_losing_the_only_mover_is_singular(monkeypatch):
     with pytest.raises(SystemExit) as excinfo:
         main(["shortlist", "AAPL", "--gainers", "1"])
 
-    assert "the biggest gainer of session 2026-08-14 was dropped" in str(excinfo.value)
+    message = str(excinfo.value)
+    assert "the biggest gainer of session 2026-08-14 was dropped" in message
+    # The tail is singular too: "none of them" about one name is the same slip.
+    assert "(AAPL), not fittable; the warning says why" in message
 
 
 def test_a_run_without_gainers_keeps_the_universe_wide_error(monkeypatch):
