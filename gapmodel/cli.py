@@ -503,7 +503,7 @@ def _cmd_export(args: argparse.Namespace) -> None:
 
 
 def _last_monday() -> pd.Timestamp:
-    """Midnight UTC on the most recent Monday, or the one before on a Monday.
+    """Midnight UTC on the most recent Monday, or the Monday before if today is one.
 
     Midnight rather than the opening hour: daily bars are indexed on the
     normalised session date, so any intra-day cutoff would drop the Monday
