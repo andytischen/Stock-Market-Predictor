@@ -42,7 +42,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .features import STALE_GAP_TOLERANCE, dividend_adjusted
+from .features import STALE_GAP_TOLERANCE, dividend_factor
 from .predict import Forecast
 from .stocks import is_stock, target_market
 
@@ -125,13 +125,25 @@ def _gap_bars(panel: dict[str, pd.DataFrame] | None, symbol: str) -> pd.DataFram
     which rows they keep and in nothing else: a company's bars are put on a
     total-return basis either way, so an ex-dividend morning cannot read as an
     auction to one of them and as a repeated close to the other.
+
+    The basis is taken from the usable rows alone, because that is the frame
+    ``features`` adjusts and the dividend factor is carried across gaps in it: a
+    half-published session left in would lend its neighbours a factor the label
+    was never built with. The rows that survive the filter therefore come out of
+    here bit-for-bit as ``features`` has them, and the ones it drops inherit the
+    factor of the session beside them -- enough to tell an auction from a
+    repeated close, which is all they are read for.
     """
     if not panel:
         return None
     bars = panel.get(_gap_symbol(symbol))
-    if bars is None:
-        return None
-    return dividend_adjusted(bars) if is_stock(symbol) else bars
+    if bars is None or not is_stock(symbol):
+        return bars
+    factor = dividend_factor(bars.dropna(subset=["Open", "Close"]))
+    if factor is None:
+        return bars
+    factor = factor.reindex(bars.index).ffill().bfill().fillna(1.0)
+    return bars.assign(Open=bars["Open"] * factor, Close=bars["Close"] * factor)
 
 
 def opening_bars(panel: dict[str, pd.DataFrame] | None, symbol: str) -> pd.DataFrame | None:

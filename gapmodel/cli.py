@@ -502,11 +502,13 @@ def _cmd_export(args: argparse.Namespace) -> None:
 
 
 def _last_monday() -> pd.Timestamp:
-    """Most recent Monday at midnight UTC — the start of last week's sessions.
+    """Midnight UTC on the most recent Monday, or the one before on a Monday.
 
     Midnight rather than the opening hour: daily bars are indexed on the
     normalised session date, so any intra-day cutoff would drop the Monday
-    session itself from the window.
+    session itself from the window.  Stepping back a week on a Monday keeps a
+    run made before the open from reporting on a single session, at the cost of
+    a window that spans both Mondays.
     """
     now = pd.Timestamp.now("UTC").tz_localize(None)
     # weekday(): Mon=0 … Sun=6.  Roll back to the most recent Monday.
@@ -796,6 +798,27 @@ def _shortlist_equities(symbols: list[str]) -> list[str]:
     return list(dict.fromkeys(symbols + peers))
 
 
+def _mover_selection(kept: int, chosen: int, candidates: int, moved: str) -> str:
+    """How a ``--gainers`` shortlist reached the names printed beneath it.
+
+    Both counts are named because a dropped mover is not the smallest one: a
+    stale listing or a name short of training rows can be the largest riser of
+    the session, so calling what is left "the 3 largest movers" would promote
+    the survivors into a ranking they did not earn. The session is named, and so
+    is the ranking rule: sorting descending and slicing gives the smallest
+    fallers on a session where everything fell, so these are the largest movers
+    of that session and calling them gainers would assert a rise the data may
+    deny.
+    """
+    movers = "largest mover" if chosen == 1 else f"{chosen} largest movers"
+    held = f"the {movers}" if kept == chosen else f"{kept} of the {movers}"
+    return (
+        f"{held} of session {moved}, out of {candidates} candidates, ranked on "
+        "their move in that session (descending, so on a falling session these "
+        "are the smallest fallers)"
+    )
+
+
 def _cmd_shortlist(args: argparse.Namespace) -> None:
     """Rank the universe by how much edge each name's own record supports."""
     candidates = args.symbols or modelled_universe()
@@ -817,9 +840,10 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     # bars are cheap and each walk-forward is not, so the mover pass narrows
     # after the panel exists rather than guessing which names moved beforehand.
     symbols = candidates
+    chosen: list[str] = []
     moved: str | None = None
     if args.gainers:
-        symbols = biggest_gainers(panel, candidates, args.gainers)
+        symbols = chosen = biggest_gainers(panel, candidates, args.gainers)
         if not symbols:
             raise SystemExit(
                 "error: no candidate could be ranked: none loaded with two closes "
@@ -831,17 +855,11 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     # of the names about to be fitted.
     symbols = _fresh_enough(panel, args, symbols)
     picks = forecast_universe(panel, symbols=symbols, c=args.regularisation)
-    # Counted off the picks, the last place names are dropped: a stale listing or
-    # one short of training rows leaves the report, and a count taken before
-    # either would claim movers the table does not hold. The session is named,
-    # and so is the ranking rule: sorting descending and slicing gives the
-    # smallest fallers on a session where everything fell, so these are the
-    # largest movers of that session and calling them gainers would assert a rise
-    # the data may deny.
+    # Described once the picks are in, the last place names are dropped: a stale
+    # listing or one short of training rows leaves the report, and a sentence
+    # written before either would claim movers the table does not hold.
     selection = (
-        f"the {len(picks)} largest movers of session {moved}, out of "
-        f"{len(candidates)} candidates, ranked on their move in that session "
-        "(descending, so on a falling session these are the smallest fallers)"
+        _mover_selection(len(picks), len(chosen), len(candidates), moved)
         if moved is not None
         else None
     )
@@ -1111,7 +1129,8 @@ def build_parser() -> argparse.ArgumentParser:
     window.add_argument(
         "--last-week",
         action="store_true",
-        help="shorthand for --since the most recent Monday (00:00 UTC)",
+        help="shorthand for --since 00:00 UTC on the most recent Monday, "
+        "or the Monday before if today is one",
     )
     backtest.set_defaults(func=_cmd_backtest)
 
