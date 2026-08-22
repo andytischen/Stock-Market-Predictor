@@ -368,7 +368,10 @@ def test_losing_every_mover_names_them_instead_of_blaming_the_universe(monkeypat
     assert "all 3 biggest gainers of session 2026-08-14 were dropped" in message
     assert "AAPL, MSFT, NVDA" in message
     # The reader is told how to get a report, not just that there isn't one.
-    assert "--refresh" in message and "--allow-stale" in message
+    assert "--refresh" in message and "--gainers" in message
+    # A stale mover is stopped by _fresh_enough before the fit, so offering
+    # staleness here would send the reader after a cause this path cannot have.
+    assert "stale" not in message
 
 
 def test_losing_the_only_mover_is_singular(monkeypatch):

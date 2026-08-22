@@ -822,8 +822,10 @@ def _all_movers_dropped(chosen: Sequence[str], moved: str) -> str:
 
     ``forecast_universe`` speaks for the universe it was handed ("no stock could
     be modelled"), which reads as a broken cache when the run in fact chose its
-    movers and then lost every one of them to a stale listing or to too little
-    history. Naming them says which request came back empty, and how wide it was.
+    movers and then lost every one of them to too little history. Naming them
+    says which request came back empty, and how wide it was. Staleness is not
+    offered as a cause: a stale mover never reaches the fit, because
+    ``_fresh_enough`` has already raised on it.
     """
     movers = (
         f"the biggest gainer of session {moved} was dropped"
@@ -831,10 +833,10 @@ def _all_movers_dropped(chosen: Sequence[str], moved: str) -> str:
         else f"all {len(chosen)} biggest gainers of session {moved} were dropped"
     )
     return (
-        f"{movers} ({', '.join(chosen)}), as a stale listing or short of training "
-        "rows; the warning for each name says which. Re-run with --refresh to "
-        "update the cache, a wider --gainers to reach further down the movers, or "
-        "--allow-stale to forecast the old bars anyway"
+        f"{movers} ({', '.join(chosen)}), none of them fittable; the warning for "
+        "each name says why, usually too few labelled rows to train on. Re-run "
+        "with --refresh for more history, or a wider --gainers to reach further "
+        "down the movers"
     )
 
 

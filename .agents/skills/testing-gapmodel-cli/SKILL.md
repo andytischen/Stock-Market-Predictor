@@ -161,7 +161,11 @@ The all-dropped case has no report to inspect: with no pick left, `forecast_univ
 "0 of the 1 biggest gainer" sentence. Expect the abort, but assert the `error:` line names the
 chosen movers — `all 3 biggest gainers of session DATE were dropped (AAPL, MSFT, NVDA)`, or the
 singular `the biggest gainer of session DATE was dropped` — since the bare universe-wide message
-survives only for a run that never selected movers.
+survives only for a run that never selected movers. Reach it by clipping every chosen mover below
+`MIN_TRAIN` (keep the mover-session bar); staleness is not another way in, because all-stale movers
+hit `StaleInputs` ("every requested name has no bar within N days of ...") before
+`forecast_universe` is called at all, which is why that message blames training rows and not the
+cache's age.
 
 ## Pandas `na_rep` only reaches a float column
 
