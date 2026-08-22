@@ -21,6 +21,7 @@ from .intraday import load_hourly_panel
 from .journal import (
     DEFAULT_LOG,
     MIN_SETTLED,
+    PENDING,
     decayed,
     read_log,
     record,
@@ -896,7 +897,14 @@ def _cmd_journal(args: argparse.Namespace) -> None:
     min_settled = resolved_minimum(args.window, args.min_settled)
     path = Path(args.log)
     journal = read_log(path)
-    panel = _panel(args)
+    # A company needs its peers and its ``Adj Close`` loaded, and the log
+    # outlives the flags: a name journalled by an earlier run is still owed a
+    # settlement, so the rows waiting for one widen the download as much as
+    # ``--market`` does. Left to the index panel those rows would sit pending
+    # for ever behind "not in the panel".
+    wanted = args.market or [m.symbol for m in MARKETS]
+    owed = journal.loc[journal["status"] == PENDING, "symbol"]
+    panel = _stock_panel(args) if any(is_stock(s) for s in [*wanted, *owed]) else _panel(args)
     if not args.settle_only:
         forecasts = _forecast(panel, args, _hourly(args))
         journal, added = record(journal, forecasts, panel)
@@ -1252,7 +1260,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="journal today's forecasts and score the ones whose opens have printed",
     )
     journal.add_argument(
-        "--market", action="append", type=_market_symbol, help="restrict to a symbol"
+        "--market",
+        action="append",
+        type=_target_symbol,
+        help="restrict to a symbol; a modelled single stock is accepted too",
     )
     journal.add_argument(
         "--log", default=str(DEFAULT_LOG), help=f"journal CSV (default {DEFAULT_LOG})"

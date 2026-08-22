@@ -361,6 +361,42 @@ the score stops measuring the model. Note the trackers distribute, and leaving t
 flips the gap sign on ~4% of `STW.AX` and ~0.7% of `ISF.L` sessions; that is a property of the
 model's label, not of the journal.
 
+### Company targets in the journal
+
+`journal --market MU` takes a modelled single stock, and a run also widens its download to
+`_stock_panel` when a company row is already `pending` in the log — otherwise the index panel
+would leave that row behind `WARNING <SYM> is not in the panel: leaving its rows pending` for
+ever. Test the dividend basis on a company: an index symbol returns early from `_gap_bars` and
+cannot exercise the adjustment at all.
+
+**Getting a company into a temp cache.** No company CSV ships in `~/.cache/gapmodel`, so fetch one
+into a temp dir: `load_panel(["KO"], start="2005-01-01", cache_dir=Path("/tmp/cache-stock"),
+require=("Adj Close",))`, then copy `KO.*` into a copy of the real cache. **Match the start date
+the CLI will ask for** (the CLI default is `2005-01-01`): the cached `.start` sidecar is compared
+against the requested start, and a mismatch silently re-downloads and *overwrites your planted
+bars* mid-test. The tell is a row count that disagrees with the CSV on disk — print both before
+trusting a run. `KO` is a good subject: ~5440 rows and ~46 real ex-dividend factor steps
+(`Adj Close / Close` from ~0.70 to 1.0).
+
+### The dividend basis: how to make old and new visibly disagree
+
+The factor is `Adj Close / Close`, `ffill().bfill()`-ed. Measuring it on the *unfiltered* frame
+versus on `dropna(subset=["Open","Close"])` differs in exactly one situation, so build that
+situation deliberately in a cache copy:
+
+1. session **A**: blank `Open`, keep `Close`, and set `Adj Close = 0.9 * Close` (a half-published
+   row carrying an anomalous factor);
+2. session **B** (the next one): blank `Adj Close` so B's factor must be inherited.
+
+`opening_bars` drops A in both versions, so only B's *basis* moves: the old code hands B A's 0.9,
+the new code hands it the last complete session's factor. Pick B so its raw gap is **positive**
+(`Open` above the previous complete `Close`) — then the 0.9 scaling pushes the old gap negative
+and the two trees disagree on `outcome`, not merely on a price, which is far harder to dismiss.
+Assert the branch's settled `prev_close`/`open` equal
+`dividend_adjusted(bars.dropna(subset=["Open","Close"]))` to the last stored digit, and assert
+both halves of the intent at once: the half-published row is still present in `_gap_bars` (the
+late-check view) yet absent from `opening_bars` (the settlement view).
+
 ### Forcing the statuses without touching the real cache
 
 `cp -r ~/.cache/gapmodel /tmp/cache-mod` and pass `--cache /tmp/cache-mod`. Then, editing the

@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from gapmodel.cli import _last_monday, _since_timestamp, build_parser, main
+from gapmodel.journal import read_log
 from gapmodel.markets import MARKETS
 from gapmodel.staleness import StaleInputs
 
@@ -215,6 +216,52 @@ def test_journal_and_scorecard_are_separate_commands():
     assert (live.window, live.min_settled) == (90, 5)
     assert live.settle_only and not live.fail_on_decay
     assert live.log.endswith("forecast-log.csv")
+
+
+def test_journal_accepts_a_modelled_single_stock_like_the_other_scored_commands():
+    # backtest and scorecard both grade a company; a journal that refused one at
+    # parse time could never hold the live record of a call `stock` printed.
+    assert build_parser().parse_args(["journal", "--market", "mu"]).market == ["MU"]
+
+
+def test_journal_loads_the_peer_panel_for_a_company_it_still_owes_a_settlement(
+    tmp_path, monkeypatch, capsys
+):
+    """A company row waits on bars the index panel does not carry.
+
+    The log outlives the flags, so the download is widened by the rows already
+    pending and not only by ``--market``: on the index panel alone MU's bars are
+    never loaded and the row sits pending for ever behind "not in the panel".
+    """
+    from gapmodel import cli
+
+    bars = pd.DataFrame(
+        {"Open": [99.0, 101.0], "Close": [100.0, 103.0], "Adj Close": [100.0, 103.0]},
+        index=pd.to_datetime(["2026-08-13", "2026-08-14"]),
+    )
+    monkeypatch.setattr(
+        cli, "_panel", lambda _args: pytest.fail("a pending company needs the peer panel")
+    )
+    monkeypatch.setattr(cli, "_stock_panel", lambda _args: {"MU": bars})
+    log_path = tmp_path / "forecast-log.csv"
+    pd.DataFrame(
+        [
+            {
+                "recorded": "2026-08-13T20:00:00Z",
+                "session": "2026-08-14",
+                "symbol": "MU",
+                "market": "Micron Technology",
+                "region": "US",
+                "p_open_up": 0.61,
+                "status": "pending",
+            }
+        ]
+    ).to_csv(log_path, index=False)
+
+    main(["journal", "--settle-only", "--log", str(log_path)])
+
+    assert "settled 1 session(s)" in capsys.readouterr().out
+    assert read_log(log_path).at[0, "status"] == "settled"
 
 
 def test_a_shorter_journal_window_leaves_the_minimum_to_be_narrowed():
