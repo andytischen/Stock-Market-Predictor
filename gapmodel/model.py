@@ -15,6 +15,10 @@ MIN_TRAIN = 500
 # The hourly window is short, so the intraday variant needs a smaller warm-up.
 INTRADAY_MIN_TRAIN = 200
 REFIT_EVERY = 21
+# Out-of-sample predictions a Platt map needs behind it before it is worth
+# applying. The map has two parameters fitted on binary outcomes, so a few
+# dozen sessions would move it as much as the miscalibration it corrects.
+MIN_CALIBRATION = 250
 
 
 def make_pipeline(c: float = 0.1) -> Pipeline:
@@ -148,6 +152,50 @@ def calibrator(backtest: Backtest) -> Calibration:
         intercept=float(platt.intercept_[0]),
         lo=float(logit.min()),
         hi=float(logit.max()),
+    )
+
+
+def calibrated(
+    backtest: Backtest,
+    min_history: int = MIN_CALIBRATION,
+    step: int = REFIT_EVERY,
+) -> Backtest:
+    """The walk-forward record restated in the probabilities a reader was shown.
+
+    A forecast is published through ``calibrator``: the raw model reaches
+    certainties its own record does not support, and the Platt map pulls them
+    back. Scoring the raw walk-forward therefore judges a number nobody ever
+    saw, and judges it where the model is weakest — a raw 0.008 that opens up
+    costs a Brier score several times what the published 0.2 would have, so a
+    handful of confident sessions can bury a window that was merely wrong about
+    the direction.
+
+    The map is refitted forward like the model itself: each block of sessions is
+    calibrated by the out-of-sample predictions that preceded it, never by its
+    own outcomes, and the first ``min_history`` predictions are dropped rather
+    than mapped by a calibration fitted on nothing. Below that many predictions
+    the record is returned unchanged, since there is nothing to calibrate with.
+    """
+    probabilities, outcomes = backtest.probabilities, backtest.outcomes
+    if len(probabilities) <= min_history:
+        return backtest
+
+    blocks: list[pd.Series] = []
+    for start in range(min_history, len(probabilities), step):
+        stop = min(start + step, len(probabilities))
+        history = Backtest(
+            probabilities=probabilities.iloc[:start],
+            outcomes=outcomes.iloc[:start],
+        )
+        mapped = calibrator(history)(probabilities.iloc[start:stop].to_numpy())
+        blocks.append(pd.Series(mapped, index=probabilities.index[start:stop]))
+
+    published = pd.concat(blocks)
+    realised = outcomes.loc[published.index]
+    return Backtest(
+        probabilities=published,
+        outcomes=realised,
+        metrics=_metrics(published.to_numpy(), realised.to_numpy()),
     )
 
 
