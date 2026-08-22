@@ -10,7 +10,7 @@ import pandas as pd
 
 from . import model as model_mod
 from .events import caveats
-from .features import _column_name, build_features, live_feature_row
+from .features import MKT_SHOCK_CLIP, _column_name, build_features, live_feature_row
 from .markets import CURVE_FRONT, CURVE_STRIP, CURVE_WINDOW, MARKETS
 from .stocks import target_market
 
@@ -69,7 +69,8 @@ def shocked_row(live: pd.DataFrame, shocks: dict[str, float]) -> pd.DataFrame:
 
     A shock is applied to every feature derived from that symbol's latest bar:
     the one-day and five-day returns (a move today is also part of the week),
-    the VIX level, and the volatility-normalised shock feature.
+    the VIX level, and the volatility-normalised shock features, where the move
+    is first converted into deviations of the volatility already realised.
 
     A symbol this target reads nothing from — its own symbol, above all, which
     no model may use to predict itself — has no column to bump. That is said out
@@ -81,8 +82,6 @@ def shocked_row(live: pd.DataFrame, shocks: dict[str, float]) -> pd.DataFrame:
         name = _column_name(symbol)
         touched = False
         for column in (
-            f"mkt_{name}_return",
-            f"mkt_{name}_return_5",
             f"ind_{name}_return",
             f"ind_{name}_return_5",
             f"peer_{name}_return",
@@ -96,12 +95,24 @@ def shocked_row(live: pd.DataFrame, shocks: dict[str, float]) -> pd.DataFrame:
             touched = True
         # A volatility-normalised shock feature has to move with its return.
         # The volatility itself is measured up to the previous bar, so a move
-        # today leaves the denominator alone.
-        vol = [c for c in bumped.columns if c.startswith(f"ind_{name}_vol_")]
-        if f"ind_{name}_shock" in bumped and vol:
+        # today leaves the denominator alone.  A cross-market read is carried
+        # entirely by such features, so the same conversion is what makes it
+        # shockable at all: added raw, a 10% move would land as ten sigma.
+        for prefix in (f"ind_{name}", f"mkt_{name}"):
+            vol = [c for c in bumped.columns if c.startswith(f"{prefix}_vol_")]
+            if not vol:
+                continue
             sigma = bumped[vol[0]]
-            bumped[f"ind_{name}_shock"] += move / sigma.where(sigma > 0)
-            touched = True
+            for column in (f"{prefix}_shock", f"{prefix}_shock_5"):
+                if column not in bumped:
+                    continue
+                scaled = bumped[column] + move / sigma.where(sigma > 0)
+                # Cross-market reads are held inside the range they are built
+                # in, so a hypothetical cannot be pushed where no fit has been.
+                if prefix.startswith("mkt_"):
+                    scaled = scaled.clip(-MKT_SHOCK_CLIP, MKT_SHOCK_CLIP)
+                bumped[column] = scaled
+                touched = True
         # The curve features are differences between the two oil funds, so a
         # move in either leg tilts them, in opposite directions.
         sign = 1.0 if symbol == CURVE_FRONT else -1.0 if symbol == CURVE_STRIP else 0.0

@@ -33,6 +33,12 @@ OIL_VOL_WINDOW = 20
 # the oil window so both shock series share a comparable normalisation scale,
 # but defined separately so it can be tuned independently.
 FX_VOL_WINDOW = 20
+# Cross-market moves are read in standard deviations of the volatility regime
+# the target already knew about, not in raw percent.
+MKT_VOL_WINDOW = 60
+# A move beyond this many deviations is held at the edge: past it the linear
+# model is extrapolating out of every sample it was ever fitted on.
+MKT_SHOCK_CLIP = 4.0
 # A gap of exactly zero means the source repeated the previous close instead of
 # publishing a real opening print; such sessions cannot be labelled.
 STALE_GAP_TOLERANCE = 1e-9
@@ -110,6 +116,17 @@ def _column_name(symbol: str) -> str:
     for character in "=-.":
         cleaned = cleaned.replace(character, "_")
     return cleaned.lower()
+
+
+def _shock(returns: pd.Series, dates: pd.DatetimeIndex, lag: int) -> pd.Series:
+    """``returns`` in deviations of their own trailing volatility, clipped.
+
+    The denominator is measured up to the previous bar, so the session being
+    scaled is not part of the scale it is judged by.
+    """
+    vol = returns.rolling(MKT_VOL_WINDOW).std().shift(1)
+    scaled = (returns / vol.where(vol > 0)).clip(-MKT_SHOCK_CLIP, MKT_SHOCK_CLIP)
+    return as_of(scaled, dates, lag)
 
 
 def _lag_days(source_close_utc: float, target: Market) -> int:
@@ -294,8 +311,19 @@ def build_features(
         close = panel[other.symbol]["Close"].dropna()
         lag = _lag_days(other.close_utc, target)
         name = _column_name(other.symbol)
-        features[f"mkt_{name}_return"] = as_of(log_return(close), dates, lag)
-        features[f"mkt_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
+        # In percent a cross-market move is not comparable across regimes: a 6%
+        # Kospi session is a four-sigma event in a calm sample and an ordinary
+        # one in a violent month. Fitted on the calm years, the model reads the
+        # violent month as certainty and states 0.01 for opens that then come up
+        # small, which costs far more than being merely wrong. Each move is
+        # therefore divided by the volatility the source had already shown -
+        # measured to the previous bar, as the oil and FX shocks are - and held
+        # at the edge of the range any fit has seen.
+        features[f"mkt_{name}_shock"] = _shock(log_return(close), dates, lag)
+        features[f"mkt_{name}_shock_5"] = _shock(log_return(close, 5), dates, lag)
+        features[f"mkt_{name}_vol_{MKT_VOL_WINDOW}"] = as_of(
+            log_return(close).rolling(MKT_VOL_WINDOW).std().shift(1), dates, lag
+        )
 
     for indicator in INDICATORS:
         if not carried(panel, indicator.symbol):
@@ -305,7 +333,12 @@ def build_features(
         # cross-asset indicators only.
         if indicator.symbol in SECTOR_SYMBOLS and target.region != "Europe":
             continue
-        close = panel[indicator.symbol]["Close"].dropna()
+        # The sector read-across is carried by iShares trackers, which are
+        # funds and distribute: on an ex-distribution morning every one of the
+        # eighteen prints a fall of up to 3% that the sectors never made, and
+        # European targets read all of them at once. The dividend factor makes
+        # those sessions total-return, as it does for a single stock's peers.
+        close = total_return_close(panel[indicator.symbol])
         lag = _lag_days(indicator.close_utc, target)
         name = _column_name(indicator.symbol)
         returns = log_return(close)

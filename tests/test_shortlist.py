@@ -144,7 +144,7 @@ def test_build_features_accepts_a_stock_target(panel):
     assert set(labels.dropna().unique()) <= {0.0, 1.0}
     # Its own history, the indices as read-across, and the cross-asset panel.
     assert any(c.startswith("own_") for c in features.columns)
-    assert "mkt_gspc_return" in features.columns
+    assert "mkt_gspc_shock" in features.columns
     assert "ind_vix_level" in features.columns
     # The stock is the target, so it is not also one of its own columns.
     assert not any(c.startswith("mkt_aapl") for c in features.columns)

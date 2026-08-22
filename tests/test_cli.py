@@ -310,12 +310,21 @@ def test_shock_moves_only_the_features_of_that_symbol():
     from gapmodel.predict import shocked_row
 
     live = pd.DataFrame(
-        {"mkt_ks11_return": [0.01], "mkt_ks11_return_5": [0.02], "mkt_n225_return": [0.03]}
+        {
+            "mkt_ks11_shock": [0.5],
+            "mkt_ks11_shock_5": [0.2],
+            "mkt_ks11_vol_60": [0.05],
+            "mkt_n225_shock": [0.3],
+            "mkt_n225_vol_60": [0.05],
+        }
     )
     bumped = shocked_row(live, {"^KS11": 0.1})
-    assert bumped["mkt_ks11_return"].iloc[0] == pytest.approx(0.11)
-    assert bumped["mkt_ks11_return_5"].iloc[0] == pytest.approx(0.12)
-    assert bumped["mkt_n225_return"].iloc[0] == pytest.approx(0.03)
+    # The move arrives in deviations of the volatility already realised.
+    assert bumped["mkt_ks11_shock"].iloc[0] == pytest.approx(0.5 + 0.1 / 0.05)
+    assert bumped["mkt_ks11_shock_5"].iloc[0] == pytest.approx(0.2 + 0.1 / 0.05)
+    # The denominator is measured to the previous bar, so it stays.
+    assert bumped["mkt_ks11_vol_60"].iloc[0] == pytest.approx(0.05)
+    assert bumped["mkt_n225_shock"].iloc[0] == pytest.approx(0.3)
 
 
 def test_shock_accepts_symbols_containing_equals():

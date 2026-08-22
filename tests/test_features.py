@@ -314,3 +314,100 @@ def test_calibration_pulls_overconfident_probabilities_back():
     assert calibrate(np.array([0.9999]))[0] < 0.9
     # Probabilities inside the earned range are left broadly alone.
     assert abs(calibrate(np.array([0.6]))[0] - 0.6) < 0.1
+
+
+def test_calibrating_forward_never_reads_the_session_it_maps():
+    from gapmodel.model import Backtest, calibrated
+
+    index = pd.bdate_range("2020-01-01", periods=600)
+    rng = np.random.default_rng(1)
+    # An overconfident record: the model speaks in near-certainties and is right
+    # about two thirds of the time.
+    raw = pd.Series(rng.choice([0.004, 0.996], len(index)), index=index)
+    outcomes = pd.Series(
+        [int(rng.random() < (0.66 if p > 0.5 else 0.34)) for p in raw], index=index
+    )
+
+    record = calibrated(Backtest(probabilities=raw, outcomes=outcomes), min_history=250, step=21)
+
+    # The first block is dropped: nothing had been earned to calibrate it with.
+    assert record.probabilities.index[0] == index[250]
+    assert record.probabilities.between(0.05, 0.95).all()
+    assert (
+        record.metrics["brier"]
+        < Backtest(
+            probabilities=raw.loc[record.probabilities.index],
+            outcomes=outcomes.loc[record.probabilities.index],
+        ).window_metrics()["brier"]
+    )
+
+    # Flipping outcomes after a session cannot change the probability shown for
+    # it: its calibration was fitted on the sessions before it and nothing else.
+    tampered = outcomes.copy()
+    tampered.iloc[300:] = 1 - tampered.iloc[300:]
+    later = calibrated(Backtest(probabilities=raw, outcomes=tampered), min_history=250, step=21)
+    assert later.probabilities.iloc[:50].equals(record.probabilities.iloc[:50])
+
+
+def test_a_short_record_is_returned_uncalibrated():
+    from gapmodel.model import Backtest, calibrated
+
+    index = pd.bdate_range("2020-01-01", periods=40)
+    raw = pd.Series(np.linspace(0.1, 0.9, len(index)), index=index)
+    outcomes = pd.Series([i % 2 for i in range(len(index))], index=index)
+    record = Backtest(probabilities=raw, outcomes=outcomes)
+
+    assert calibrated(record, min_history=250) is record
+
+
+def test_sector_trackers_are_read_on_a_total_return_basis(panel):
+    """An ex-distribution print is not eighteen sectors selling off."""
+    tracker = panel["EXV3.DE"].copy()
+    session = tracker.index[700]
+    # The fund goes ex a 2% distribution: the price drops, the factor does not.
+    tracker["Adj Close"] = tracker["Close"]
+    tracker.loc[session:, "Close"] *= 0.98
+    tracker.loc[session:, "Adj Close"] = tracker.loc[session:, "Close"] / 0.98
+    europe = dict(panel, **{"EXV3.DE": tracker})
+
+    corrected, _ = build_features("^GDAXI", europe)
+    raw = dict(panel, **{"EXV3.DE": tracker.drop(columns=["Adj Close"])})
+    uncorrected, _ = build_features("^GDAXI", raw)
+
+    column = "ind_exv3_de_return"
+    read_on = corrected.index[corrected.index >= session]
+    ex_day = (uncorrected.loc[read_on, column] - corrected.loc[read_on, column]).idxmin()
+    # Only the ex-distribution session differs, and there by the distribution.
+    assert uncorrected.loc[ex_day, column] - corrected.loc[ex_day, column] == pytest.approx(
+        np.log(0.98), abs=1e-9
+    )
+    others = corrected.loc[read_on, column].drop(ex_day)
+    assert others.to_numpy() == pytest.approx(
+        uncorrected.loc[others.index, column].to_numpy(), abs=1e-12
+    )
+
+
+def test_a_cross_market_move_is_read_in_deviations_of_its_own_regime(panel):
+    """The same 6% session is a shock in a calm month and routine in a wild one."""
+    from gapmodel.features import MKT_SHOCK_CLIP
+
+    features, _ = build_features("^GDAXI", panel)
+    shock = features["mkt_n225_shock"]
+    assert shock.abs().max() <= MKT_SHOCK_CLIP + 1e-12
+
+    nikkei = panel["^N225"].copy()
+    calm, wild = nikkei.index[300], nikkei.index[700]
+    # Ten times the volatility for the run-up to the second session, the same
+    # move on the day itself.
+    close = nikkei["Close"].astype(float)
+    steps = np.log(close).diff()
+    steps.iloc[601:700] *= 10
+    steps.iloc[300] = steps.iloc[700] = np.log(1.06)
+    nikkei["Close"] = np.exp(np.log(close.iloc[0]) + steps.fillna(0.0).cumsum())
+    regimes, _ = build_features("^GDAXI", dict(panel, **{"^N225": nikkei}))
+
+    read = regimes["mkt_n225_shock"]
+    # The identical 6% session reads as a large shock in the calm regime and a
+    # small one after a hundred sessions of ten-fold volatility.
+    assert read.loc[calm] > 3.0
+    assert 0.0 < read.loc[wild] < 1.0

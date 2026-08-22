@@ -14,6 +14,12 @@ refits or re-predicts, and no session is scored by a model that had seen it —
 the predictions are the walk-forward's, which is what makes a recent window an
 honest out-of-sample record rather than a fit to the last month.
 
+The probabilities are the calibrated ones, which is what a reader was actually
+shown: a forecast is published through the Platt map fitted on the walk-forward
+record, so scoring the raw walk-forward would judge a confidence the model never
+reported. Each session here is mapped by the calibration its own history had
+earned, never by one fitted on its outcome.
+
 The realised *gap size* is carried beside the binary outcome because a miss is
 not one thing. Calling a down open against a gap of two basis points is the
 model declining to distinguish noise; the same call against a 1.8% gap up is a
@@ -32,7 +38,7 @@ import pandas as pd
 
 from .features import build_features, dividend_adjusted, opening_gap
 from .markets import MARKETS
-from .model import MIN_TRAIN, Backtest, walk_forward
+from .model import MIN_TRAIN, Backtest, calibrated, walk_forward
 from .stocks import is_stock, target_market
 
 log = logging.getLogger(__name__)
@@ -163,7 +169,7 @@ def score(
 ) -> Record:
     """Walk-forward one market and keep the last ``window`` scored sessions."""
     features, labels = build_features(symbol, panel, hourly=hourly)
-    result = walk_forward(features, labels, min_train=min_train, c=c)
+    result = calibrated(walk_forward(features, labels, min_train=min_train, c=c))
     return _record(symbol, result, realised_gaps(symbol, panel), window)
 
 
@@ -288,8 +294,9 @@ def render_text(records: list[Record], window: int = RECENT_WINDOW) -> str:
             )
     lines.append("")
     lines.append(
-        f"Every probability above is the walk-forward's own, made by a model "
-        f"fitted only on sessions before it, so the window is out of sample. It "
+        f"Every probability above is the one a reader was shown, made by a model "
+        f"fitted only on sessions before it and calibrated only on the sessions "
+        f"before it, so the window is out of sample. It "
         f"is also short: {window} sessions put a hit rate's standard error near "
         f"{50.0 / np.sqrt(window):.0f} points, so a single window's fall is "
         "weak evidence of decay and a run of them is the thing to read."
