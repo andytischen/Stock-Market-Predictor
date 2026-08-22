@@ -20,6 +20,12 @@ record, so scoring the raw walk-forward would judge a confidence the model never
 reported. Each session here is mapped by the calibration its own history had
 earned, never by one fitted on its outcome.
 
+A record too short to calibrate — a young stock, or an intraday variant with few
+out-of-sample predictions behind it — is the exception, and it is stated rather
+than glossed: those probabilities are the model's raw output, which reaches
+confidences its own record does not support, so the report names them raw and
+the reader can discount them accordingly.
+
 The realised *gap size* is carried beside the binary outcome because a miss is
 not one thing. Calling a down open against a gap of two basis points is the
 model declining to distinguish noise; the same call against a 1.8% gap up is a
@@ -38,7 +44,14 @@ import pandas as pd
 
 from .features import build_features, dividend_adjusted, opening_gap
 from .markets import MARKETS
-from .model import MIN_TRAIN, Backtest, calibrated, walk_forward
+from .model import (
+    MIN_CALIBRATION,
+    MIN_TRAIN,
+    Backtest,
+    calibratable,
+    calibrated,
+    walk_forward,
+)
 from .stocks import is_stock, target_market
 
 log = logging.getLogger(__name__)
@@ -101,6 +114,9 @@ class Record:
     calls: tuple[Call, ...]
     window: dict[str, float]
     full: dict[str, float]
+    # Whether the probabilities went through the Platt map, or are the model's
+    # raw output because too few predictions preceded them to fit one.
+    calibrated: bool = True
 
     @property
     def latest(self) -> Call:
@@ -169,11 +185,23 @@ def score(
 ) -> Record:
     """Walk-forward one market and keep the last ``window`` scored sessions."""
     features, labels = build_features(symbol, panel, hourly=hourly)
-    result = calibrated(walk_forward(features, labels, min_train=min_train, c=c))
-    return _record(symbol, result, realised_gaps(symbol, panel), window)
+    raw = walk_forward(features, labels, min_train=min_train, c=c)
+    return _record(
+        symbol,
+        calibrated(raw),
+        realised_gaps(symbol, panel),
+        window,
+        published=calibratable(raw),
+    )
 
 
-def _record(symbol: str, result: Backtest, gaps: pd.Series, window: int) -> Record:
+def _record(
+    symbol: str,
+    result: Backtest,
+    gaps: pd.Series,
+    window: int,
+    published: bool = True,
+) -> Record:
     if window < 1:
         raise ValueError(f"window must be at least one session, got {window}")
     recent = result.probabilities.iloc[-window:]
@@ -194,6 +222,7 @@ def _record(symbol: str, result: Backtest, gaps: pd.Series, window: int) -> Reco
         calls=calls,
         window=result.window_metrics(since=recent.index[0]),
         full=result.metrics,
+        calibrated=published,
     )
 
 
@@ -295,10 +324,40 @@ def render_text(records: list[Record], window: int = RECENT_WINDOW) -> str:
     lines.append("")
     lines.append(
         f"Every probability above is the one a reader was shown, made by a model "
-        f"fitted only on sessions before it and calibrated only on the sessions "
-        f"before it, so the window is out of sample. It "
+        f"fitted only on sessions before it, so the window is out of sample. It "
         f"is also short: {window} sessions put a hit rate's standard error near "
         f"{50.0 / np.sqrt(window):.0f} points, so a single window's fall is "
         "weak evidence of decay and a run of them is the thing to read."
     )
+    lines.append(_calibration_note(records))
     return "\n".join(lines) + "\n"
+
+
+def _calibration_note(records: list[Record]) -> str:
+    """Which of the printed probabilities are calibrated, and which are raw.
+
+    The claim has to follow the transform rather than lead it: a record with too
+    few out-of-sample predictions to fit a Platt map is printed as the model
+    made it, and raw probabilities run more confident than the record supports,
+    so describing them as calibrated would flatter exactly the numbers a reader
+    should trust least.
+    """
+    raw = [record for record in records if not record.calibrated]
+    if not raw:
+        return (
+            "Each is also calibrated on the predictions that preceded it: the "
+            "Platt map that published it was fitted forward, never on its own "
+            "outcome."
+        )
+    named = ", ".join(f"{record.name} ({record.symbol})" for record in raw)
+    subject = (
+        f"None of it is calibrated: {named} has"
+        if len(raw) == len(records)
+        else (f"All are calibrated on the predictions that preceded them except {named}, which has")
+    )
+    return (
+        f"{subject} fewer than {MIN_CALIBRATION} out-of-sample predictions "
+        "behind it, too short a record to fit a Platt map on, so those are the "
+        "model's raw probabilities and run more confident than the record "
+        "behind them supports."
+    )

@@ -155,6 +155,16 @@ def calibrator(backtest: Backtest) -> Calibration:
     )
 
 
+def calibratable(backtest: Backtest, min_history: int = MIN_CALIBRATION) -> bool:
+    """Whether ``calibrated`` will map this record or hand it back raw.
+
+    A caller that describes its probabilities to a reader has to ask: below
+    ``min_history`` predictions the map is fitted on nothing, so the record
+    comes back as the model made it and calling it calibrated is a false claim.
+    """
+    return len(backtest.probabilities) > min_history
+
+
 def calibrated(
     backtest: Backtest,
     min_history: int = MIN_CALIBRATION,
@@ -177,7 +187,7 @@ def calibrated(
     the record is returned unchanged, since there is nothing to calibrate with.
     """
     probabilities, outcomes = backtest.probabilities, backtest.outcomes
-    if len(probabilities) <= min_history:
+    if not calibratable(backtest, min_history):
         return backtest
 
     blocks: list[pd.Series] = []
