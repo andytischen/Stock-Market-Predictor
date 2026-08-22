@@ -207,7 +207,10 @@ deviations or more is flagged as a shock.
 
 1. **Data** — daily OHLC bars from Yahoo Finance, cached as CSV under
    `~/.cache/gapmodel`.
-2. **Features** — log returns of every other index and every indicator, plus the
+2. **Features** — every other index read in deviations of its own 60-day
+   realised volatility rather than in percent (a 6% Kospi session is a shock in
+   a calm quarter and an ordinary day in a violent one, and the fit cannot tell
+   them apart from the raw number), log returns of every indicator, plus the
    target's own recent gaps, returns and realised gap volatility.
 3. **Model** — standardised L2 logistic regression, which yields probabilities
    that are close to calibrated out of the box and coefficients you can read.
@@ -477,6 +480,12 @@ symbol last_session  p_open_up called realised  gap_pct  hit  n  window_accuracy
 Nothing is refitted or re-predicted: each probability is the walk-forward's own,
 from a model fitted only on sessions before the one it scored, which is what
 makes a recent window an out-of-sample record rather than a fit to last month.
+It is also the probability `predict` would have published, because the same
+Platt calibration is applied — refitted forward on the predictions that preceded
+each block, never on the outcomes being scored. Scoring the uncalibrated number
+would judge a forecast nobody was shown, and judge it hardest where the raw
+model is least trustworthy: a raw 0.01 that opens up costs several times what
+the published 0.25 does, so a handful of sessions can bury a window.
 The realised gap *size* is carried beside the binary outcome because a miss is
 not one thing — calling a down open against a two-basis-point gap is the model
 declining to distinguish noise, and the same call against a 1.8% gap up is a call
