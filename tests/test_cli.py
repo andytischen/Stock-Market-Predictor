@@ -585,3 +585,60 @@ def test_a_run_spanning_the_year_end_warns_about_the_session_that_needs_it(capsy
     out = capsys.readouterr().out
     assert "not checked for 2027-01-04" in out
     assert "2026-12-31 —" not in out
+
+
+def _brief_stubs(monkeypatch, calls=None):
+    """A brief run with the download, the staleness guard and the fit stubbed out."""
+    from gapmodel import cli
+
+    seen = {}
+    monkeypatch.setattr(cli, "_panel", lambda _args: {"BZ=F": None})
+    monkeypatch.setattr(cli, "_hourly", lambda _args: None)
+    monkeypatch.setattr(cli, "_fresh_enough", lambda _panel, _args, targets: list(targets))
+    monkeypatch.setattr(
+        cli,
+        "forecast_all",
+        lambda _panel, **kwargs: (
+            seen.update(kwargs) or (calls if calls is not None else [_stub_forecast("S&P 500", ())])
+        ),
+    )
+    monkeypatch.setattr("gapmodel.brief.quotes", lambda _panel, _as_of: [])
+    return seen
+
+
+def test_brief_forecasts_only_the_regions_asked_for(monkeypatch, capsys):
+    seen = _brief_stubs(monkeypatch)
+    main(["brief", "--region", "Europe", "--at", "07:00"])
+
+    assert seen["symbols"] == [m.symbol for m in MARKETS if m.region == "Europe"]
+    out = capsys.readouterr().out
+    assert "07:00 UTC" in out and "S&P 500" in out
+
+
+def test_brief_writes_the_html_page_it_printed(monkeypatch, capsys, tmp_path):
+    _brief_stubs(monkeypatch)
+    page = tmp_path / "brief.html"
+    main(["brief", "--market", "^GSPC", "--html", str(page)])
+
+    assert f"wrote {page}" in capsys.readouterr().out
+    html = page.read_text()
+    assert html.startswith("<!doctype html>") and "S&amp;P 500" in html
+
+
+def test_brief_publishes_the_notes_file_as_a_written_view(monkeypatch, capsys, tmp_path):
+    _brief_stubs(monkeypatch)
+    notes = tmp_path / "notes.md"
+    notes.write_text("## Oil\nBrent is a binary on Hormuz.\n")
+    main(["brief", "--market", "^GSPC", "--notes", str(notes)])
+
+    out = capsys.readouterr().out
+    assert "Oil (written view, not model output)" in out
+    assert "Brent is a binary on Hormuz." in out
+
+
+def test_brief_refuses_an_unreadable_notes_file(monkeypatch, tmp_path):
+    """A brief that quietly dropped the section it was run to publish looks complete."""
+    _brief_stubs(monkeypatch)
+    with pytest.raises(SystemExit) as exit_info:
+        main(["brief", "--notes", str(tmp_path / "missing.md")])
+    assert "--notes" in str(exit_info.value)
