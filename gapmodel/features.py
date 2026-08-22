@@ -117,6 +117,17 @@ def _lag_days(source_close_utc: float, target: Market) -> int:
     return lag_days(source_close_utc, target.open_utc)
 
 
+def carried(panel: dict[str, pd.DataFrame], symbol: str) -> bool:
+    """Whether ``symbol`` arrived with bars, as opposed to a frame with none.
+
+    A download that returned nothing leaves a series a feature cannot be taken
+    from at all: it has no first date to carry values forward from, so it is
+    read exactly as an absent symbol is rather than reaching the arithmetic.
+    """
+    bars = panel.get(symbol)
+    return bars is not None and not bars.empty
+
+
 def curve_features(
     panel: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, target: Market
 ) -> dict[str, pd.Series]:
@@ -128,7 +139,7 @@ def curve_features(
     — the front lagging, supply comfortable — and positive is backwardation.
     Absent from the panel, the features are simply not built.
     """
-    if CURVE_FRONT not in panel or CURVE_STRIP not in panel:
+    if not carried(panel, CURVE_FRONT) or not carried(panel, CURVE_STRIP):
         return {}
     front = panel[CURVE_FRONT]["Close"].dropna()
     strip = panel[CURVE_STRIP]["Close"].dropna()
@@ -156,7 +167,7 @@ def peer_features(
     """
     built: dict[str, pd.Series] = {}
     for peer in peers_of(target_symbol):
-        if peer.symbol not in panel:
+        if not carried(panel, peer.symbol):
             continue
         close = total_return_close(panel[peer.symbol])
         lag = _lag_days(peer.close_utc, target)
@@ -187,7 +198,7 @@ def policy_features(
     The two legs close an hour apart, so both are read on the later of the two
     clocks and the bill is carried forward onto the future's sessions.
     """
-    if FUNDS_FUTURE not in panel or BILL_YIELD not in panel:
+    if not carried(panel, FUNDS_FUTURE) or not carried(panel, BILL_YIELD):
         return {}
     price = panel[FUNDS_FUTURE]["Close"].dropna()
     bill = panel[BILL_YIELD]["Close"].dropna()
@@ -278,7 +289,7 @@ def build_features(
     }
 
     for other in MARKETS:
-        if other.symbol == target_symbol or other.symbol not in panel:
+        if other.symbol == target_symbol or not carried(panel, other.symbol):
             continue
         close = panel[other.symbol]["Close"].dropna()
         lag = _lag_days(other.close_utc, target)
@@ -287,7 +298,7 @@ def build_features(
         features[f"mkt_{name}_return_5"] = as_of(log_return(close, 5), dates, lag)
 
     for indicator in INDICATORS:
-        if indicator.symbol not in panel:
+        if not carried(panel, indicator.symbol):
             continue
         # European sector read-across is a European story: outside the region it
         # measurably dilutes the fit, so those markets keep the whole-index and
