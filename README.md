@@ -635,7 +635,14 @@ written down — the number a reader of a live forecast can actually act on.
 python -m gapmodel journal                       # record today, settle what printed, score
 python -m gapmodel journal --settle-only         # score the journal without forecasting
 python -m gapmodel journal --window 120 --fail-on-decay
+python -m gapmodel journal --market MU            # a modelled single stock, like `scorecard`
 ```
+
+Without `--market` the run journals the indices, so the daily record does not
+quietly grow a column of company calls. A company named on the command line is
+journalled and settled like any other target, on the total-return basis its
+label is built on; and a company row left `pending` by an earlier run widens the
+next run's download by itself, because the log outlives the flags that wrote it.
 
 Each run appends its forecasts to `docs/forecast-log.csv`, one row per market
 and session, then fills in the realised open for the rows whose auction has
