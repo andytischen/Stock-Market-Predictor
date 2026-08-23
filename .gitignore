@@ -8,3 +8,4 @@ __pycache__/
 !docs/forecast-log.csv
 .cache/
 *.egg-info/
+.vscode/
