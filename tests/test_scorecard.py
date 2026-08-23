@@ -232,7 +232,9 @@ def test_the_report_says_a_probability_is_raw_when_nothing_calibrated_it():
 
     raw_text = render_text([raw_record], window=6)
     assert "None of it is calibrated" in raw_text
-    assert f"fewer than {MIN_CALIBRATION} out-of-sample predictions" in raw_text
+    # Exactly MIN_CALIBRATION predictions is raw too, so the count is inclusive.
+    assert f"{MIN_CALIBRATION} or fewer out-of-sample predictions" in raw_text
+    assert f"fewer than {MIN_CALIBRATION}" not in raw_text
     assert "raw probabilities" in raw_text
     # And the unconditional claim is gone from the raw report.
     assert "calibrated only on the sessions before it" not in raw_text
@@ -270,3 +272,4 @@ def test_a_record_is_only_called_calibrated_when_the_map_was_fitted():
     assert calibratable(long)
     assert not calibratable(short)
     assert calibrated(short) is short
+    assert len(short.probabilities) == MIN_CALIBRATION
