@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gapmodel.model import Backtest
+from gapmodel.model import MIN_CALIBRATION, Backtest, calibratable, calibrated
 from gapmodel.scorecard import (
     DRIFT_MIN_SESSIONS,
     Call,
@@ -209,3 +209,64 @@ def test_every_market_failing_is_an_error(monkeypatch):
     monkeypatch.setattr(scorecard_mod, "score", fail)
     with pytest.raises(RuntimeError, match="no market could be scored"):
         build_scorecard({}, symbols=["^GSPC"])
+
+
+def test_the_report_says_a_probability_is_raw_when_nothing_calibrated_it():
+    """The claim has to follow the transform, not lead it.
+
+    A record shorter than ``MIN_CALIBRATION`` predictions comes back from
+    ``calibrated`` untouched, so calling it calibrated would flatter exactly the
+    numbers a reader should trust least.
+    """
+    outcomes = [1, 0, 1, 0, 1, 0]
+    result = _backtest([0.6, 0.4] * 3, outcomes)
+    gaps = _gaps(result.probabilities.index, outcomes)
+
+    calibrated_record = _record("^GSPC", result, gaps, window=6)
+    raw_record = _record("^GSPC", result, gaps, window=6, published=False)
+
+    assert calibrated_record.calibrated and not raw_record.calibrated
+    assert "calibrated on the predictions that preceded it" in render_text(
+        [calibrated_record], window=6
+    )
+
+    raw_text = render_text([raw_record], window=6)
+    assert "None of it is calibrated" in raw_text
+    assert f"fewer than {MIN_CALIBRATION} out-of-sample predictions" in raw_text
+    assert "raw probabilities" in raw_text
+    # And the unconditional claim is gone from the raw report.
+    assert "calibrated only on the sessions before it" not in raw_text
+
+
+def test_the_report_names_which_markets_are_raw_when_only_some_are():
+    outcomes = [1, 0, 1, 0]
+    result = _backtest([0.6, 0.4, 0.6, 0.4], outcomes)
+    gaps = _gaps(result.probabilities.index, outcomes)
+    text = render_text(
+        [
+            _record("^GSPC", result, gaps, window=4),
+            _record("^N225", result, gaps, window=4, published=False),
+        ],
+        window=4,
+    )
+
+    assert "All are calibrated on the predictions that preceded them except" in text
+    assert "^N225" in text.split("except")[1]
+    assert "^GSPC" not in text.split("except")[1]
+
+
+def test_a_record_is_only_called_calibrated_when_the_map_was_fitted():
+    """``score`` reads the same threshold ``calibrated`` acts on."""
+    index = _sessions(MIN_CALIBRATION + 1)
+    long = Backtest(
+        probabilities=pd.Series([0.6] * len(index), index=index),
+        outcomes=pd.Series([1, 0] * len(index))[: len(index)].set_axis(index),
+    )
+    short = Backtest(
+        probabilities=long.probabilities.iloc[:MIN_CALIBRATION],
+        outcomes=long.outcomes.iloc[:MIN_CALIBRATION],
+    )
+
+    assert calibratable(long)
+    assert not calibratable(short)
+    assert calibrated(short) is short
