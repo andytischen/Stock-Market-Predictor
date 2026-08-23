@@ -356,8 +356,9 @@ def _calibration_note(records: list[Record]) -> str:
         else (f"All are calibrated on the predictions that preceded them except {named}, which has")
     )
     return (
-        f"{subject} fewer than {MIN_CALIBRATION} out-of-sample predictions "
-        "behind it, too short a record to fit a Platt map on, so those are the "
-        "model's raw probabilities and run more confident than the record "
-        "behind them supports."
+        f"{subject} {MIN_CALIBRATION} or fewer out-of-sample predictions "
+        f"behind it, and the first {MIN_CALIBRATION} are spent fitting the Platt "
+        "map rather than mapped by it, so those are the model's raw "
+        "probabilities and run more confident than the record behind them "
+        "supports."
     )
