@@ -350,15 +350,16 @@ def _calibration_note(records: list[Record]) -> str:
             "outcome."
         )
     named = ", ".join(f"{record.name} ({record.symbol})" for record in raw)
+    has, it = ("has", "it") if len(raw) == 1 else ("have", "them")
     subject = (
-        f"None of it is calibrated: {named} has"
+        f"None of it is calibrated: {named} {has}"
         if len(raw) == len(records)
-        else (f"All are calibrated on the predictions that preceded them except {named}, which has")
+        else f"All are calibrated on the predictions that preceded them except {named}, which {has}"
     )
     return (
         f"{subject} {MIN_CALIBRATION} or fewer out-of-sample predictions "
-        f"behind it, and the first {MIN_CALIBRATION} are spent fitting the Platt "
-        "map rather than mapped by it, so those are the model's raw "
+        f"behind {it}, and the first {MIN_CALIBRATION} are spent fitting the "
+        "Platt map rather than mapped by it, so those are the model's raw "
         "probabilities and run more confident than the record behind them "
         "supports."
     )

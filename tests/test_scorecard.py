@@ -255,6 +255,23 @@ def test_the_report_names_which_markets_are_raw_when_only_some_are():
     assert "All are calibrated on the predictions that preceded them except" in text
     assert "^N225" in text.split("except")[1]
     assert "^GSPC" not in text.split("except")[1]
+    assert "which has" in text
+
+
+def test_the_report_reads_as_plural_when_several_markets_are_raw():
+    outcomes = [1, 0, 1, 0]
+    result = _backtest([0.6, 0.4, 0.6, 0.4], outcomes)
+    gaps = _gaps(result.probabilities.index, outcomes)
+    records = [
+        _record(symbol, result, gaps, window=4, published=False) for symbol in ("^GSPC", "^N225")
+    ]
+
+    text = render_text(records, window=4)
+    assert "have" in text and "behind them" in text
+    assert "has" not in text.split("None of it is calibrated")[1].split(",")[0]
+
+    mixed = render_text([_record("^FTSE", result, gaps, window=4), *records], window=4)
+    assert "which have" in mixed
 
 
 def test_a_record_is_only_called_calibrated_when_the_map_was_fitted():
