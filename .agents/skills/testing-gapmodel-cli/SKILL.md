@@ -156,20 +156,22 @@ count both before calling a mismatch a bug; `--top N` additionally cuts the rank
 A count larger than the two tables together is the bug worth reporting.
 
 The sentence also says *whether* anything was dropped, via `cli._mover_selection`, so assert the
-wording and not just the number: `the 3 biggest gainers of session ...` when every chosen mover
-survived, `2 of the 3 biggest gainers of session ...` when one dropped, and the singular
-`the biggest gainer of session ...` whenever `biggest_gainers` returned one name (never
-"the 1 biggest gainers"). The second count is what `biggest_gainers` returned, not `--gainers N`, so
+wording and not just the number: `the 3 largest movers of session ...` when every chosen mover
+survived, `2 of the 3 largest movers of session ...` when one dropped, and the singular
+`the largest mover of session ...` whenever `biggest_gainers` returned one name (never
+"the 1 largest movers"). The noun is deliberately not "gainers": the sort is descending, so on a
+falling session these are the smallest fallers, which the line says in parentheses. The second
+count is what `biggest_gainers` returned, not `--gainers N`, so
 a run whose universe offers fewer movers than requested still reads honestly — and it can offer
 fewer for a reason other than the latest-bar rule: `_changes` skips a name whose `last_change`
 raises (a single-bar series, say) with a stderr `no last move for SYM: ...`. A test that only
-greps for "biggest gainers" passes on all three and proves nothing.
+greps for "largest movers" passes on all three and proves nothing.
 
 The all-dropped case has no report to inspect: with no pick left, `forecast_universe` raises
 `RuntimeError("no stock could be modelled")` and the CLI exits 1, so there is no
-"0 of the 1 biggest gainer" sentence. Expect the abort, but assert the `error:` line names the
-chosen movers — `all 3 biggest gainers of session DATE were dropped (AAPL, MSFT, NVDA)`, or the
-singular `the biggest gainer of session DATE was dropped` — since the bare universe-wide message
+"0 of the 1 largest mover" sentence. Expect the abort, but assert the `error:` line names the
+chosen movers — `all 3 largest movers of session DATE were dropped (AAPL, MSFT, NVDA)`, or the
+singular `the largest mover of session DATE was dropped` — since the bare universe-wide message
 survives only for a run that never selected movers. Reach it by clipping every chosen mover below
 `MIN_TRAIN` (keep the mover-session bar); staleness is not another way in, because all-stale movers
 hit `StaleInputs` ("every requested name has no bar within N days of ...") before

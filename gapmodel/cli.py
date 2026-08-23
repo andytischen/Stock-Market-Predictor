@@ -71,7 +71,7 @@ from .screener import render_text as render_screen_text
 from .screener import to_frame as screen_to_frame
 from .sectors import build_sector_board
 from .sectors import render_text as render_sector_text
-from .shortlist import biggest_gainers, forecast_universe
+from .shortlist import biggest_gainers, forecast_universe, last_close_session
 from .shortlist import discarded as discarded_shortlist
 from .shortlist import rank as rank_shortlist
 from .shortlist import render_text as render_shortlist_text
@@ -804,17 +804,19 @@ def _mover_selection(kept: int, chosen: int, candidates: int, moved: str) -> str
 
     Both counts are named because a dropped mover is not the smallest one: a
     stale listing or a name short of training rows can be the largest riser of
-    the session, so calling what is left "the 3 biggest gainers" would promote
+    the session, so calling what is left "the 3 largest movers" would promote
     the survivors into a ranking they did not earn. The session is named, and so
     is the ranking rule: sorting descending and slicing gives the smallest
-    fallers on a session where everything fell, and calling those gainers would
-    assert a rise the data denies.
+    fallers on a session where everything fell, so these are the largest movers
+    of that session and calling them gainers would assert a rise the data may
+    deny.
     """
-    movers = "biggest gainer" if chosen == 1 else f"{chosen} biggest gainers"
+    movers = "largest mover" if chosen == 1 else f"{chosen} largest movers"
     held = f"the {movers}" if kept == chosen else f"{kept} of the {movers}"
     return (
-        f"{held} of session {moved}, out of {candidates} candidates, "
-        "ranked on their move in that session"
+        f"{held} of session {moved}, out of {candidates} candidates, ranked on "
+        "their move in that session (descending, so on a falling session these "
+        "are the smallest fallers)"
     )
 
 
@@ -829,10 +831,10 @@ def _all_movers_dropped(chosen: Sequence[str], moved: str) -> str:
     ``_fresh_enough`` has already raised on it.
     """
     if len(chosen) == 1:
-        dropped = f"the biggest gainer of session {moved} was dropped"
+        dropped = f"the largest mover of session {moved} was dropped"
         unfittable = "not fittable; the warning says why"
     else:
-        dropped = f"all {len(chosen)} biggest gainers of session {moved} were dropped"
+        dropped = f"all {len(chosen)} largest movers of session {moved} were dropped"
         unfittable = "none of them fittable; the warning for each name says why"
     return (
         f"{dropped} ({', '.join(chosen)}), {unfittable}, usually too few labelled "
@@ -867,8 +869,12 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
     if args.gainers:
         symbols = chosen = biggest_gainers(panel, candidates, args.gainers)
         if not symbols:
-            raise SystemExit("error: no candidate had two closes to compare")
-        moved = max(panel[symbol].index.max() for symbol in symbols).date().isoformat()
+            raise SystemExit(
+                "error: no candidate could be ranked: none loaded with two closes "
+                "to compare in its latest session"
+            )
+        sessions = [last_close_session(panel[symbol]) for symbol in symbols]
+        moved = max(session for session in sessions if session is not None).date().isoformat()
     # After the mover pass, so that a stale listing is judged only when it is one
     # of the names about to be fitted.
     symbols = _fresh_enough(panel, args, symbols)

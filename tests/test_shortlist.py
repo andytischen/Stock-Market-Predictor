@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -607,6 +608,38 @@ def test_a_name_that_did_not_trade_the_latest_session_is_not_ranked_as_a_mover(c
     assert "STALE" in caplog.text
 
 
+def test_a_row_carrying_no_close_does_not_make_a_name_eligible(caplog):
+    """A blank newest row is the session's placeholder, not its price.
+
+    Dating eligibility from the row rather than the close would rank the name on
+    a move belonging to an older day, and a blank row dated ahead of everyone
+    else would anchor the whole ranking on the one name that did not trade.
+    """
+    blank = _closing([100.0, 140.0], end=SESSION - pd.offsets.BDay(1))
+    ahead = pd.date_range(end=SESSION + pd.offsets.BDay(1), periods=1, freq="B")
+    blank = pd.concat([blank, pd.DataFrame({"Open": [np.nan], "Close": [np.nan]}, index=ahead)])
+    panel = {
+        "BLANK": blank,
+        "UP": _closing([100.0, 105.0]),
+        "MID": _closing([100.0, 102.0]),
+    }
+    assert biggest_gainers(panel, list(panel), 2) == ["UP", "MID"]
+    assert "BLANK" in caplog.text
+
+
+def test_a_series_that_never_closed_is_named_not_dropped_in_silence(caplog):
+    """A requested name leaving the report unremarked reads as a name with no view."""
+    blank = _closing([100.0, 140.0])
+    panel = {
+        "BLANK": blank.assign(Close=np.nan),
+        "UP": _closing([100.0, 105.0]),
+        "MID": _closing([100.0, 102.0]),
+    }
+    assert biggest_gainers(panel, list(panel), 2) == ["UP", "MID"]
+    assert "1 of 3 candidates have no close" in caplog.text
+    assert "BLANK" in caplog.text
+
+
 def test_the_table_reports_the_move_the_name_has_just_made(panel):
     entry = forecast_universe(panel, symbols=[TICKER], min_train=500)[0]
     expected = last_change(panel[TICKER])
@@ -642,9 +675,9 @@ def test_an_unknown_last_move_prints_empty_rather_than_zero():
 
 def test_the_report_says_when_the_names_were_chosen_for_moving():
     """Ten movers read as a universe would look like a market of only risers."""
-    text = render_text([pick("GOOD", 0.70, auc=0.62)], selection="the 1 biggest gainers")
-    assert "the 1 biggest gainers" in text
-    assert "biggest gainers" not in render_text([pick("GOOD", 0.70, auc=0.62)])
+    text = render_text([pick("GOOD", 0.70, auc=0.62)], selection="the 1 largest movers")
+    assert "the 1 largest movers" in text
+    assert "largest movers" not in render_text([pick("GOOD", 0.70, auc=0.62)])
 
 
 def test_the_cli_exposes_the_gainers_pass():

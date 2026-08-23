@@ -383,7 +383,9 @@ def test_the_gainers_line_counts_the_names_the_report_holds(monkeypatch, capsys)
     main(["shortlist", "AAPL", "MSFT", "NVDA", "--gainers", "3"])
 
     out = capsys.readouterr().out
-    assert "1 of the 3 biggest gainers of session 2026-08-14, out of 3 candidates" in out
+    assert "1 of the 3 largest movers of session 2026-08-14, out of 3 candidates" in out
+    # The noun never asserts a rise: a descending sort can hand back fallers.
+    assert "gainers" not in out
 
 
 def test_the_gainers_line_claims_the_ranking_only_when_it_kept_every_mover():
@@ -391,10 +393,11 @@ def test_the_gainers_line_claims_the_ranking_only_when_it_kept_every_mover():
     from gapmodel.cli import _mover_selection
 
     kept_all = _mover_selection(3, 3, 158, "2026-08-14")
-    assert kept_all.startswith("the 3 biggest gainers of session 2026-08-14, out of 158")
-    assert _mover_selection(2, 3, 158, "2026-08-14").startswith("2 of the 3 biggest gainers")
-    assert _mover_selection(0, 3, 158, "2026-08-14").startswith("0 of the 3 biggest gainers")
-    assert _mover_selection(1, 1, 158, "2026-08-14").startswith("the biggest gainer of session")
+    assert kept_all.startswith("the 3 largest movers of session 2026-08-14, out of 158")
+    assert "smallest fallers" in kept_all
+    assert _mover_selection(2, 3, 158, "2026-08-14").startswith("2 of the 3 largest movers")
+    assert _mover_selection(0, 3, 158, "2026-08-14").startswith("0 of the 3 largest movers")
+    assert _mover_selection(1, 1, 158, "2026-08-14").startswith("the largest mover of session")
 
 
 def _all_dropped_shortlist(monkeypatch, movers):
@@ -422,7 +425,7 @@ def test_losing_every_mover_names_them_instead_of_blaming_the_universe(monkeypat
         main(["shortlist", "AAPL", "MSFT", "NVDA", "--gainers", "3"])
 
     message = str(excinfo.value)
-    assert "all 3 biggest gainers of session 2026-08-14 were dropped" in message
+    assert "all 3 largest movers of session 2026-08-14 were dropped" in message
     assert "AAPL, MSFT, NVDA" in message
     # The reader is told how to get a report, not just that there isn't one.
     assert "--refresh" in message and "--gainers" in message
@@ -432,13 +435,13 @@ def test_losing_every_mover_names_them_instead_of_blaming_the_universe(monkeypat
 
 
 def test_losing_the_only_mover_is_singular(monkeypatch):
-    """ "All 1 biggest gainers were dropped" would be a plural about one name."""
+    """ "All 1 largest movers were dropped" would be a plural about one name."""
     _all_dropped_shortlist(monkeypatch, ["AAPL"])
     with pytest.raises(SystemExit) as excinfo:
         main(["shortlist", "AAPL", "--gainers", "1"])
 
     message = str(excinfo.value)
-    assert "the biggest gainer of session 2026-08-14 was dropped" in message
+    assert "the largest mover of session 2026-08-14 was dropped" in message
     # The tail is singular too: "none of them" about one name is the same slip.
     assert "(AAPL), not fittable; the warning says why" in message
 
