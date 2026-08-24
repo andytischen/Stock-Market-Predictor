@@ -65,17 +65,30 @@ def test_walk_forward_and_window_metrics_use_only_oos_rows():
         backtest.window_metrics(since="2100-01-01")
 
 
-def test_calibration_uses_the_walk_forward_record_without_leaking_lookahead():
-    probs = pd.Series(np.linspace(0.01, 0.99, 300), index=pd.RangeIndex(300))
-    outcomes = pd.Series((np.linspace(0.0, 1.0, 300) > 0.5).astype(int), index=probs.index)
+def test_calibration_uses_the_walk_forward_record_without_leaking_lookahead(monkeypatch):
+    probs = pd.Series(np.linspace(0.01, 0.99, 10), index=pd.RangeIndex(10))
+    outcomes = pd.Series((np.arange(10) % 2).astype(int), index=probs.index)
     backtest = model.Backtest(probabilities=probs, outcomes=outcomes)
 
-    calibrator = model.calibrator(backtest)
+    actual_calibrator = model.calibrator
+    calibrator = actual_calibrator(backtest)
     mapped = calibrator(np.array([0.01, 0.5, 0.99]))
     assert np.all(np.isfinite(mapped))
     assert mapped.min() >= 0.0
     assert mapped.max() <= 1.0
     assert mapped[1] == pytest.approx(0.5, abs=0.5)
+
+    seen: list[int] = []
+
+    def fake_calibrator(history):
+        seen.append(history.probabilities.index[-1])
+        return lambda values: np.asarray(values, dtype=float)
+
+    monkeypatch.setattr(model, "calibrator", fake_calibrator)
+
+    published = model.calibrated(backtest, min_history=3, step=2)
+    assert seen == [2, 4, 6, 8]
+    assert list(published.probabilities.index) == [3, 4, 5, 6, 7, 8, 9]
 
     unchanged = model.calibrated(backtest, min_history=500)
     assert unchanged is backtest
