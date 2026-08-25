@@ -186,6 +186,23 @@ def events_on(date: pd.Timestamp) -> tuple[Event, ...]:
     return tuple(sorted(found, key=lambda event: event.time_utc))
 
 
+def upcoming(date: pd.Timestamp, days: int) -> tuple[Event, ...]:
+    """Releases scheduled over ``days`` calendar days from ``date`` inclusive.
+
+    Day by day rather than by filtering the tables directly, so a schedule that
+    stops before the end of the window contributes nothing past its own end
+    date instead of being read as having no release there — the same
+    distinction ``unmaintained_on`` exists to report.
+    """
+    first = pd.Timestamp(date).normalize()
+    if days < 1:
+        raise ValueError(f"a window of {days} days covers nothing")
+    found = [
+        event for offset in range(days) for event in events_on(first + pd.Timedelta(days=offset))
+    ]
+    return tuple(sorted(found, key=lambda event: (event.date, event.time_utc)))
+
+
 def unmaintained_on(date: pd.Timestamp) -> tuple[str, ...]:
     """Series whose published calendar does not reach ``date``.
 
