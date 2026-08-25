@@ -10,7 +10,14 @@ from gapmodel.features import (
     feature_symbols,
     opening_gap,
 )
-from gapmodel.markets import INDICATORS, MARKETS, SECTOR_SYMBOLS, all_symbols, market
+from gapmodel.markets import (
+    INDICATORS,
+    MARKETS,
+    METAL_SYMBOLS,
+    SECTOR_SYMBOLS,
+    all_symbols,
+    market,
+)
 from gapmodel.model import walk_forward
 
 
@@ -52,6 +59,10 @@ def panel() -> dict[str, pd.DataFrame]:
                 "^VIX",
                 "ES=F",
                 "CL=F",
+                "GC=F",
+                "SI=F",
+                "HG=F",
+                "PL=F",
                 "JPY=X",
                 "KRW=X",
                 "EXH8.DE",
@@ -114,6 +125,51 @@ def test_oil_carries_shock_features(panel):
         "ind_cl_f_shock",
     } <= set(features.columns)
     assert (features["ind_cl_f_vol_20"] > 0).all()
+
+
+def test_every_metal_is_collected_and_read_as_a_daily_move(panel):
+    """Gold, silver, copper and platinum reach every model, as returns.
+
+    Crude's extra columns are deliberately not extended to them: measured, the
+    weekly move, volatility and shock cost out-of-sample AUC on every market.
+    """
+    assert METAL_SYMBOLS == {"GC=F", "SI=F", "HG=F", "PL=F"}
+    assert METAL_SYMBOLS <= set(all_symbols())
+    features, _ = build_features("^GSPC", panel)
+    for symbol in sorted(METAL_SYMBOLS):
+        name = _column_name(symbol)
+        assert f"ind_{name}_return" in features.columns
+        assert not [c for c in features.columns if c.startswith(f"ind_{name}_vol")]
+        assert f"ind_{name}_shock" not in features.columns
+
+
+def test_a_metal_is_read_from_the_close_before_the_target_opens(panel):
+    """Comex closes at 21:00 UTC, after Wall Street opens: yesterday's bar."""
+    features, _ = build_features("^GSPC", panel)
+    close = panel["PL=F"]["Close"]
+    returns = np.log(close / close.shift(1))
+    calendar = pd.date_range(returns.index.min(), returns.index.max())
+    expected = returns.reindex(calendar).ffill().reindex(features.index - pd.Timedelta(days=1))
+    assert features["ind_pl_f_return"].to_numpy() == pytest.approx(expected.to_numpy())
+    metals = [next(i for i in INDICATORS if i.symbol == s) for s in sorted(METAL_SYMBOLS)]
+    assert all(
+        _lag_days(metal.close_utc, market(m.symbol)) == 1 for metal in metals for m in MARKETS
+    )
+
+
+def test_platinum_is_read_as_of_its_last_close_so_a_thin_year_costs_no_rows(panel):
+    """Yahoo prints platinum thinly before 2010; a gap must not blank the row.
+
+    Every training row needs every feature, so an indicator that goes quiet for a
+    week would otherwise delete that week from every market's sample.
+    """
+    thin = panel["PL=F"].iloc[::4]
+    features, _ = build_features("^GSPC", {**panel, "PL=F": thin})
+    dense, _ = build_features("^GSPC", panel)
+    assert features.notna().all().all()
+    # A thinner series only costs the start, where its first move is not yet
+    # measurable: no session inside the sample is dropped for want of a print.
+    assert features.index.equals(dense.index[dense.index >= features.index[0]])
 
 
 def test_sectors_carry_a_weekly_return_but_no_shock(panel):

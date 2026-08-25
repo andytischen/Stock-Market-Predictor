@@ -10,8 +10,8 @@ Seventeen indices are covered across Asia, Europe and the Americas, driven by th
 sessions that have already closed plus a set of cross-asset indicators (VIX, the
 US 5y/10y/30y yields, the priced policy rate, Russell 2000, the semiconductor
 index, ASML, the eighteen STOXX Europe 600 sectors, dollar index, USD/JPY,
-EUR/USD, GBP/USD, WTI and Brent crude, gold, silver, copper, S&P 500 and Nasdaq
-futures). Run
+EUR/USD, GBP/USD, WTI and Brent crude, gold, silver, copper, platinum, S&P 500
+and Nasdaq futures). Run
 `python -m gapmodel markets` for the full list with session times.
 
 Each market is then analysed by its own bespoke model: a separate probability
@@ -46,6 +46,30 @@ python -m gapmodel predict --shock 'EXV3.DE=-3%'   # sectors are shockable too
 index's next-open probability, alongside its 1-day and 5-day move, and prints
 the net. It only works for European indices, since they are the only ones
 carrying the features.
+
+Four metals are carried beside the two crudes: gold and silver price the hedge
+against policy and the dollar, copper industrial demand, and platinum sits across
+both — it rises with gold when the dollar is being sold and parts company with it
+when the bid is a hedge against something, which is the distinction that matters
+on a session where the hedge and the risk asset are bought together. Each enters
+as its daily move, read from the close before the target opens, and each is
+shockable by symbol:
+
+```bash
+python -m gapmodel predict --shock 'GC=F=+3%' --shock 'HG=F=-2%'
+```
+
+They deliberately do *not* carry crude's extra columns. Giving the metals a
+weekly return, 20-day volatility and a shock was measured over the same
+walk-forward split and cost out-of-sample AUC on every market it was tried on
+(S&P 0.7003 → 0.6977, Kospi 0.8510 → 0.8495, FTSE 0.7939 → 0.7922, DAX 0.8069 →
+0.8061): twelve columns for a consistently worse fit. Platinum alone costs about
+0.0003 of AUC, which is the price of one column, and buys an input none of the
+others carries.
+
+None of them is a *target*: there is no gold, silver, copper, platinum or oil
+forecast in this system. The only thing forecast is an equity index's opening
+auction.
 
 The shape of the crude curve is carried alongside its level. Yahoo serves only
 the generic front contract, so the two ends are read from the oil funds that

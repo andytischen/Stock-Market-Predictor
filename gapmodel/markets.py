@@ -124,6 +124,15 @@ INDICATORS: tuple[Instrument, ...] = (
     Instrument("GC=F", "Gold", close_utc=21.0),
     Instrument("SI=F", "Silver", close_utc=21.0),
     Instrument("HG=F", "Copper", close_utc=21.0),
+    # Platinum trades on the same risk-and-debasement axis as gold but is half
+    # an industrial metal, so it separates a monetary bid from a growth one: the
+    # two rise together when the dollar is being sold and part company when the
+    # bid is a hedge against something. Yahoo prints it from 2000, and thinly
+    # until 2010, but the gaps cost no training rows: an indicator is read as of
+    # its last published close, so a missing session repeats the previous one
+    # rather than blanking the row. Unlike Bitcoin above it is therefore nearly
+    # free — one column, and no session lost by any market.
+    Instrument("PL=F", "Platinum", close_utc=21.0),
     Instrument("ES=F", "S&P 500 futures", close_utc=21.0),
     Instrument("NQ=F", "Nasdaq 100 futures", close_utc=21.0),
     # The third leg of the US futures complex: ES is breadth, NQ is growth, YM
@@ -137,6 +146,16 @@ INDICATORS: tuple[Instrument, ...] = (
 # deal) unwinds it. Both directions are informative for equity opens, so oil
 # carries extra features describing the size and volatility of the move.
 OIL_SYMBOLS: frozenset[str] = frozenset({"CL=F", "BZ=F"})
+
+# The metals are named as a group for the reader, and for the tests that hold the
+# grouping: gold and silver price the hedge against policy and the dollar, copper
+# industrial demand, platinum sits across both. Each is carried as its daily move
+# and nothing else. Extending crude's columns to them — weekly move, realised
+# volatility, the day's move in deviations of it — was measured over the same
+# walk-forward split and cost out-of-sample AUC on every market it was tried on
+# (S&P 0.7003 -> 0.6977, Kospi 0.8510 -> 0.8495, FTSE 0.7939 -> 0.7922), so a
+# metal reaches the model as a return, and a shock to one arrives the same way.
+METAL_SYMBOLS: frozenset[str] = frozenset({"GC=F", "SI=F", "HG=F", "PL=F"})
 
 # Central-bank governors intervene in these pairs to defend exchange-rate
 # levels or smooth volatility. Intervention episodes produce moves that are
