@@ -17,7 +17,6 @@ from gapmodel.social.report import render_html
 from gapmodel.social.sentiment import score_text
 from gapmodel.social.signals import _classify
 
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -165,9 +164,7 @@ def test_scan_sorted_by_sentiment_mean_descending():
         resp = MagicMock()
         resp.raise_for_status = MagicMock()
         if "AAPL" in url or ("reddit" in url and "AAPL" in url):
-            resp.json.return_value = _reddit_payload(
-                ["Great stock, rising fast, wonderful!"]
-            )
+            resp.json.return_value = _reddit_payload(["Great stock, rising fast, wonderful!"])
         elif "TSLA" in url:
             resp.json.return_value = _reddit_payload(["Terrible crash, awful disaster"])
         else:
@@ -208,9 +205,7 @@ def test_scan_velocity_is_zero_when_no_prior_posts():
 
 def test_scan_velocity_capped_at_9_9():
     now = time.time()
-    recent = _reddit_payload(
-        ["recent " + str(i) for i in range(20)], created_utc=now - 100
-    )
+    recent = _reddit_payload(["recent " + str(i) for i in range(20)], created_utc=now - 100)
     prior = _stocktwits_payload(["prior"], created_utc=now - 5400)
     session = _make_session(recent, prior)
     results = scan(["CAKE"], session=session)
