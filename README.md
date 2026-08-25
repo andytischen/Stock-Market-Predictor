@@ -418,6 +418,16 @@ that stopped trading is dropped by name and the rest of the universe is still
 ranked. A name that is a *peer* of something requested counts as a shared input,
 because it is a column in another company's model.
 
+That rule reaches further than it looks for `stock`, whose curated names are each
+other's peers: MU is a column in WDC's model, so a default `gapmodel stock` run
+holds the whole command to MU's freshness and fails outright if MU stops trading
+rather than losing its row. A curated name is dropped by name only when it is
+asked for alone and no other requested name lists it as a peer — `gapmodel stock
+MU`. Everywhere else the recovery is `--allow-stale`, which forecasts the rest
+from MU's carried-forward last price and says so. Dropping the name from the
+other models instead would fit them without a column their metrics were earned
+with, which is the substitution the guard exists to refuse.
+
 "Input" means a series the requested forecasts actually read, not everything the
 download happened to fetch. One panel serves every command and every model reads
 a subset of it: the STOXX 600 sector trackers are features of the European
