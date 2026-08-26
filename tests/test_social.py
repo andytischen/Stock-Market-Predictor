@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from typing import Any
 from unittest.mock import MagicMock
+from urllib.parse import urlparse
 
 import pytest
 
@@ -20,6 +21,17 @@ from gapmodel.social.signals import _classify
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
+def _host_is(url: str, domain: str) -> bool:
+    """True if *url*'s hostname is exactly *domain* or a subdomain of it.
+
+    A substring check like ``"reddit.com" in url`` also matches an attacker
+    or typo URL such as ``https://reddit.com.evil.example/``, so the mock
+    router below compares the parsed hostname instead.
+    """
+    host = urlparse(url).hostname or ""
+    return host == domain or host.endswith(f".{domain}")
+
+
 def _make_session(reddit_payload: dict, stocktwits_payload: dict) -> MagicMock:
     """Build a mock requests.Session whose .get() returns pre-canned payloads."""
     session = MagicMock()
@@ -27,9 +39,9 @@ def _make_session(reddit_payload: dict, stocktwits_payload: dict) -> MagicMock:
     def _get(url: str, **_kwargs: Any) -> MagicMock:
         resp = MagicMock()
         resp.raise_for_status = MagicMock()
-        if "reddit.com" in url:
+        if _host_is(url, "reddit.com"):
             resp.json.return_value = reddit_payload
-        elif "stocktwits.com" in url:
+        elif _host_is(url, "stocktwits.com"):
             resp.json.return_value = stocktwits_payload
         else:
             resp.json.return_value = {}

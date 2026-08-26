@@ -1,0 +1,633 @@
+---
+name: testing-gapmodel-cli
+description: How to runtime-test the gapmodel CLI (predict / screen / sectors / stock / shortlist) and the gapmodel web browser dashboard end to end - venv, cached price data, expected runtimes, and the checks that actually catch look-ahead and ranking bugs.
+---
+
+# Testing the gapmodel CLI
+
+Mostly a terminal project: a Python library + `python -m gapmodel` CLI, so for every command
+except `web` collect stdout as text evidence — no browser, no screen recording.
+
+`gapmodel web` is the exception: it serves the regional dashboard over HTTP and must be tested in
+a real browser with a recording. See "Testing `gapmodel web`" below.
+
+Subcommands on `main`: `markets, fetch, score, screen, predict, stock, backtest, scorecard, asia,
+dashboard, web, export, shortlist, sectors, journal, social-arb`. The screener is invoked as
+`screen` even though the parser variable is named `screener`, and `social-arb` is hyphenated even
+though its module is `social_arb`.
+
+The two single-stock commands are easy to confuse, and testing one proves nothing about the other:
+
+- `stock SYM` — the curated registry in `gapmodel/stocks.py`: memory and storage (`MU`, `WDC`,
+  `STX`), AI accelerators (`NVDA`, `AMD`, `AVGO`) and consumer hardware (`AAPL`). Each complex
+  adds `peer_*` columns from the Asian names that trade the same demand overnight.
+- `shortlist [SYM ...]` — the broad ranking in `gapmodel/shortlist.py` over the ~158-name US
+  universe `modelled_universe()` in `gapmodel/universe.py` (`NASDAQ + LARGE_CAP + MID_CAP`, both
+  venues). `nasdaq_universe()` is the 66-name venue slice and is no longer what `shortlist` runs.
+
+They overlap on the curated names, so assert they **agree**: `shortlist SYM` must print the same
+`p_open_up` and OOS metrics as `stock SYM` for every name in `stocks.STOCKS_BY_SYMBOL`, which holds
+only because `cli._shortlist_equities()` downloads the peers of curated names too. A mismatch here
+is the regression this check exists for (`shortlist MU` once printed 0.6331 against `stock MU`'s
+0.6881, having silently dropped the peer columns). Every curated name is also in the universe, so
+there is no name that one command models and the other refuses.
+
+## Environment
+
+- `source ~/.venvs/gapmodel/bin/activate` (the blueprint creates it; system python3 has no deps).
+- Add `-W ignore` to every `python -m gapmodel ...` invocation: under **scikit-learn 1.9.0**
+  the `penalty="l2"` in `model.py` emits a `FutureWarning: 'penalty' was deprecated` per fit,
+  which swamps the output. Re-check whether this is still needed if sklearn is upgraded.
+- Yahoo Finance bars are cached in `~/.cache/gapmodel/`, under a **sanitised** filename:
+  `_cache_path` maps `^` to `idx_`, and `/` and `=` to `_`. So `^GSPC` is `idx_GSPC.csv` and
+  `CL=F` is `CL_F.csv`, while plain tickers are `AAPL.csv`. Scripting a staleness check against
+  a literal `<SYMBOL>.csv` raises a missing-file error for every index and future.
+- Runs hit the network only for symbols missing from the cache (a garbage ticker therefore
+  produces yfinance `ERROR` lines before the CLI's own `error:` message — expected, not a
+  traceback).
+- **A cache left warm by an earlier session goes stale as the box's clock advances.** Once its last
+  bar is more than 5 days old, `predict`/`stock`/`scorecard` abort with
+  `error: N of N input series have no bar within 5 days of <today>`. That is the guard working, not
+  a regression from the branch under test. Keep the run offline and deterministic by adding the
+  **global** `--allow-stale` (or `--max-stale-days`) flag — it belongs *before* the subcommand
+  (`python -m gapmodel --cache ... --allow-stale predict ...`); placed after it, argparse rejects it
+  with `unrecognized arguments`. `journal` does not trip the guard, so an unflagged journal run and
+  a flagged `predict` run can disagree about whether the cache is usable. Apply the same flags to
+  both trees in a branch-vs-main comparison.
+- `python -m pytest tests -q` takes ~1 min (237 tests); `ruff check . && ruff format --check .`
+  is instant.
+
+## Runtime budget (walk-forward backtest per name, single-threaded per symbol)
+
+- ~1.3 min per stock for `python -W ignore -m gapmodel shortlist SYM ...`.
+- The full universe is ~158 names, so budget upwards of half an hour and start it in the
+  background *first* (`nohup ... > /tmp/log 2>&1 &`), doing targeted runs while it works. CPU
+  contention on this box matters as much as the count: 66 names took ~11 min alone and ~23 min
+  alongside six other forecast jobs.
+- `--gainers N` is the cheap way to exercise the whole path: every candidate's bars are loaded but
+  only N walk-forwards are fitted, so a 12-name run costs about what 12 named symbols cost.
+  A staleness case must be **synthesised** — the warm cache is date-uniform, so a test that relies
+  on it to produce a lagging series passes vacuously.
+
+## Checks that actually catch bugs (do these, not just "it printed a table")
+
+Parse the CSV (`--csv PATH`) with pandas rather than eyeballing the table:
+
+1. **Look-ahead**: forecast `session` must be strictly later than the last `Date` in that
+   symbol's cache file (sanitised name — see above). `features.next_session_date` only skips
+   weekends, so the expected value is "next weekday after the last cached bar" (holidays are
+   ignored).
+2. **Internal arithmetic**: `edge == round(p_open_up - base_rate, 4)` *exactly*, in the printed
+   table and the CSV alike — the reported edge is derived from the two reported columns either
+   side of it, so a reader checking it by hand cannot find a discrepancy. (It did not always
+   hold: `edge` was once computed from the unrounded probability while `p_open_up` went through
+   `predict._display`, which clamps to [1e-4, 1-1e-4] and rounds to 4dp, so 17 of 65 names were
+   off by 1 in the last digit. Assert equality, not a 1e-4 tolerance, or the regression returns.)
+   The unrounded `StockPick.edge` property still drives the ranking.
+3. **Credibility filter** (`shortlist.StockPick.credible`): recompute
+   `auc >= 0.55 and brier_skill > 0 and n_oos >= 500` from the CSV and assert the ranked block
+   is exactly that set, the unranked block is exactly its complement, the two do not overlap,
+   and each `SYM: reason` line names precisely the failed test(s). Also probe the boundaries in
+   a throwaway script by constructing `StockPick(Forecast(...))` with
+   `backtest={"auc":..., "brier_skill":..., "n":..., "base_rate":..., "accuracy":...}` —
+   `Forecast` needs `symbol, name, region, session, probability_up, backtest, contributions`.
+4. **Ranking order**: ranked block must be sorted by `abs(edge) * max(auc - 0.5, 0)` desc.
+5. **`--top N` must not truncate the CSV** — the CSV always holds every name, ranked or not,
+   written in report order (credible first) with a `credible` boolean column. That column is
+   deliberately absent from the printed tables. `--top 0`/negatives are rejected by the parser.
+6. Good tickers for exercising the filter: `ARM` (too few OOS sessions), `HOOD`/`COIN`
+   (negative Brier skill), `AAPL`/`NVDA` (credible — but both are curated, so they also
+   exercise the shortlist/`stock` parity check above; `TSLA` is a credible name with no peers).
+
+## Faking a stale or missing series without harming the warm cache
+
+The global `--cache DIR` flag (before the subcommand) is the way to test anything that depends on
+the *shape* of the cached data — a series that stopped updating, a name with one bar, a missing
+column. Copy the cache and edit the copy; never edit `~/.cache/gapmodel` in place, since re-fetching
+it costs a slow network round trip for every symbol:
+
+```bash
+cp -a ~/.cache/gapmodel /tmp/probe-cache
+md5sum ~/.cache/gapmodel/AMD.csv > /tmp/warm.md5   # verify untouched afterwards
+# edit /tmp/probe-cache/AMD.csv, then:
+python -W ignore -m gapmodel --cache /tmp/probe-cache shortlist AMD MU JPM XOM --gainers 2
+md5sum -c /tmp/warm.md5
+```
+
+Pair it with a small explicit symbol list so the run costs two fits rather than 158. Truncating one
+name's CSV to an earlier date *and* inflating its final close is what distinguishes "ranked on the
+panel's latest session" from "ranked on each name's own last two bars": the doctored name has the
+largest own-tail move, so it must still be excluded, and a run that lists it has the bug back.
+Expect the same doctored series to be named twice — once by the mover-eligibility warning on stderr
+and once by the `stale inputs:` footer — which are different mechanisms; do not read one as the
+other.
+
+### With `--gainers`, the stale filter is all-or-nothing
+
+Worth knowing before designing a test around `_fresh_enough` dropping *some* of the chosen movers:
+`biggest_gainers` only keeps names whose own last bar **is** the latest bar among the candidate
+symbols it was handed — not among the whole loaded panel, so doctoring an index or peer series does
+not move mover eligibility. Every chosen mover therefore shares one last-bar date, and one lag
+against `today()`: either none of them is stale, or all of them are — and the all-stale case raises
+`StaleInputs` before anything is printed. Which message you get depends on what you doctored: the
+targets-only "every requested name has no bar within N days of ..." only appears while the shared
+inputs are still fresh, since the shared-input `guard` runs first and aborts a uniformly old cache
+with "N of M input series have no bar within ..." instead. Grep for whichever one your fixture
+earns.
+
+Either way, a doctored cache cannot produce a partially-filtered mover set through the CLI; only a
+monkeypatched `cli._fresh_enough` (as `tests/test_cli.py` does) reaches it. Do not report "could not
+reproduce" as a bug: check whether the branch is reachable at all first. With `--allow-stale` the
+all-stale case does not raise either — every mover is forecast on the old bars, and what discloses
+the age is the `stale run:` paragraph (measured against `as_of`), not the `stale inputs:` footer:
+that one measures each series against the forecast session, so it says nothing when the whole cache
+is equally old.
+
+The table can still be shorter than the mover set, by the other drop: `forecast_universe` skips a
+name without `model.MIN_TRAIN` (500) labelled rows, with only a stderr
+`WARNING no forecast for SYM: need more than 500 labelled rows, got N` (the `, got N` suffix is part
+of the message — do not grep for the string without it). Synthesise it by keeping only the *last*
+~120 rows of a candidate's CSV in a cache copy — the final bar date has to survive or the name is
+dropped earlier, as mover-ineligible, and you are testing the wrong path. The `--gainers` selection
+line is written after the picks, so its count is `len(picks)`, every name forecast — not the length
+of the ranked table. With no `--top` limit it equals the rows across **both** tables, the ranked one
+and the discarded-picks one `render_text` prints for names that missed the credibility hurdles, so
+count both before calling a mismatch a bug; `--top N` additionally cuts the ranked block on purpose.
+A count larger than the two tables together is the bug worth reporting.
+
+The sentence also says *whether* anything was dropped, via `cli._mover_selection`, so assert the
+wording and not just the number: `the 3 largest movers of session ...` when every chosen mover
+survived, `2 of the 3 largest movers of session ...` when one dropped, and the singular
+`the largest mover of session ...` whenever `biggest_gainers` returned one name (never
+"the 1 largest movers"). The noun is deliberately not "gainers": the sort is descending, so on a
+falling session these are the smallest fallers, which the line says in parentheses. The second
+count is what `biggest_gainers` returned, not `--gainers N`, so
+a run whose universe offers fewer movers than requested still reads honestly — and it can offer
+fewer for a reason other than the latest-bar rule: `_changes` skips a name whose `last_change`
+raises (a single-bar series, say) with a stderr `no last move for SYM: ...`. A test that only
+greps for "largest movers" passes on all three and proves nothing.
+
+The all-dropped case has no report to inspect: with no pick left, `forecast_universe` raises
+`RuntimeError("no stock could be modelled")` and the CLI exits 1, so there is no
+"0 of the 1 largest mover" sentence. Expect the abort, but assert the `error:` line names the
+chosen movers — `all 3 largest movers of session DATE were dropped (AAPL, MSFT, NVDA)`, or the
+singular `the largest mover of session DATE was dropped` — since the bare universe-wide message
+survives only for a run that never selected movers. Reach it by clipping every chosen mover below
+`MIN_TRAIN` (keep the mover-session bar); staleness is not another way in, because all-stale movers
+hit `StaleInputs` ("every requested name has no bar within N days of ...") before
+`forecast_universe` is called at all, which is why that message blames training rows and not the
+cache's age.
+
+## Pandas `na_rep` only reaches a float column
+
+A missing numeric field rendered with `DataFrame.to_string(na_rep="")` prints blank only while the
+column still has at least one real value and is therefore `float64`. If *every* row is `None` the
+column is `object` dtype and pandas prints the literal `None`, `na_rep` notwithstanding. So test a
+"missing value prints blank" claim in **both** shapes — one missing among valued rows, and every row
+missing — or the all-missing case will slip through. `to_csv` writes an empty field in both, so the
+CSV passing says nothing about the table.
+
+## Known data caveat to re-check, not to re-file
+
+The cached **index** series (`^GSPC`, `^IXIC`, European indices, `^VIX`, `^TNX`, ...) are often
+several days staler than the individual stock series. `features.as_of` forward-fills, so a
+stock forecast dated e.g. 2026-08-14 can be built from cross-market returns whose last real
+observation is 2026-08-04. `shortlist` discloses this itself in a `stale inputs:` footer via
+`shortlist.stale_inputs(panel, session)`, so check the footer rather than re-filing it as a
+finding. There is no look-ahead either way; `--refresh` is the workaround if the network allows
+it, and the `predict`/`export` paths have the same exposure with no such footer.
+
+Verify the footer by building a lag histogram against the **forecast session** and asserting the
+flagged set is exactly `{series : (session - last bar).days > STALE_DAYS}` (5). Expect a US series
+that has not opened yet (lag 1) and a partial same-session Asian peer bar (lag 0) to be *absent*:
+the count deliberately does not key off the freshest bar in the panel, which counted 129 of 134
+series stale because Seoul was open, and swung between 42, 67 and 129 depending on which peers a
+run happened to load. A count that moves with the peer set again is a regression — only the
+denominator should. The live cache holds nothing lagging 3–8 days, so probe the threshold itself
+with a synthetic dict of `pd.DataFrame`s at chosen lags rather than assuming it.
+
+## Paired branch-vs-main comparison (the highest-value regression test)
+
+When a PR claims "existing index/market outputs are unchanged", prove it by diffing real CLI output
+between the branch and `main`, not by reasoning about the code:
+
+```bash
+git worktree add --detach /tmp/gapmain origin/main   # detached: `main` may be checked out already
+cd /tmp/gapmain && python -c 'import gapmodel; print(gapmodel.__file__)'   # must print /tmp/gapmain/...
+cd /tmp/gapmain && python -W ignore -m gapmodel predict --market ^GSPC --market ^FTSE --explain > /tmp/main.txt
+cd <repo>        && python -W ignore -m gapmodel predict --market ^GSPC --market ^FTSE --explain > /tmp/branch.txt
+diff /tmp/main.txt /tmp/branch.txt      # expect no output
+git worktree remove --force /tmp/gapmain   # always clean up
+```
+
+Use `--explain` so driver names and log-odds values are compared too, not just probabilities. A
+worktree is essential: it shares the cache but never touches the working tree. Compare against
+`origin/main` rather than the local branch, which may be behind.
+
+The `main` side only runs `main`'s code because `python -m` puts the cwd ahead of the editable
+install on `sys.path` — nothing enforces it. Anything that removes the cwd (`-I`, `PYTHONSAFEPATH`,
+invoking from elsewhere) silently compares the branch with itself and the empty diff means nothing,
+so print `gapmodel.__file__` first and check it points into the worktree.
+
+**Ordering rule:** run paired comparisons **before** any `--refresh`, so both sides read a
+byte-identical cache. Otherwise new bars or newly-collected columns make a code difference
+indistinguishable from cache drift. If you must test post-refresh behaviour, refresh once and then
+re-run *both* sides again.
+
+## Proving a change affects only the intended targets
+
+Two techniques that turn "I didn't see a difference" into real evidence:
+
+1. **Inject the triggering data rather than trusting the current cache.** A new column (e.g.
+   `Adj Close`) is often absent from cached CSVs, so "the index output didn't change" can be vacuous.
+   Build the excluded target's features twice — once with the column injected into its source symbol,
+   once without — and assert `pd.testing.assert_frame_equal` on the features *and*
+   `assert_series_equal` on the labels. Make the injected factor realistic (a step function, e.g. 1%
+   per quarter, matches how Yahoo's `Adj Close` actually behaves) and report how many rows it *would*
+   have moved had the adjustment applied, so the test is shown to be capable of failing.
+   After a real `--refresh` the column may become genuinely present — prefer that stronger version.
+2. **Reproduce the old logic inline for contrast.** To show a fix matters, compute both the new and
+   the previous behaviour in one script and quantify the gap (e.g. an old `ffill().fillna(1.0)`
+   invented a −71.8% opening gap at the data boundary where `ffill().bfill()` gives +0.186%).
+
+## Comparing adjusted vs unadjusted price series: mind the float noise
+
+`Adj Close / Close` is never exactly 1.0 in floating point, so a naive `atol=1e-12` comparison
+reports *every* session as differing (~5,370 of 5,435 for one name). Only above a material threshold
+(~`1e-6`) does the true count appear (80 of 5,434, matching the documented figure). Always state the
+threshold used. Related: a same-session multiplicative factor cancels out of intraday
+`log(Close/Open)`, so that should be identical to ~1e-16 — a good invariant to assert.
+
+## Verifying feature lags / look-ahead
+
+The strong form: reconstruct each feature column from its source series at **both** candidate lags and
+require a match at exactly one — the expected one. A column matching both lags proves nothing.
+
+```python
+mu, label = build_features("MU", panel)  # returns a (DataFrame, Series) TUPLE
+```
+Forward-fill the source onto a calendar index before reindexing, since features are aligned to the
+target's trading sessions. Column names carry suffixes (`own_close_return_lag1`, not
+`own_close_return`) — list `frame.columns` rather than guessing.
+
+For peer/dividend-sourced columns, test on sessions that **straddle an actual dividend**: the most
+recent sessions usually have none, so both candidate source series agree there and the test is
+inconclusive. Find sessions where the two sources differ by more than `1e-6` first.
+
+## The intraday path may be untestable end-to-end
+
+`--intraday` needs hourly futures bars stamped *after* the previous cash close. If the hourly feed
+stops earlier (check `load_hourly_panel(cache_dir=..., refresh=True)` and print each series'
+`index[-1]`), the CLI logs `no pre-open futures bars: falling back to the daily model` and uses the
+daily model — correct documented behaviour, not a bug. Confirm it is not target-specific by trying an
+index target too; and confirm the `pre_*` features do exist historically via
+`build_features(sym, panel, hourly=hourly)` (without `forecast_row=True`), which is the difference
+between "flag ignored" and "flag works, live data unavailable".
+
+## Forcing date-driven or calendar-driven code paths
+
+Use a throwaway script under `/tmp` that monkeypatches module attributes in memory — never edit repo
+files. Note that `cli.py` imports some names directly (e.g. `SCENARIOS` from `gapmodel.scenarios`), so
+both the defining module and `gapmodel.cli` may need patching for the CLI to see the change.
+
+## Rendering console evidence for a PR comment
+
+No terminal emulator is installed and there is no GUI app to screenshot. `pip install pillow`
+into the venv and render the captured log to a PNG (monospace on a dark background) so the PR
+comment has an image; label it clearly as rendered CLI output. Pillow is for evidence only —
+do not add it to the project's dependencies.
+
+If the venv `pip install pillow` fails (PyPI has returned repeated 502s from this box), render with
+headless Chrome instead — it needs nothing installed: write the log into
+`<pre style="font:15px monospace;color:#e1e4e8;background:#14161a">` and run
+`google-chrome --headless=new --disable-gpu --hide-scrollbars --window-size=1150,900
+--screenshot=/tmp/evidence.png /tmp/x.html`. Wrap lines over ~110 chars yourself (the caveat
+paragraph is ~370 chars and otherwise runs off the image). ImageMagick `convert label:` is present
+but its security policy blocks `label:@file` and it rejected multi-line labels of this size, so it
+is not a reliable fallback.
+
+Do not assume `~/.cache/gapmodel` is warm: on a fresh box it can be missing entirely, in which case
+the first `shortlist` run downloads every candidate (~158 names ≈ 2 min of network before the fits).
+Warm it with the run you intend to compare, then run the origin/main worktree against the same cache
+so the comparison is offline and deterministic (the cached rerun took ~16 s).
+
+## When CI fails a test that passes locally, suspect the merge, not the environment
+
+CI is `.github/workflows/ci.yml` (job `check`: Python 3.12, `pip install -e . ruff pytest`, then
+`ruff check`, `ruff format --check`, `pytest`). It triggers on `pull_request`, so **GitHub checks
+out the merge of your branch with `main`, not your branch.** A test can therefore fail on CI
+while passing on every local run, because the code under test only exists in that merge.
+
+Not hypothetical: `tests/test_score.py::test_to_frame_sorts_and_rounds` failed
+(`assert np.float64(5.6) == 5.56`) on a branch whose own `score.py` was correct. `main` had
+momentarily carried `round(s.last, 1)` — committed deliberately in 5488bf7 as a smoke test for
+CI automation, fixed again in #63 — and the PR was being tested against it. Time was lost
+pinning numpy, pandas and pytest to CI's exact versions hunting a rounding difference that was
+never there.
+
+So when local is green and CI is red:
+
+1. `git fetch origin` **first**. A stale `origin/main` hides this, and makes "the same failure
+   is on `main`" look like proof that the failure is pre-existing and none of your business.
+2. Reproduce against the merge, not the branch: `git merge origin/main` (or check out
+   `refs/pull/<N>/merge`) and re-run the suite.
+3. Only then suspect the environment.
+
+Merging current `main` is usually the whole fix.
+
+## Testing `journal` (the forecast journal)
+
+`journal` both *writes* forecasts to a journal CSV and *settles* matured rows. Two rules make
+it cheap and safe to test:
+
+- **Always pass `--log /tmp/...`.** The default is the committed `docs/forecast-log.csv`; a bare
+  `journal` run rewrites a tracked file. Finish with `git status --porcelain` to prove you did
+  not. Copy the committed journal to `/tmp` when you want to test against the real seed.
+- **`--settle-only` skips forecasting entirely**, so it returns in seconds instead of ~1 min per
+  market. Almost every check (settle arithmetic, window/min-settled, decay, exit code) can be
+  driven from a *hand-built* journal CSV plus `--settle-only`. Only idempotence-of-recording
+  needs a real forecast.
+
+A hand-built journal only needs `session,symbol,market,p_open_up,status` — `read_log` widens a
+frame that is missing the optional columns, which is worth exercising on purpose. Set
+`status=settled` and supply your own `outcome` to test the metrics directly; set
+`status=pending` with real session dates to test settlement against the cache.
+
+### Settle on `Market.gap_symbol`, never on the index
+
+The single most important correctness check. Yahoo repeats the previous close as the *index*
+open for some markets, so the model labels those on a tracker (`Market.open_source`):
+`^FTSE` → `ISF.L`, `^AXJO` → `STW.AX`. Measured from the cache on this box:
+
+| symbol | stale-open fraction |
+| --- | --- |
+| `^FTSE` | 96.3% |
+| `ISF.L` | 1.5% |
+| `^AXJO` | 48.4% |
+| `STW.AX` | 6.6% |
+
+So code that settles against `panel[symbol]` retires almost every FTSE session as `stale` and
+the market silently never reaches `--min-settled` — a failure that looks like "no data yet"
+rather than a bug. Test it by journalling ~30 real tracker sessions as pending, settling, and
+asserting the recorded `prev_close`/`open` are at **tracker scale** (FTSE ≈ 1050, not ≈ 10800)
+and that `status=settled` dominates. `journal.opening_bars` must mirror
+`features.build_features` exactly (same `dropna(subset=["Open","Close"])`, same
+`is_stock(target_symbol)` gate on `dividend_adjusted`) — grading has to use the price the label
+was built from, so if you think the adjustment is wrong, it must be changed in *both* places or
+the score stops measuring the model. Note the trackers distribute, and leaving them unadjusted
+flips the gap sign on ~4% of `STW.AX` and ~0.7% of `ISF.L` sessions; that is a property of the
+model's label, not of the journal.
+
+### Company targets in the journal
+
+`journal --market MU` takes a modelled single stock, and a run also widens its download to
+`_stock_panel` when a company row is already `pending` in the log — otherwise the index panel
+would leave that row behind `WARNING <SYM> is not in the panel: leaving its rows pending` for
+ever. Test the dividend basis on a company: an index symbol returns early from `_gap_bars` and
+cannot exercise the adjustment at all.
+
+**Prove the two-sided behaviour, not just the happy path.** The panel choice has to widen for a
+company *and* stay narrow for indices, so run both halves:
+
+- *must widen:* leave `pending` company rows in a temp log and run `journal --settle-only` with
+  **no `--market` at all** — the flags are gone, only the log can widen the download. They must
+  settle, with no `not in the panel` warning. Run the same log and cache on the base commit for the
+  before-picture: it prints that warning and settles 0. Checking only `journal --market MU` cannot
+  distinguish an implementation that looks at `args.market` alone.
+- *must not widen:* copy the real cache, delete every company file (`{sym}.csv/.fields/.start` for
+  `stock_symbols()`), then run an index-only journal and `diff` a listing of that cache dir before
+  and after. `all_symbols()` and `stock_symbols()` are disjoint, so a stray `_stock_panel` call has
+  to re-create those files — the deleted-file trick turns "did it download the companies?" into a
+  cheap, offline, byte-level assertion.
+
+**Getting a company into a temp cache.** Check first — the warm `~/.cache/gapmodel` now carries all
+20 `stock_symbols()` (81 CSVs), so a company run is usually offline and needs no fetch at all. If a
+name really is missing, fetch it into a temp dir: `load_panel(["KO"], start="2005-01-01",
+cache_dir=Path("/tmp/cache-stock"), require=("Adj Close",))`, then copy `KO.*` into a copy of the
+real cache. **Match the start date the CLI will ask for** (the CLI default is `2005-01-01`): the
+cached `.start` sidecar is compared against the requested start, and a mismatch silently
+re-downloads and *overwrites your planted bars* mid-test. The tell is a row count that disagrees
+with the CSV on disk — print both before trusting a run. `KO` is a good subject: ~5440 rows and ~46
+real ex-dividend factor steps (`Adj Close / Close` from ~0.70 to 1.0).
+
+**Pick sessions where the adjustment is visible, or the basis assertion is vacuous.** Most recent
+sessions have factor exactly `1.0`, where adjusted and raw prices are equal and a run settling on
+the *wrong* basis still passes. Scan for a window with `Adj Close / Close != 1` first and journal
+those sessions (e.g. `MU` over `2026-06-26..2026-07-02` sits at `0.999846`, which moves a ~1082 open
+by ~0.17 — far above the log's stored precision). Then assert both directions: the settled `open`
+equals `dividend_adjusted(bars.dropna(subset=["Open","Close"]))` **and** does *not* equal the raw
+cache `Open`.
+
+### The dividend basis: how to make old and new visibly disagree
+
+The factor is `Adj Close / Close`, `ffill().bfill()`-ed. Measuring it on the *unfiltered* frame
+versus on `dropna(subset=["Open","Close"])` differs in exactly one situation, so build that
+situation deliberately in a cache copy:
+
+1. session **A**: blank `Open`, keep `Close`, and set `Adj Close = 0.9 * Close` (a half-published
+   row carrying an anomalous factor);
+2. session **B** (the next one): blank `Adj Close` so B's factor must be inherited.
+
+`opening_bars` drops A in both versions, so only B's *basis* moves: the old code hands B A's 0.9,
+the new code hands it the last complete session's factor. Pick B so its raw gap is **positive**
+(`Open` above the previous complete `Close`) — then the 0.9 scaling pushes the old gap negative
+and the two trees disagree on `outcome`, not merely on a price, which is far harder to dismiss.
+Assert the branch's settled `prev_close`/`open` equal
+`dividend_adjusted(bars.dropna(subset=["Open","Close"]))` to the last stored digit, and assert
+both halves of the intent at once: the half-published row is still present in `_gap_bars` (the
+late-check view) yet absent from `opening_bars` (the settlement view).
+
+### Forcing the statuses without touching the real cache
+
+`cp -r ~/.cache/gapmodel /tmp/cache-mod` and pass `--cache /tmp/cache-mod`. Then, editing the
+**gap symbol's** CSV:
+
+- `stale` — usually occurs naturally; otherwise set a session's `Open` equal to the previous
+  row's `Close` (tolerance is `features.STALE_GAP_TOLERANCE = 1e-9`).
+- `no-session` — drop a row whose date you have journalled, keeping later rows.
+- `pending` → `settled` — a trailing bar with `Close` NaN is dropped by `opening_bars`, so it is
+  never settled while the close is missing; filling that `Close` in the copy settles it.
+- `late` — reachable **naturally**, which makes it the cheap end-to-end check.
+  `_already_printed` reads *every* tracker bar (`_gap_bars`, not `opening_bars`, which drops the
+  very row that matters — same prices, including the total-return basis for a company, only more
+  rows) and asks whether the forecast session carries a real opening print: a non-null
+  `Open` that differs from the previous close by more than `STALE_GAP_TOLERANCE`. Seen live:
+  a cache fetched *during* London hours holds `ISF.L 2026-08-14 Open=1056.0 Close=NaN`, so
+  `^FTSE` is journalled `late` while `^AXJO` (whose `STW.AX` bar is complete) forecasts the next
+  session and stays `pending` — recording both in one run isolates the rule from mere row
+  membership. Three counter-tests, all on a cache copy, and each one guards a hole that a passing
+  `late` case alone does not: blank that `Open` (leave `Close` empty) and the same session must
+  come back `pending`; set that `Open` equal to the previous close and it must *also* come back
+  `pending` (a placeholder open is not an auction — settlement retires it as `stale` later, and
+  filing it `late` instead would be terminal); and after filling a real `late` row's `Close`, it
+  must still never settle, because `settle` revisits `pending` rows only.
+
+  Add a **boundary probe** for the placeholder rule, because it guards the opposite defect: the
+  natural print clears the tolerance by six orders of magnitude (`|log(1056.0/1053.5999755859375)|
+  = 2.3e-3` against `1e-9`), so it cannot tell a correct `>` comparison from a guard so wide it
+  swallows genuine prints. Set the `Open` to `prev_close * math.exp(2e-9)` and require `late`
+  anyway; `prev_close * math.exp(5e-10)` is the under-tolerance twin. Both survive the cache CSV
+  round-trip exactly at these price magnitudes (~1e3, where float64 resolution is ~1e-13) — verify
+  that by re-reading the CSV and printing `abs(log(open/prev_close))` before trusting the result,
+  since the whole test lives inside the last few bits of the mantissa.
+
+  Run the four variants — real print, blanked `Open`, `Open == prev_close`, and the boundary — as
+  one table against the *same* market and session, since only the `Open` differs and everything
+  else (session `2026-08-14`, `p_open_up 0.8109`) must stay put. Reproducing the old rule inline
+  (`session in bars.dropna(["Open"]).index`) over the same four caches is a cheap way to show
+  which variant a change actually moves.
+
+A run after every market it forecasts has closed (the daily automation, 21:47 UTC) sees complete
+tracker bars and so journals `pending`, not `late`: `late` is what a run *during* a session gets,
+and it is the honest status there. Do not read a `late` `^FTSE` row from a mid-session cache as a
+regression — check when the cache was last fetched first.
+
+Assert unscorable rows never move the numbers: recompute the metrics over `status == "settled"`
+rows only and require an exact 4dp match to the printed table.
+
+### Decay has three legs — test them apart
+
+`Skill.decayed` is `brier_skill <= 0 or hit_rate < drift_rate` when the Brier skill is finite,
+falling back to `hit_rate <= 0.5` when it is not, where
+`drift_rate = max(base_rate, 1 - base_rate)`. Comparing against `base_rate` alone is wrong: in a
+market that opens *down* 67% of the time, always saying "down" scores 67%, so a 60% hit rate
+with a healthy Brier skill is still no read. A journal that hits both legs proves nothing about
+the drift leg, so build one where `brier_skill > 0` and `base_rate < hit_rate < drift_rate` and
+require it to be flagged anyway. A worked example that does it: 30 rows, 20 down / 10 up
+(`base_rate` 0.333, `drift_rate` 0.667), probabilities `[0.15]*14 + [0.52]*6 + [0.55]*4 +
+[0.48]*6` → hit 0.60, Brier skill +0.345, and it must still be listed under "below their own
+drift" with `--fail-on-decay` exiting 1.
+
+The third leg is a market that opened the same way on *every* settled session: `brier_skill` is
+nan (no variance to explain) and `drift_rate` is 100%, so direction alone decides at a coin-flip
+bar. A one-way market called 100% right proves nothing here — it also passes under a rule that
+never flags a nan Brier skill — so test the wrong-called twin (all `p=0.2` against
+`outcome=1.0`) and require it listed, exit 1, and the alert line to carry **no** `Brier skill`
+clause (`grep '+nan'` must find nothing). The comparison is `<=`, deliberately stricter than the
+finite branch's `<`: hit exactly 0.5 is flagged, 16/30 is not.
+
+### Append-only is the other thing worth attacking
+
+`record` keys on `(symbol, session)`. Run the same command twice and require the file to be
+**byte-identical** (`diff`), not merely the same row count: the bug to catch is a second run
+overwriting `p_open_up` or `recorded` in place, which a row count cannot see.
+
+Beware that a seeded journal's probabilities stop reproducing once the cache is refreshed — a
+seed row and a fresh forecast for the same session can differ (seen: `^GSPC` seed 0.6206 vs
+fresh 0.6233) without anything being broken. `^FTSE` reproduces longer than the rest because
+`ISF.L` lags the index by a bar.
+
+### Window and minimum
+
+`--min-settled` has no parser default, and the difference is behavioural: omitted, it is capped
+at the window (`resolved_minimum` → `min(20, window)`), so `journal --window 10` reports a
+10-session record; *named* above the window it is a contradiction and refused. The discriminator
+is one 12-settled-row journal read twice — default window says `no market has 20 settled
+sessions yet`, `--window 10` prints the table — so assert both from the same file. The refusal is
+also a timing assertion: `--window 10 --min-settled 20` must exit 1 in ~1s (a fitting run is
+~48s) leaving the `--log` file's md5 *and* mtime untouched, never creating a missing one, and
+never writing to the cache. The library raises `ValueError` for the same pair.
+
+## Testing `gapmodel web`
+
+`python -m gapmodel web [--region R] [--port N] [--at H:MM] [--host ...] [--intraday]
+[--no-browser]` serves an index page (region `<select>` + `<input type="time">` + Render button)
+whose form targets an `<iframe>` at `/dashboard?region=...&at=...`. Nothing is cached between
+requests: **every** `/dashboard` hit refits that region's models.
+
+`--region` (default `Asia`) only sets the *default*: it is what the dropdown pre-selects and what
+`/dashboard` renders when the query omits `region`, so it decides the cost of the first load — see
+the timings below before defaulting to `Europe`. `--intraday` splices hourly futures in, which
+changes the numbers on the board but not the shape of any test here.
+
+Timings measured on an 8-core box with a warm `~/.cache/gapmodel` (budget for them, they are not
+hangs):
+
+- startup (panel load + the startup freshness guard): ~90-110 s before the port is even bound, so
+  poll the port instead of assuming a fast boot;
+- `region=Asia` render: ~20 s;
+- `region=Europe` render: **~5 min 40 s alone**, and far longer with anything else running. Two
+  impatient clicks on Render queue two full refits (`ThreadingHTTPServer`), the aborted one keeps
+  burning CPU, and the visible one then takes 15 min+. Click Render **once** and wait, and do not
+  `curl` the same region alongside a browser test.
+- `region=Americas` render: ~30 s.
+
+Redirect the server's stdout through `python -u`, otherwise `print()` output (the
+`serving dashboard at ...` line and the non-loopback "no authentication" warning) sits in the
+buffer and the log file looks empty while the server works fine.
+
+Chrome renders `<input type="time">` in a 12-hour locale (`05:00 AM`), and the value is
+per-segment: `Delete` on one segment leaves the others set, and submitting a half-cleared field is
+blocked by Chrome's own "Please enter a valid value" bubble, not by the server. To exercise the
+"empty time means now" path, clear all three segments (`Delete`, `Right`, `Delete`, `Right`,
+`Delete`) and then submit; the board heading must show the current UTC time, not `00:00`.
+
+Cheap ways to force the paths that are otherwise hard to reach:
+
+- **stale panel** — copy the cache and truncate each CSV by line (`l[:10] <= "YYYY-MM-DD"`), then
+  run with `--cache /tmp/stalecache`. Do *not* rewrite the dates via pandas: a reparsed
+  `Date` column becomes tz-aware and the loader fails with `Invalid comparison between
+  dtype=datetime64[us, UTC] and Timestamp` / `error: no symbols could be loaded`, which is a load
+  failure and proves nothing about the freshness guard. Correct evidence is
+  `error: N of N input series have no bar within 5 days of ...` plus no listener on the port.
+- **render-time 500** — a small harness beats editing the repo: import `gapmodel.web`, replace
+  `web.forecast_all` with a function that raises (e.g. `IndexError("<script>boom</script>")`), then
+  call `web.serve_dashboard({}, None, symbols={"Asia": ["^N225"], ...}, host="127.0.0.1", port=8001,
+  region="Asia", at=5.0, regularisation=1.0, launch_browser=False)`. The page must show the escaped
+  message and the log must hold the traceback; a dropped connection (ERR_EMPTY_RESPONSE) is the bug.
+
+Parse-time rejections are instant (no panel load), so test them in the shell: `--at 2024-01-01`
+and `--port 70000` must exit 2 from `argparse` before anything downloads.
+
+### The "no fresh market in this region" (503) path is not reachable from the CLI
+
+A region whose startup fresh-symbol list is empty is answered `503 No market in <region> has data
+recent enough to forecast; restart with --refresh`. Trying to produce that by truncating one
+region's index CSVs does **not** work: the Asian indices are read as cross-market features by the
+other regions, so `_shared_inputs` sees them and the startup guard aborts the whole run
+(`error: 6 of 61 input series have no bar within 5 days ...`) instead of dropping a region. And
+`--allow-stale` makes `fresh_targets` keep the stale names, so nothing is dropped either. The path
+is only reachable synthetically — wrap the real command and empty one region's list:
+
+```python
+import gapmodel.cli as cli
+
+real = cli.serve_dashboard
+
+
+def patched(panel, hourly, *, symbols, **kw):
+    symbols = dict(symbols)
+    symbols["Asia"] = []
+    return real(panel, hourly, symbols=symbols, **kw)
+
+
+cli.serve_dashboard = patched
+cli.main(["web", "--port", "8050", "--at", "5:00", "--no-browser"])
+```
+
+Say in the report that it was forced. Check the *other* regions still render on that same server —
+a blanket 503 and a correct per-region 503 look identical if you only load the broken one.
+`forecast_all(panel, symbols=[])` raises `RuntimeError("no market could be modelled")`, so without
+the 503 the symptom is a 500, and before the `symbols is None` fix it was a full board of the
+markets that had just been excluded.
+
+### Startup host warning matrix
+
+`reachable_beyond_this_machine` (via `ipaddress.ip_address(...).is_loopback`) decides the
+"no authentication" warning. Verified by starting one server per host on its own port and reading
+the first log line (each start costs a full ~2 min panel load, so launch them in parallel):
+no warning for `127.0.0.1`, `127.0.0.2`, `localhost`; warning for `0.0.0.0`, a LAN IP
+(`hostname -I`), and a hostname. IPv6 spellings bind too — `serve_dashboard` picks
+`address_family` from the host via `bind_family`, so `--host ::1` and `--host [::1]` both serve at
+`http://[::1]:PORT/` and are classified loopback. Only a *name* is assumed IPv4, so an IPv6-only
+hostname still dies at bind time with
+`error: [Errno -9] Address family for hostname not supported`.
+
+### Background servers get killed with the shell that spawned them
+
+`nohup ... &` inside a shell call that later hits the tool's timeout dies with it (the log file can
+end up never created). Use `setsid nohup ... > /tmp/log 2>&1 < /dev/null &` and poll the log.
+
+## Devin Secrets Needed
+
+None. Yahoo Finance is reachable unauthenticated from the test box.

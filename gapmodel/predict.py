@@ -5,11 +5,20 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from . import model as model_mod
-from .features import build_features, live_feature_row
-from .markets import MARKETS, market
+from .events import caveats
+from .features import (
+    MKT_SHOCK_5_SCALE,
+    MKT_SHOCK_CLIP,
+    _column_name,
+    build_features,
+    live_feature_row,
+)
+from .markets import CURVE_FRONT, CURVE_STRIP, CURVE_WINDOW, MARKETS
+from .stocks import target_market
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +33,10 @@ class Forecast:
     backtest: dict[str, float]
     contributions: pd.Series
     top_drivers: int = 5
+    # Probability under the hypothetical moves asked for, if any were.
+    shocked_probability: float | None = None
+    # Scheduled releases that this session's probability cannot account for.
+    caveats: tuple[str, ...] = ()
 
     @property
     def drivers(self) -> pd.Series:
@@ -36,13 +49,117 @@ class Forecast:
             "symbol": self.symbol,
             "region": self.region,
             "session": self.session.date().isoformat(),
-            # Never print a flat 0 or 1: no forecast here is a certainty.
-            "p_open_up": round(min(max(self.probability_up, 1e-4), 1 - 1e-4), 4),
+            "p_open_up": _display(self.probability_up),
+            **(
+                {}
+                if self.shocked_probability is None
+                else {
+                    "p_shocked": _display(self.shocked_probability),
+                    "p_change": round(self.shocked_probability - self.probability_up, 4),
+                }
+            ),
             "oos_auc": round(self.backtest.get("auc", float("nan")), 4),
             "oos_brier_skill": round(self.backtest.get("brier_skill", 0.0), 4),
             "oos_accuracy": round(self.backtest.get("accuracy", 0.0), 4),
             "base_rate": round(self.backtest.get("base_rate", 0.0), 4),
         }
+
+
+def _display(probability: float) -> float:
+    """Never print a flat 0 or 1: no forecast here is a certainty."""
+    return round(min(max(probability, 1e-4), 1 - 1e-4), 4)
+
+
+def shocked_row(live: pd.DataFrame, shocks: dict[str, float]) -> pd.DataFrame:
+    """Copy of ``live`` with hypothetical log returns added to some instruments.
+
+    A shock is applied to every feature derived from that symbol's latest bar:
+    the one-day and five-day returns (a move today is also part of the week),
+    the VIX level, and the volatility-normalised shock features, where the move
+    is first converted into deviations of the volatility already realised.
+
+    A symbol this target reads nothing from — its own symbol, above all, which
+    no model may use to predict itself — has no column to bump. That is said out
+    loud rather than printed as a probability that did not move, which would read
+    as "the move does not matter" instead of "the move is not modelled".
+    """
+    bumped = live.copy()
+    for symbol, move in shocks.items():
+        name = _column_name(symbol)
+        touched = False
+        for column in (
+            f"ind_{name}_return",
+            f"ind_{name}_return_5",
+            f"peer_{name}_return",
+            f"peer_{name}_return_5",
+        ):
+            if column in bumped:
+                bumped[column] += move
+                touched = True
+        if symbol == "^VIX" and "ind_vix_level" in bumped:
+            bumped["ind_vix_level"] *= np.exp(move)
+            touched = True
+        # A volatility-normalised shock feature has to move with its return.
+        # The volatility itself is measured up to the previous bar, so a move
+        # today leaves the denominator alone.  A cross-market read is carried
+        # entirely by such features, so the same conversion is what makes it
+        # shockable at all: added raw, a 10% move would land as ten sigma.
+        for prefix in (f"ind_{name}", f"mkt_{name}"):
+            vol = [c for c in bumped.columns if c.startswith(f"{prefix}_vol_")]
+            if not vol:
+                continue
+            sigma = bumped[vol[0]]
+            # The weekly column is quoted against that same daily volatility
+            # grown over its span, so the move has to be divided by the wider
+            # denominator: converted with the daily one it would enter the week
+            # at over twice the size it belongs there at.
+            for column, span in (
+                (f"{prefix}_shock", 1.0),
+                (f"{prefix}_shock_5", MKT_SHOCK_5_SCALE),
+            ):
+                if column not in bumped:
+                    continue
+                scaled = bumped[column] + move / (span * sigma.where(sigma > 0))
+                # Cross-market reads are held inside the range they are built
+                # in, so a hypothetical cannot be pushed where no fit has been.
+                if prefix.startswith("mkt_"):
+                    scaled = scaled.clip(-MKT_SHOCK_CLIP, MKT_SHOCK_CLIP)
+                bumped[column] = scaled
+                touched = True
+        # The curve features are differences between the two oil funds, so a
+        # move in either leg tilts them, in opposite directions.
+        sign = 1.0 if symbol == CURVE_FRONT else -1.0 if symbol == CURVE_STRIP else 0.0
+        if sign:
+            for column in ("ind_oil_curve_return", f"ind_oil_curve_slope_{CURVE_WINDOW}"):
+                if column in bumped:
+                    bumped[column] += sign * move
+                    touched = True
+        if not touched:
+            log.warning(
+                "%s is not a feature of this target: its move is unmodelled, not harmless",
+                symbol,
+            )
+    return bumped
+
+
+def parse_shock(text: str) -> tuple[str, float]:
+    """``"^KS11=+2%"`` or ``"^KS11=0.02"`` into a symbol and a log return.
+
+    Split on the last ``=`` so symbols that contain one — every FX pair and
+    future, ``CL=F``, ``JPY=X`` — remain shockable.
+    """
+    symbol, _, size = text.rpartition("=")
+    if not symbol or not size:
+        raise ValueError(f"expected SYMBOL=MOVE, got {text!r}")
+    percent = size.strip().endswith("%")
+    try:
+        number = float(size.strip().rstrip("%"))
+    except ValueError as exc:
+        raise ValueError(f"{size!r} is not a move; expected e.g. {symbol}=+2%") from exc
+    simple = number / 100.0 if percent else number
+    if simple <= -1.0:
+        raise ValueError("a move of -100% or worse is not a price")
+    return symbol, float(np.log1p(simple))
 
 
 def forecast_market(
@@ -52,22 +169,32 @@ def forecast_market(
     top_drivers: int = 5,
     hourly: dict[str, pd.Series] | None = None,
     min_train: int = model_mod.MIN_TRAIN,
+    shocks: dict[str, float] | None = None,
 ) -> Forecast:
     features, labels = build_features(symbol, panel, forecast_row=True, hourly=hourly)
     backtest = model_mod.walk_forward(features, labels, min_train=min_train, c=c)
 
     pipeline = model_mod.fit(features, labels, c=c)
     live, session = live_feature_row(symbol, panel, hourly=hourly)
-    raw = pipeline.predict_proba(live.to_numpy())[:, 1]
-    probability = float(model_mod.calibrator(backtest)(raw)[0])
+    calibrate = model_mod.calibrator(backtest)
+    probability = float(calibrate(pipeline.predict_proba(live.to_numpy())[:, 1])[0])
+
+    shocked = None
+    explained = live
+    if shocks:
+        explained = shocked_row(live, shocks)
+        shocked = float(calibrate(pipeline.predict_proba(explained.to_numpy())[:, 1])[0])
 
     weights = model_mod.coefficients(pipeline, list(features.columns))
     scaler = pipeline.named_steps["scale"]
-    standardised = pd.Series(scaler.transform(live.to_numpy())[0], index=features.columns)
+    # Drivers describe the row that produced the rightmost probability, so
+    # under a shock they explain the hypothetical rather than today.
+    standardised = pd.Series(scaler.transform(explained.to_numpy())[0], index=features.columns)
     contributions = (weights * standardised).sort_values(key=abs, ascending=False)
 
-    meta = market(symbol)
+    meta = target_market(symbol)
     return Forecast(
+        caveats=caveats(meta, session),
         symbol=symbol,
         name=meta.name,
         region=meta.region,
@@ -76,6 +203,7 @@ def forecast_market(
         backtest=backtest.metrics,
         contributions=contributions,
         top_drivers=top_drivers,
+        shocked_probability=shocked,
     )
 
 
@@ -85,11 +213,21 @@ def forecast_all(
     c: float = 0.1,
     hourly: dict[str, pd.Series] | None = None,
     min_train: int = model_mod.MIN_TRAIN,
+    shocks: dict[str, float] | None = None,
 ) -> list[Forecast]:
     results: list[Forecast] = []
-    for symbol in symbols or [m.symbol for m in MARKETS]:
+    # `None` is every market and `[]` is none of them: a caller that filtered its
+    # own list down to nothing — every candidate dropped for stale data — meant
+    # to forecast nothing, and reading that as "no restriction" forecast exactly
+    # the names it had just excluded.
+    requested = [m.symbol for m in MARKETS] if symbols is None else symbols
+    for symbol in requested:
         try:
-            results.append(forecast_market(symbol, panel, c=c, hourly=hourly, min_train=min_train))
+            results.append(
+                forecast_market(
+                    symbol, panel, c=c, hourly=hourly, min_train=min_train, shocks=shocks
+                )
+            )
         except Exception as exc:
             log.warning("no forecast for %s: %s", symbol, exc)
     if not results:

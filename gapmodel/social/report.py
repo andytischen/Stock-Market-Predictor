@@ -74,10 +74,7 @@ def render_text(signals: list[SocialSignal]) -> str:
             f"{sig.signal:<{_COL_SIG}}"
         )
     lines.append(_SEP)
-    lines.append(
-        "Signals are derived from public social-media posts. "
-        "Not investment advice."
-    )
+    lines.append("Signals are derived from public social-media posts. Not investment advice.")
     return "\n".join(lines) + "\n"
 
 
@@ -90,8 +87,7 @@ def render_html(signals: list[SocialSignal]) -> str:
         This output is a model-derived sentiment summary, not investment advice.
     """
     head = "".join(
-        f"<th>{h}</th>"
-        for h in ("Ticker", "Mentions", "Sent mean", "Bull %", "Velocity", "Signal")
+        f"<th>{h}</th>" for h in ("Ticker", "Mentions", "Sent mean", "Bull %", "Velocity", "Signal")
     )
 
     def _row(sig: SocialSignal) -> str:

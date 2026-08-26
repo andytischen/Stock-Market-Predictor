@@ -95,9 +95,7 @@ def _build_signal(ticker: str, posts: list[dict[str, Any]], window_hours: float)
 
     in_window = [p for p in posts if p["created_utc"] >= cutoff]
     recent_posts = [p for p in posts if p["created_utc"] >= recent_cutoff]
-    prior_posts = [
-        p for p in posts if prior_cutoff <= p["created_utc"] < recent_cutoff
-    ]
+    prior_posts = [p for p in posts if prior_cutoff <= p["created_utc"] < recent_cutoff]
 
     if not in_window:
         return SocialSignal(
