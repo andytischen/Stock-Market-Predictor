@@ -26,6 +26,9 @@ def test_market_lookup_and_session_boundary_are_safe(monkeypatch):
     assert markets.last_observed_utc(9.0) == pytest.approx(8.0)
     assert markets.last_observed_utc(18.0) == pytest.approx(12.0)
 
+    # market() resolves via the import-time `MARKETS_BY_SYMBOL` table, so the
+    # lookup assertion for real registry data stays outside the monkeypatched
+    # session-boundary block.
     assert markets.market("^FTSE").open_source == "ISF.L"
     with pytest.raises(KeyError, match="unknown market"):
         markets.market("NOT_A_MARKET")
@@ -65,30 +68,33 @@ def test_walk_forward_and_window_metrics_use_only_oos_rows():
         backtest.window_metrics(since="2100-01-01")
 
 
-def test_calibration_uses_the_walk_forward_record_without_leaking_lookahead(monkeypatch):
+def test_calibration_uses_only_preceding_history_for_each_block(monkeypatch):
     probs = pd.Series(np.linspace(0.01, 0.99, 10), index=pd.RangeIndex(10))
     outcomes = pd.Series((np.arange(10) % 2).astype(int), index=probs.index)
     backtest = model.Backtest(probabilities=probs, outcomes=outcomes)
 
-    actual_calibrator = model.calibrator
-    calibrator = actual_calibrator(backtest)
-    mapped = calibrator(np.array([0.01, 0.5, 0.99]))
-    assert np.all(np.isfinite(mapped))
-    assert mapped.min() >= 0.0
-    assert mapped.max() <= 1.0
-    assert mapped[1] == pytest.approx(0.5, abs=0.5)
-
-    seen: list[int] = []
+    seen: list[list[int]] = []
 
     def fake_calibrator(history):
-        seen.append(history.probabilities.index[-1])
+        seen.append(list(history.probabilities.index))
         return lambda values: np.asarray(values, dtype=float)
 
     monkeypatch.setattr(model, "calibrator", fake_calibrator)
 
     published = model.calibrated(backtest, min_history=3, step=2)
-    assert seen == [2, 4, 6, 8]
-    assert list(published.probabilities.index) == [3, 4, 5, 6, 7, 8, 9]
+    assert seen == [[0, 1, 2], [0, 1, 2, 3, 4], [0, 1, 2, 3, 4, 5, 6], [0, 1, 2, 3, 4, 5, 6, 7, 8]]
+    assert list(published.probabilities.index) == list(range(3, 10))
 
     unchanged = model.calibrated(backtest, min_history=500)
     assert unchanged is backtest
+
+
+def test_calibrator_preserves_order_for_increasing_logits():
+    probs = pd.Series([0.01, 0.2, 0.5, 0.8, 0.99], index=pd.RangeIndex(5))
+    outcomes = pd.Series([0, 0, 1, 1, 1], index=probs.index)
+    backtest = model.Backtest(probabilities=probs, outcomes=outcomes)
+
+    calibrator = model.calibrator(backtest)
+    mapped = calibrator(np.array([0.01, 0.5, 0.99]))
+    assert mapped[0] < mapped[1] < mapped[2]
+    assert mapped[0] < 0.5 < mapped[2]
