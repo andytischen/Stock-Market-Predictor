@@ -123,6 +123,26 @@ def test_a_target_is_guarded_for_itself_and_a_peer_for_everyone():
     assert "WDC" in _shared_inputs(loaded, ["MU"])
 
 
+def test_a_curated_name_asked_for_beside_its_own_peers_is_guarded_for_all_of_them():
+    """How far the peer rule reaches for ``stock``, whose names are mutual peers.
+
+    MU is a column in WDC's model, so a run asked for both is held to MU's
+    freshness and a halted MU fails it rather than losing its own row. Only when
+    MU is the whole request, and so a feature of nothing being fitted, is it a
+    target guarded for itself alone.
+    """
+    loaded = panel(MU=1, WDC=1, STX=1, **{"^GSPC": 1})
+    assert "MU" in _shared_inputs(loaded, ["MU", "WDC", "STX"])
+    assert "MU" not in _shared_inputs(loaded, ["MU"])
+    halted = panel(MU=30, WDC=1, STX=1, **{"^GSPC": 1})
+    with pytest.raises(StaleInputs, match=r"MU \(30d\)"):
+        guard(_shared_inputs(halted, ["MU", "WDC", "STX"]), SESSION)
+    # Alone, the same halted listing is dropped by name — and dropping the last
+    # target left is the whole run, so it is refused rather than printing nothing.
+    with pytest.raises(StaleInputs, match="every requested name"):
+        fresh_targets(halted, ["MU"], SESSION)
+
+
 def test_a_series_no_model_in_the_run_reads_cannot_refuse_it():
     """The panel is one download; a run of it is narrower than the whole list.
 
