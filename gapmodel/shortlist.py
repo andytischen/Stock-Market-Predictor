@@ -41,13 +41,14 @@ not a view on the company or on the session that follows the bell.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import pandas as pd
 
 from . import model as model_mod
 from .predict import Forecast, _display, forecast_market
-from .staleness import STALE_DAYS, stale_inputs
+from .staleness import STALE_DAYS, missing, stale_inputs
 from .universe import modelled_universe
 
 log = logging.getLogger(__name__)
@@ -343,6 +344,13 @@ def _table(picks: list[StockPick]) -> str:
     return frame.to_string(index=False, na_rep="")
 
 
+def _at_most_eight(described: Sequence[str]) -> str:
+    """The first eight of ``described``, with the rest counted rather than listed."""
+    return ", ".join(described[:8]) + (
+        f" and {len(described) - 8} more" if len(described) > 8 else ""
+    )
+
+
 def render_text(
     picks: list[StockPick],
     top: int | None = None,
@@ -362,6 +370,10 @@ def render_text(
     session being forecast, which is dated from the panel's own last bar, so a
     cache that stopped a month ago has nothing lagging within itself beyond the
     tolerance and names nobody — the one run where the reader most needs telling.
+
+    A series that arrived with no bars is named too, on its own line: it has no
+    lag to be behind by, so neither footer above would mention it, and the run
+    was allowed through on the strength of the series that did arrive.
     """
     ranked = rank(picks)
     # `top is not None`, not `if top`: asking for the strongest zero names is a
@@ -407,6 +419,22 @@ def render_text(
         for pick in flagged:
             for note in pick.forecast.caveats:
                 lines.append(f"  {pick.symbol}: {note}")
+    if panel is not None:
+        # Said in the report and not only on the log, because the log is not where
+        # this is read: `shortlist` prints to a terminal or a briefing, and a
+        # series that never arrived changes what the probabilities were computed
+        # from. Without a denominator of its own — these are the series the count
+        # below does not cover, and a second "N of M" reads as the two lines
+        # disagreeing about how many inputs the run had.
+        absent = missing(panel)
+        if absent:
+            lines.append("")
+            lines.append(
+                f"no bars at all: {len(absent)} series this run asked for arrived "
+                "empty, so no feature was built from them and they are judged for "
+                "no lag below. These probabilities come from a narrower read of "
+                f"the market than a complete download gives: {_at_most_eight(absent)}"
+            )
     named: list[str] = []
     counted = 0
     if panel is not None and picks:
@@ -421,8 +449,7 @@ def render_text(
                 f"{max_stale_days} days of {session.date().isoformat()}, a gap the calendar "
                 "does not explain. Their last value is carried forward, so these "
                 "probabilities are the model's read of older cross-market and "
-                f"cross-asset data: {', '.join(named[:8])}"
-                + (f" and {len(named) - 8} more" if len(named) > 8 else "")
+                f"cross-asset data: {_at_most_eight(named)}"
             )
     # Not conditional on the panel: this is a fact about the forecast itself, and
     # the only disclosure a uniformly old cache produces.
