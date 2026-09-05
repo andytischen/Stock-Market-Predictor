@@ -476,6 +476,44 @@ def test_the_run_footer_claims_nothing_about_series_it_did_not_compare(given):
     assert "no series is behind" not in text and "named above" not in text
 
 
+def test_a_series_that_arrived_with_no_bars_is_named_in_the_report(panel):
+    """The one input neither stale footer can describe.
+
+    An empty download has no last bar, so it is no number of days behind the
+    forecast session and the lag check skips it: a reader told "2 of 3 series
+    are current" would take that as covering the third. It is also not carried
+    forward, since there is nothing to carry, so the sentence about older data
+    is the wrong one for it.
+    """
+    panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}
+    panel["CL=F"] = panel["CL=F"].iloc[:0]
+    text = render_text([pick("GOOD", 0.70, auc=0.62)], panel=panel)
+    assert "no bars at all" in text
+    assert "CL=F" in text
+    # The count is of the empty series alone: a second "N of M" beside the
+    # stale line's smaller total reads as the two disagreeing.
+    assert "1 series this run asked for arrived empty" in text
+    # It is not counted among the series judged for staleness, and it is not
+    # described as forward-filled.
+    assert "stale inputs" not in text
+    # A full panel says none of this, and neither does a run given no panel.
+    assert "no bars at all" not in render_text([pick("GOOD", 0.70, auc=0.62)])
+    panel["CL=F"] = _ending(panel["^GSPC"], SESSION)
+    assert "no bars at all" not in render_text([pick("GOOD", 0.70, auc=0.62)], panel=panel)
+
+
+def test_empty_downloads_are_named_even_when_nothing_could_be_modelled(panel):
+    """The stale footers need a session to measure against; this one does not.
+
+    A run whose picks all failed still asked for the series, and an empty
+    download is a likely reason it failed.
+    """
+    panel = {symbol: bars.iloc[:0] for symbol, bars in panel.items()}
+    text = render_text([], panel=panel)
+    assert "no bars at all" in text
+    assert f"{len(panel)} series this run asked for arrived empty" in text
+
+
 def test_the_worst_lag_is_named_first(panel):
     """Eight names are printed; they should be the eight furthest behind."""
     panel = {symbol: _ending(bars, SESSION) for symbol, bars in panel.items()}
