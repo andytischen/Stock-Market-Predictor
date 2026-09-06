@@ -79,6 +79,9 @@ from .shortlist import discarded as discarded_shortlist
 from .shortlist import rank as rank_shortlist
 from .shortlist import render_text as render_shortlist_text
 from .shortlist import to_frame as shortlist_to_frame
+from .social import render_html as social_render_html
+from .social import render_text as social_render_text
+from .social import scan as social_scan
 from .social_arb import CORRELATION_WINDOW, build_social_arb
 from .social_arb import to_frame as social_arb_to_frame
 from .staleness import STALE_DAYS, fresh_targets, guard, today
@@ -1007,6 +1010,19 @@ def _cmd_fetch(args: argparse.Namespace) -> None:
         print(f"{symbol:<12} {len(frame):>6} rows  {span}")
 
 
+_SOCIAL_DEFAULT_TICKERS = ["CAKE", "BIRK", "IMAX", "HOOD"]
+
+
+def _cmd_social(args: argparse.Namespace) -> None:
+    """Run a social-media sentiment scan and print the results."""
+    tickers: list[str] = args.tickers or _SOCIAL_DEFAULT_TICKERS
+    signals = social_scan(tickers, window_hours=args.window)
+    print(social_render_text(signals), end="")
+    if args.html:
+        Path(args.html).write_text(social_render_html(signals), encoding="utf-8")
+        print(f"\nwrote {args.html}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gapmodel", description=__doc__)
     parser.add_argument("--start", default="2005-01-01", help="first date to download")
@@ -1272,6 +1288,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     dashboard.set_defaults(func=_cmd_dashboard)
+
+    social = sub.add_parser(
+        "social",
+        help="social-media sentiment scan for a set of tickers",
+    )
+    social.add_argument(
+        "--tickers",
+        nargs="+",
+        metavar="TICKER",
+        default=None,
+        help=f"tickers to scan (default: {' '.join(_SOCIAL_DEFAULT_TICKERS)})",
+    )
+    social.add_argument(
+        "--window",
+        type=float,
+        default=24.0,
+        metavar="HOURS",
+        help="look-back window in hours (default: 24)",
+    )
+    social.add_argument("--html", metavar="PATH", help="also write an HTML report here")
+    social.set_defaults(func=_cmd_social)
 
     brief = sub.add_parser(
         "brief",
