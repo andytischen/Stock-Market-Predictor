@@ -178,6 +178,56 @@ hit `StaleInputs` ("every requested name has no bar within N days of ...") befor
 `forecast_universe` is called at all, which is why that message blames training rows and not the
 cache's age.
 
+### Reaching the too-short-to-calibrate branch (`calibratable` / raw probabilities)
+
+`scorecard` publishes calibrated probabilities, but `model.calibrated()` hands a record back **raw**
+when `calibratable(bt)` is False — `len(bt.probabilities) > MIN_CALIBRATION` (250), strict, so
+exactly 250 predictions is *not* calibratable and 251 is. Anything that describes the printed
+numbers to a reader (the `scorecard` footer, and by the same argument any future export or web
+copy) branches on this, so testing it needs a genuinely short record.
+
+**No undoctored CLI target is short enough**, and that is worth stating in a report rather than
+re-discovering: `scorecard --market` accepts only `MARKETS_BY_SYMBOL` plus the seven curated
+`STOCKS_BY_SYMBOL` names (`cli._target_symbol`), and in a warm cache all of them are long (indices
+~4682 bars, MU/WDC/STX/NVDA/AMD/AAPL 5443, AVGO 4287) — every one yields ~3800+ out-of-sample
+predictions. `--intraday` is not a way in either: with no hourly data cached, `cli._hourly` logs
+`no hourly futures data (...): falling back to the daily model`, returns None, and `min_train`
+stays at `MIN_TRAIN` (500) rather than `INTRADAY_MIN_TRAIN` (200), so the record is long anyway.
+
+Use a truncated cache copy and size it by arithmetic — for a curated stock the feature frame came
+out at `bars - 21`, so:
+
+```text
+bars ≈ 500 (min_train) + wanted_oos + 21
+# 730 bars -> 709 feature rows -> 209 oos  (raw)
+# 771 bars -> 750 feature rows -> 250 oos  (raw — the boundary)
+# 772 bars -> 751 feature rows -> 251 oos  (calibrated)
+```
+
+Keep the **last** N bars so the final bar date survives, or the staleness guard fires and you are
+testing that instead. Re-derive the `- 21` empirically for a different target; don't trust it.
+
+Two traps:
+
+- A library probe that recomputes "the raw probabilities" must build the **same panel the CLI
+  built**, or the numbers won't match and it looks like the CLI published something else. `cli._panel`
+  is `load_panel(start=..., cache_dir=..., refresh=...)` with **no `symbols` argument** (the full
+  default panel), and `_stock_panel` then `update`s it with `stock_symbols()` requiring `Adj Close`.
+  Passing a hand-built symbol list instead silently drops the indicator columns, changes the fit, and
+  gave visibly different probabilities. Also note `load_panel(symbols=...)` wants symbol *strings* —
+  handing it `Instrument` objects only logs `skipping Instrument(...): 'Instrument' object has no
+  attribute 'replace'` per name and quietly returns a thinner panel.
+- Just above the boundary the report is degenerate but not wrong: `calibrated()` drops the first 250
+  predictions, so a 251-prediction record has **one** scored session left and a `--window 21` run
+  prints `n 1` with `window_accuracy 1.0` and every Brier skill `0.0`. Expect it; it is not caused by
+  a wording change.
+
+To prove the printed numbers really are unmapped, assert `calibratable(raw) is False`, that
+`calibrated(raw)` has the *same index* as `raw` (no 250-row drop) with max abs diff `0.0`, and that
+the last `window` raw probabilities equal the `--csv` file's `p_open_up` to 4dp. Above the boundary
+the same comparison should show a real difference (~0.1 here), which is what makes the equality
+below it meaningful.
+
 ## Pandas `na_rep` only reaches a float column
 
 A missing numeric field rendered with `DataFrame.to_string(na_rep="")` prints blank only while the
