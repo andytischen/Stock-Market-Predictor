@@ -87,13 +87,19 @@ def test_one_dead_listing_does_not_cancel_the_names_around_it(caplog):
     with caplog.at_level("WARNING"):
         kept = alone(universe, ["AAPL", "MSFT", "HALTED"])
     assert kept == ["AAPL", "MSFT"]
-    assert "HALTED" in caplog.text and "skipping 1 of 3" in caplog.text
+    assert "skipping 1 of 3 requested forecasts (HALTED)" in caplog.text
+    # And the series behind it, which is what a reader can act on.
+    assert "HALTED (30d)" in caplog.text
 
 
 def test_a_run_whose_every_forecast_is_dead_fails_rather_than_forecasting_nothing(caplog):
     with pytest.raises(StaleInputs) as raised, caplog.at_level("WARNING"):
         alone(panel(AAPL=30, MSFT=30), ["AAPL", "MSFT"])
-    assert "2 of 2 input series have no bar within 5 days" in str(raised.value)
+    message = str(raised.value)
+    # Said as a refusal of the request, not as a count of series: a reader who
+    # asked for two names is told both are gone, and how to widen the tolerance.
+    assert "every requested forecast reads a series with no bar within 5 days" in message
+    assert "--allow-stale" in message
     # Not "skipping" and then aborting: two lines describing two outcomes.
     assert "skipping" not in caplog.text
 
@@ -147,7 +153,8 @@ def test_a_halted_curated_name_costs_the_models_that_hold_it_as_a_peer(caplog):
     halted = panel(MU=30, WDC=1, STX=1, AAPL=1, **{"^GSPC": 1})
     with caplog.at_level("WARNING"):
         assert judged(halted, ["MU", "WDC", "STX", "AAPL"]) == ["AAPL"]
-    assert "skipping 3 of 4" in caplog.text and "MU (30d)" in caplog.text
+    assert "skipping 3 of 4 requested forecasts (MU, STX, WDC)" in caplog.text
+    assert "MU (30d)" in caplog.text
     # Asked for alone, the halted name is the whole run, so the run is refused.
     with pytest.raises(StaleInputs, match=r"MU \(30d\)"):
         judged(halted, ["MU"])
