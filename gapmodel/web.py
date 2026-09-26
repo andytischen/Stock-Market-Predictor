@@ -5,8 +5,10 @@ from __future__ import annotations
 import ipaddress
 import logging
 import socket
+import threading
 import webbrowser
-from collections.abc import Mapping, Sequence
+from collections import OrderedDict
+from collections.abc import Callable, Mapping, Sequence
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -24,6 +26,11 @@ log = logging.getLogger(__name__)
 
 # Bind addresses that mean "every interface": not reachable as a URL host.
 _WILDCARD_HOSTS = {"", "0.0.0.0", "::", "[::]"}
+
+# Rendered boards kept per (region, time). One board per region and a handful of
+# times is the whole realistic working set; the bound is only there so a client
+# asking for every minute of the day cannot grow the server without limit.
+_CACHE_SIZE = 32
 
 
 def reachable_beyond_this_machine(host: str) -> bool:
@@ -84,6 +91,46 @@ def dashboard_document(
     return render_html(board)
 
 
+class _Renders:
+    """Boards rendered once per (region, time) rather than once per request.
+
+    A render refits every model in the region, which is minutes for the larger
+    ones, so a second look at a board already on screen - a reload, a second
+    tab, an impatient click - must not pay for it again. The per-key lock is
+    what makes the impatient click cheap rather than twice as expensive: the
+    second request waits for the render already running instead of starting a
+    second one beside it.
+    """
+
+    def __init__(self, size: int = _CACHE_SIZE) -> None:
+        self._size = size
+        self._boards: OrderedDict[tuple[str, float], str] = OrderedDict()
+        self._locks: OrderedDict[tuple[str, float], threading.Lock] = OrderedDict()
+        self._guard = threading.Lock()
+
+    def get(self, region: str, hour: float | None, render: Callable[[], str]) -> str:
+        if hour is None:
+            # "Now" is a different board every time it is asked for.
+            return render()
+        key = (region, hour)
+        with self._guard:
+            lock = self._locks.setdefault(key, threading.Lock())
+            while len(self._locks) > self._size:
+                self._locks.popitem(last=False)
+        with lock:
+            with self._guard:
+                board = self._boards.get(key)
+                if board is not None:
+                    self._boards.move_to_end(key)
+            if board is None:
+                board = render()
+                with self._guard:
+                    self._boards[key] = board
+                    while len(self._boards) > self._size:
+                        self._boards.popitem(last=False)
+            return board
+
+
 def _index_html(default_region: str, default_at: float | None) -> str:
     time_value = "" if default_at is None else format_utc_time(default_at)
     options = "".join(
@@ -103,6 +150,7 @@ def _index_html(default_region: str, default_at: float | None) -> str:
  }}
  label {{ display: grid; gap: .25rem; }}
  iframe {{ width: 100%; height: 85vh; border: 1px solid #ddd; }}
+ .status {{ color: #666; }}
 </style>
 <h1>Gapmodel browser dashboard</h1>
 <form class="controls" action="/dashboard" method="get" target="board">
@@ -113,8 +161,26 @@ def _index_html(default_region: str, default_at: float | None) -> str:
     <input type="time" name="at" value="{time_value}">
   </label>
   <button type="submit">Render</button>
+  <span class="status" id="status" role="status">rendering, this can take minutes&hellip;</span>
 </form>
-<iframe name="board" src="/dashboard?{query}" title="dashboard"></iframe>
+<iframe name="board" id="board" src="/dashboard?{query}" title="dashboard"></iframe>
+<script>
+ // A render is minutes of model fitting with nothing on the wire until it ends,
+ // so the wait is said out loud and the button is held shut while it runs: a
+ // second click is another region-wide refit queued behind the first.
+ const form = document.querySelector("form");
+ const button = form.querySelector("button");
+ const status = document.getElementById("status");
+ button.disabled = true;
+ form.addEventListener("submit", () => {{
+   button.disabled = true;
+   status.textContent = "rendering, this can take minutes\\u2026";
+ }});
+ document.getElementById("board").addEventListener("load", () => {{
+   button.disabled = false;
+   status.textContent = "";
+ }});
+</script>
 </html>
 """
 
@@ -127,6 +193,8 @@ def _handler(
     default_at: float | None,
     regularisation: float,
 ) -> type[BaseHTTPRequestHandler]:
+    renders = _Renders()
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
@@ -172,8 +240,12 @@ def _handler(
                         return
 
             try:
-                html = dashboard_document(
-                    panel, hourly, symbols[region], region, at, regularisation
+                html = renders.get(
+                    region,
+                    at,
+                    lambda: dashboard_document(
+                        panel, hourly, symbols[region], region, at, regularisation
+                    ),
                 )
             # Every failure below the render is answered rather than raised: an
             # exception out of `do_GET` closes the socket mid-response, so the

@@ -58,6 +58,70 @@ def test_omitting_the_time_keeps_the_startup_time(served):
     assert seen == [("Asia", 5.0, ["^N225"])]
 
 
+def test_a_board_already_rendered_is_not_rendered_again(served):
+    base, seen = served
+    first = _get(f"{base}/dashboard?region=Asia&at=5:00")
+    second = _get(f"{base}/dashboard?region=Asia&at=5:00")
+    assert first == second
+    assert seen == [("Asia", 5.0, ["^N225"])]
+    _get(f"{base}/dashboard?region=Asia&at=6:00")
+    assert seen == [("Asia", 5.0, ["^N225"]), ("Asia", 6.0, ["^N225"])]
+
+
+def test_the_live_view_is_rendered_afresh_every_time(served):
+    base, seen = served
+    _get(f"{base}/dashboard?region=Asia&at=")
+    _get(f"{base}/dashboard?region=Asia&at=")
+    assert seen == [("Asia", None, ["^N225"]), ("Asia", None, ["^N225"])]
+
+
+def test_only_the_most_recent_boards_are_kept():
+    renders = web._Renders(size=2)
+    rendered = []
+
+    def board(name):
+        rendered.append(name)
+        return name
+
+    for hour in (1.0, 2.0, 3.0, 1.0):
+        renders.get("Asia", hour, lambda hour=hour: board(hour))
+    assert rendered == [1.0, 2.0, 3.0, 1.0]
+
+
+def test_a_second_request_waits_for_the_render_already_running():
+    renders = web._Renders()
+    started = threading.Event()
+    finish = threading.Event()
+    rendered = []
+
+    def slow():
+        rendered.append("render")
+        started.set()
+        finish.wait(5)
+        return "<h1>board</h1>"
+
+    def fast():
+        rendered.append("render")
+        return "<h1>board</h1>"
+
+    first = threading.Thread(target=lambda: renders.get("Asia", 5.0, slow))
+    first.start()
+    started.wait(5)
+    second = threading.Thread(target=lambda: renders.get("Asia", 5.0, fast))
+    second.start()
+    finish.set()
+    first.join(5)
+    second.join(5)
+    assert rendered == ["render"]
+
+
+def test_the_index_says_a_render_is_running_and_shuts_the_button():
+    page = web._index_html("Asia", 5.0)
+    assert 'id="status"' in page
+    assert "rendering, this can take minutes" in page
+    assert "button.disabled = true" in page
+
+
 def test_unknown_region_is_reported_without_reflecting_markup(served):
     base, _ = served
     with pytest.raises(urllib.error.HTTPError) as error:
