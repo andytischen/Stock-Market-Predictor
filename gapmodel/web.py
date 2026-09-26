@@ -24,8 +24,9 @@ from .utctime import as_of, format_utc_time, parse_utc_time
 
 log = logging.getLogger(__name__)
 
-# Bind addresses that mean "every interface": not reachable as a URL host.
-_WILDCARD_HOSTS = {"", "0.0.0.0", "::", "[::]"}
+# The loopback a wildcard bind is advertised as, per family: "every interface"
+# is not an address a browser can open.
+_LOOPBACK = {4: "127.0.0.1", 6: "::1"}
 
 # Rendered boards kept per (region, time). One board per region and a handful of
 # times is the whole realistic working set; the bound is only there so a client
@@ -64,12 +65,24 @@ def bind_family(host: str) -> int:
 
 
 def browser_url(host: str, port: int) -> str:
-    """The address a local browser can actually open for this bind address."""
-    if host in _WILDCARD_HOSTS:
-        host = "127.0.0.1"
-    elif ":" in host:
-        host = f"[{host}]"
-    return f"http://{host}:{port}/"
+    """The address a local browser can actually open for this bind address.
+
+    The wildcard is recognised as an address rather than as a spelling, so the
+    IPv6 one is advertised whether it was written ``::``, ``[::]`` or
+    ``0:0:0:0:0:0:0:0``, and in the family it was bound in: an ``::`` bind is
+    only reachable at ``127.0.0.1`` where the kernel makes it dual-stack.
+    """
+    host = host.strip("[]")
+    if host == "":
+        return f"http://{_LOOPBACK[4]}:{port}/"
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        # A name: whatever it resolves to, it is the name that is openable.
+        return f"http://{host}:{port}/"
+    if address.is_unspecified:
+        host = _LOOPBACK[address.version]
+    return f"http://[{host}]:{port}/" if ":" in host else f"http://{host}:{port}/"
 
 
 def dashboard_document(
