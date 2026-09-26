@@ -654,8 +654,8 @@ Expected shapes (all with `--max-stale-days 40` because the warm cache is weeks 
 - A stale *shared* series (`idx_GSPC.csv`, read by every model) still aborts the run with
   `error: 1 of N input series have no bar within 40 days of ...`.
 - When *every* requested name is blocked (`stock MU WDC` on the MU-stale cache) the run is
-  refused with the same generic `guard` error — there is no longer a distinct "every requested
-  name" message, and no `skipping` line (correct: skip and abort would contradict each other).
+  refused with `error: every requested forecast reads a series with no bar within 40 days of ...`,
+  and no `skipping` line (correct: skip and abort would contradict each other).
 - `--allow-stale` keeps everything, prints the warning on stderr only, and is the only way to get
   a `shortlist` `stale inputs:` footer to name a stale target. Without it the footer is built from
   `_model_inputs(panel, kept)`, so a skipped name is legitimately *absent* from the footer — use an
