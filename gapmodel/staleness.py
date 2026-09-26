@@ -44,6 +44,15 @@ class StaleInputs(RuntimeError):
     """Raised when the panel is too far behind to answer the question asked."""
 
 
+# Said in full wherever a run is refused: a reader who hits the wall should not
+# have to look up which flag widens it.
+REMEDIES = (
+    "Their last value would be forward-filled, so the forecast would read older "
+    "cross-market data as though nothing had moved. Re-run with --refresh to update the "
+    "cache, --max-stale-days to widen the tolerance, or --allow-stale to forecast anyway."
+)
+
+
 def today() -> pd.Timestamp:
     """The reference a guard measures against, before any session is known.
 
@@ -164,12 +173,7 @@ def guard(
     if allow:
         log.warning("%s (--allow-stale)", detail)
         return
-    raise StaleInputs(
-        f"{detail}. Their last value would be forward-filled, so the forecast would "
-        "read older cross-market data as though nothing had moved. Re-run with "
-        "--refresh to update the cache, --max-stale-days to widen the tolerance, or "
-        "--allow-stale to forecast anyway."
-    )
+    raise StaleInputs(f"{detail}. {REMEDIES}")
 
 
 def fresh_forecasts(
@@ -202,22 +206,31 @@ def fresh_forecasts(
         if (stale := behind(lags(read, session), max_days))
     }
     kept = [target for target in inputs if target not in blocked]
-    if not blocked or allow or not kept:
-        # Nothing lost, everything lost, or the loss deliberately accepted: in
-        # all three the run stands or falls as one, which is what ``guard`` says
-        # — passing quietly, refusing, or warning under ``--allow-stale``.
+    if not blocked or allow:
+        # Nothing lost, or the loss deliberately accepted: either way the run
+        # stands as one, which is what ``guard`` says — quietly, or warning
+        # under ``--allow-stale``.
         guard(union, session, max_days, allow=allow)
         return list(inputs)
     _say_what_never_arrived(union)
     measured = lags(union, session)
+    stale = describe(measured, behind(measured, max_days))
+    if not kept:
+        # Refused rather than printed as an empty table: a command that skips
+        # every name it was asked for has not answered the question, and saying
+        # so as a skip would leave the reader to infer it from a blank report.
+        raise StaleInputs(
+            f"every requested forecast reads a series with no bar within {max_days} days "
+            f"of {session.date().isoformat()}: {stale}. {REMEDIES}"
+        )
     log.warning(
-        "skipping %d of %d requested forecasts, which read a series with no bar within "
-        "%d days of %s: %s. The series behind that: %s",
+        "skipping %d of %d requested forecasts (%s): they read a series with no bar "
+        "within %d days of %s \u2014 %s",
         len(blocked),
         len(inputs),
+        _at_most_eight(sorted(blocked)),
         max_days,
         session.date().isoformat(),
-        _at_most_eight(sorted(blocked)),
-        describe(measured, behind(measured, max_days)),
+        stale,
     )
     return kept
