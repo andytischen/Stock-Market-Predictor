@@ -94,6 +94,7 @@ from .stocks import (
 from .universe import modelled_universe, read_universe, us_universe
 from .utctime import as_of as _as_of
 from .utctime import parse_utc_time
+from .weather_web import serve_weather
 from .web import serve_dashboard
 
 log = logging.getLogger(__name__)
@@ -719,6 +720,15 @@ def _cmd_web(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_weather(args: argparse.Namespace) -> None:
+    serve_weather(
+        host=args.host,
+        port=args.port,
+        launch_browser=not args.no_browser,
+        default_query=args.location,
+    )
+
+
 def _score_universe(args: argparse.Namespace) -> list[str]:
     """The comparison list for ``--relative``: a file if given, else the US list."""
     if args.universe:
@@ -1324,6 +1334,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="add pre-open futures moves (recent ~2 years only)",
     )
     web.set_defaults(func=_cmd_web)
+
+    weather = sub.add_parser("weather", help="serve an interactive weather dashboard")
+    weather.add_argument("--location", default="", help="optional initial location search text")
+    weather.add_argument(
+        "--host", default="127.0.0.1", help="address to bind (anything but loopback is unprotected)"
+    )
+    weather.add_argument(
+        "--port", type=_port, default=8010, help="port to bind, or 0 for any free one"
+    )
+    weather.add_argument("--no-browser", action="store_true", help="do not auto-open a browser tab")
+    weather.set_defaults(func=_cmd_weather)
 
     export = sub.add_parser(
         "export", help="write the forecast run as a JSON snapshot for the mobile app"
