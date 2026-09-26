@@ -26,7 +26,7 @@ and diverge only under ``--allow-stale`` or a widened tolerance.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import pandas as pd
 
@@ -113,6 +113,25 @@ def missing(panel: dict[str, pd.DataFrame]) -> list[str]:
     return sorted(symbol for symbol, bars in panel.items() if bars.empty)
 
 
+def _say_what_never_arrived(panel: dict[str, pd.DataFrame]) -> None:
+    """Name the series that arrived empty, which no staleness count covers.
+
+    Not a refusal: a download that returned nothing is a different failure with
+    a different remedy, and it is reported where it happens. Said here only so
+    that a count of the series that did arrive is not read as covering it — and
+    said without a denominator of its own, since a second "N of M" beside a
+    smaller total reads as the two lines disagreeing.
+    """
+    absent = missing(panel)
+    if absent:
+        log.warning(
+            "%d input series arrived with no bars at all, so they are neither counted "
+            "nor judged for staleness: %s",
+            len(absent),
+            _at_most_eight(absent),
+        )
+
+
 def guard(
     panel: dict[str, pd.DataFrame],
     session: pd.Timestamp,
@@ -133,19 +152,7 @@ def guard(
     writes its snapshot there: a warning printed alongside it would be read by
     the next program in the pipe as the first line of the JSON.
     """
-    absent = missing(panel)
-    if absent:
-        # Not a refusal: a download that returned nothing is a different failure
-        # with a different remedy, and it is reported where it happens. Said here
-        # only so that a count of the series that did arrive is not read as
-        # covering it — and said without a denominator of its own, since a second
-        # "N of M" beside a smaller total reads as the two lines disagreeing.
-        log.warning(
-            "%d input series arrived with no bars at all, so they are neither counted "
-            "nor judged for staleness: %s",
-            len(absent),
-            _at_most_eight(absent),
-        )
+    _say_what_never_arrived(panel)
     measured = lags(panel, session)
     stale = behind(measured, max_days)
     if not stale:
@@ -165,58 +172,52 @@ def guard(
     )
 
 
-def fresh_targets(
-    panel: dict[str, pd.DataFrame],
-    symbols: Sequence[str],
+def fresh_forecasts(
+    inputs: Mapping[str, dict[str, pd.DataFrame]],
     session: pd.Timestamp,
     max_days: int = STALE_DAYS,
     allow: bool = False,
 ) -> list[str]:
-    """The requested names whose own history is current enough to forecast.
+    """The requested forecasts none of whose own inputs has gone quiet.
 
-    A stale feature is everyone's problem, because every model in the run reads
-    it; a stale target is only its own. One name that stopped trading — halted,
-    acquired, delisted since the universe file was written — should not decide
-    whether the other sixty-five get forecast, so it is dropped by name and the
-    run continues. Losing the whole ranking to it would be the same failure the
-    guard exists to prevent, in the other direction.
+    ``inputs`` maps each name asked for to the series its model reads, its own
+    history included. A stale series therefore costs exactly the forecasts that
+    read it: a halted listing loses its own row, and takes with it the models
+    that hold it as a peer — in a default ``stock`` run MU is a column in WDC's
+    model, so both go, while AAPL, which never opens it, is still forecast. One
+    quiet feed cancelling every unrelated name is the same failure refusing to
+    forecast from it exists to prevent, in the other direction.
+
+    What is *not* done is dropping the stale column and fitting the model
+    without it: that model's AUC and Brier skill were earned over a history in
+    which the column was live, so the number it printed would answer a different
+    question from the one its metrics describe.
     """
-    measured = lags({s: panel[s] for s in symbols if s in panel}, session)
-    stale = behind(measured, max_days)
-    if not stale:
-        return list(symbols)
-    if allow:
-        # Said even here, and for the same reason the guard says it: ``stock``
-        # prints no staleness footer, so this is the only place a reader learns
-        # that the name in front of them stopped trading weeks ago.
-        log.warning(
-            "forecasting %d of %d requested names whose own history stops more than %d "
-            "days before %s (--allow-stale): %s",
-            len(stale),
-            len(symbols),
-            max_days,
-            session.date().isoformat(),
-            describe(measured, stale),
-        )
-        return list(symbols)
-    kept = [symbol for symbol in symbols if symbol not in set(stale)]
-    if kept:
-        # Only when something is left to skip *to*: announcing a skip and then
-        # aborting the run would describe two different outcomes in two lines.
-        log.warning(
-            "skipping %d of %d requested names whose own history stops more than %d days "
-            "before %s: %s",
-            len(stale),
-            len(symbols),
-            max_days,
-            session.date().isoformat(),
-            describe(measured, stale),
-        )
-    else:
-        raise StaleInputs(
-            f"every requested name has no bar within {max_days} days of "
-            f"{session.date().isoformat()}: {describe(measured, stale)}. Re-run with "
-            "--refresh to update the cache, --max-stale-days to widen the tolerance, or "
-            "--allow-stale to forecast anyway."
-        )
+    union: dict[str, pd.DataFrame] = {}
+    for read in inputs.values():
+        union.update(read)
+    blocked = {
+        target: stale
+        for target, read in inputs.items()
+        if (stale := behind(lags(read, session), max_days))
+    }
+    kept = [target for target in inputs if target not in blocked]
+    if not blocked or allow or not kept:
+        # Nothing lost, everything lost, or the loss deliberately accepted: in
+        # all three the run stands or falls as one, which is what ``guard`` says
+        # — passing quietly, refusing, or warning under ``--allow-stale``.
+        guard(union, session, max_days, allow=allow)
+        return list(inputs)
+    _say_what_never_arrived(union)
+    measured = lags(union, session)
+    log.warning(
+        "skipping %d of %d requested forecasts, which read a series with no bar within "
+        "%d days of %s: %s. The series behind that: %s",
+        len(blocked),
+        len(inputs),
+        max_days,
+        session.date().isoformat(),
+        _at_most_eight(sorted(blocked)),
+        describe(measured, behind(measured, max_days)),
+    )
     return kept
