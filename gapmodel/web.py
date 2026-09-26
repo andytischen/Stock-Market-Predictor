@@ -22,8 +22,9 @@ from .utctime import as_of, format_utc_time, parse_utc_time
 
 log = logging.getLogger(__name__)
 
-# Bind addresses that mean "every interface": not reachable as a URL host.
-_WILDCARD_HOSTS = {"", "0.0.0.0", "::", "[::]"}
+# Bind addresses that mean "every interface": not reachable as a URL host, and
+# replaced by the loopback address of the family they were bound in.
+_WILDCARD_LOOPBACK = {"": "127.0.0.1", "0.0.0.0": "127.0.0.1", "::": "::1"}
 
 
 def reachable_beyond_this_machine(host: str) -> bool:
@@ -58,9 +59,9 @@ def bind_family(host: str) -> int:
 
 def browser_url(host: str, port: int) -> str:
     """The address a local browser can actually open for this bind address."""
-    if host in _WILDCARD_HOSTS:
-        host = "127.0.0.1"
-    elif ":" in host:
+    host = host.strip("[]")
+    host = _WILDCARD_LOOPBACK.get(host, host)
+    if ":" in host:
         host = f"[{host}]"
     return f"http://{host}:{port}/"
 

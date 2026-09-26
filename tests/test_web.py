@@ -103,8 +103,10 @@ def test_an_unexpected_rendering_failure_is_answered_as_a_500(served, monkeypatc
     [
         ("127.0.0.1", "http://127.0.0.1:8000/"),
         ("0.0.0.0", "http://127.0.0.1:8000/"),
-        ("::", "http://127.0.0.1:8000/"),
+        ("::", "http://[::1]:8000/"),
+        ("[::]", "http://[::1]:8000/"),
         ("::1", "http://[::1]:8000/"),
+        ("[::1]", "http://[::1]:8000/"),
     ],
 )
 def test_browser_url_is_always_reachable(host, expected):
