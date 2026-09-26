@@ -4,11 +4,11 @@ import pandas as pd
 import pytest
 
 from gapmodel import cli
-from gapmodel.cli import _forecast_inputs, _shared_inputs, build_parser, main
+from gapmodel.cli import _model_inputs, build_parser, main
 from gapmodel.staleness import (
     STALE_DAYS,
     StaleInputs,
-    fresh_targets,
+    fresh_forecasts,
     guard,
     lags,
     stale_inputs,
@@ -29,6 +29,18 @@ def panel(**lags_by_symbol: int) -> dict[str, pd.DataFrame]:
     return {
         symbol: bars(SESSION - pd.Timedelta(days=lag)) for symbol, lag in lags_by_symbol.items()
     }
+
+
+def judged(loaded: dict[str, pd.DataFrame], targets: list[str], **how) -> list[str]:
+    """``fresh_forecasts`` over what each target's own model reads, as the CLI does."""
+    return fresh_forecasts(
+        {target: _model_inputs(loaded, [target]) for target in targets}, SESSION, **how
+    )
+
+
+def alone(loaded: dict[str, pd.DataFrame], targets: list[str], **how) -> list[str]:
+    """``fresh_forecasts`` where each name is the only series its model reads."""
+    return fresh_forecasts({target: {target: loaded[target]} for target in targets}, SESSION, **how)
 
 
 def test_a_run_on_current_inputs_is_left_alone():
@@ -70,18 +82,18 @@ def test_forecasting_from_stale_inputs_on_purpose_still_says_so(caplog, capsys):
 
 
 def test_one_dead_listing_does_not_cancel_the_names_around_it(caplog):
-    """A stale feature is read by every model in the run; a stale target by one."""
+    """A stale series costs the forecasts that read it, and no others."""
     universe = panel(AAPL=1, MSFT=1, HALTED=30)
     with caplog.at_level("WARNING"):
-        kept = fresh_targets(universe, ["AAPL", "MSFT", "HALTED"], SESSION)
+        kept = alone(universe, ["AAPL", "MSFT", "HALTED"])
     assert kept == ["AAPL", "MSFT"]
-    assert "HALTED (30d)" in caplog.text
+    assert "HALTED" in caplog.text and "skipping 1 of 3" in caplog.text
 
 
-def test_a_run_whose_every_target_is_dead_fails_rather_than_forecasting_nothing(caplog):
+def test_a_run_whose_every_forecast_is_dead_fails_rather_than_forecasting_nothing(caplog):
     with pytest.raises(StaleInputs) as raised, caplog.at_level("WARNING"):
-        fresh_targets(panel(AAPL=30, MSFT=30), ["AAPL", "MSFT"], SESSION)
-    assert "every requested name" in str(raised.value)
+        alone(panel(AAPL=30, MSFT=30), ["AAPL", "MSFT"])
+    assert "2 of 2 input series have no bar within 5 days" in str(raised.value)
     # Not "skipping" and then aborting: two lines describing two outcomes.
     assert "skipping" not in caplog.text
 
@@ -94,53 +106,51 @@ def test_the_footer_describes_the_series_the_run_read(caplog):
     """
     loaded = panel(AAPL=1, ZM=30, **{"^GSPC": 1})
     with caplog.at_level("WARNING"):
-        kept = fresh_targets(loaded, ["AAPL", "ZM"], SESSION)
-    counted, stale = stale_inputs(_forecast_inputs(loaded, kept), SESSION)
-    assert (counted, stale) == (2, [])
+        kept = alone(loaded, ["AAPL", "ZM"])
+    counted, stale = stale_inputs({s: loaded[s] for s in kept}, SESSION)
+    assert (counted, stale) == (1, [])
 
 
-def test_targets_are_kept_when_the_stale_read_is_the_deliberate_one(caplog):
+def test_forecasts_are_kept_when_the_stale_read_is_the_deliberate_one(caplog):
     """Kept, and still named: `stock` prints no footer, so this is the only place
     a reader learns the name in front of them stopped trading."""
     with caplog.at_level("WARNING"):
-        assert fresh_targets(panel(AAPL=30), ["AAPL"], SESSION, allow=True) == ["AAPL"]
+        assert alone(panel(AAPL=30), ["AAPL"], allow=True) == ["AAPL"]
     assert "AAPL (30d)" in caplog.text and "--allow-stale" in caplog.text
 
 
-def test_a_target_is_guarded_for_itself_and_a_peer_for_everyone():
-    """Which series can fail a whole run, and which only lose their own row.
+def test_a_forecast_is_judged_on_the_series_its_own_model_reads():
+    """A run of the panel is narrower than the download, and narrower per name.
 
     ``stock`` and ``shortlist`` load their names in bulk, so the panel holds
-    listings this run may never forecast. Those cannot decide the run. A peer of
-    something requested is a different thing: it is a column in another name's
-    model, and stale it is read as a company that did not move.
+    listings a given model never opens. Those cannot decide its forecast. A peer
+    is a different thing: it is a column in that model, and stale it is read as
+    a company that did not move.
     """
     loaded = panel(AAPL=1, MSFT=1, WDC=1, **{"^GSPC": 1, "005930.KS": 1})
-    # MSFT and WDC are loaded but unasked for, so neither can fail this run, and
-    # Samsung is a memory peer that nothing in an AAPL run reads.
-    assert set(_shared_inputs(loaded, ["AAPL"])) == {"^GSPC"}
-    # WDC is in MU's peer list, so a MU run reads it as a feature.
-    assert "WDC" in _shared_inputs(loaded, ["MU"])
+    # MSFT is loaded but read by no model here, and Samsung is a memory peer
+    # that an AAPL model never opens.
+    assert set(_model_inputs(loaded, ["AAPL"])) == {"^GSPC", "AAPL"}
+    # WDC is in MU's peer list, so a MU model reads it as a feature.
+    assert "WDC" in _model_inputs(loaded, ["MU"])
 
 
-def test_a_curated_name_asked_for_beside_its_own_peers_is_guarded_for_all_of_them():
-    """How far the peer rule reaches for ``stock``, whose names are mutual peers.
+def test_a_halted_curated_name_costs_the_models_that_hold_it_as_a_peer(caplog):
+    """How far one silence reaches for ``stock``, whose names are mutual peers.
 
-    MU is a column in WDC's model, so a run asked for both is held to MU's
-    freshness and a halted MU fails it rather than losing its own row. Only when
-    MU is the whole request, and so a feature of nothing being fitted, is it a
-    target guarded for itself alone.
+    MU is a column in WDC's model and in STX's, so a halted MU takes all three
+    down: their metrics were earned over a history in which it was live, and
+    fitting them without it would answer a different question. AAPL never opens
+    MU, so it is still forecast — the run loses the names that read the dead
+    feed rather than every name it was asked for.
     """
-    loaded = panel(MU=1, WDC=1, STX=1, **{"^GSPC": 1})
-    assert "MU" in _shared_inputs(loaded, ["MU", "WDC", "STX"])
-    assert "MU" not in _shared_inputs(loaded, ["MU"])
-    halted = panel(MU=30, WDC=1, STX=1, **{"^GSPC": 1})
+    halted = panel(MU=30, WDC=1, STX=1, AAPL=1, **{"^GSPC": 1})
+    with caplog.at_level("WARNING"):
+        assert judged(halted, ["MU", "WDC", "STX", "AAPL"]) == ["AAPL"]
+    assert "skipping 3 of 4" in caplog.text and "MU (30d)" in caplog.text
+    # Asked for alone, the halted name is the whole run, so the run is refused.
     with pytest.raises(StaleInputs, match=r"MU \(30d\)"):
-        guard(_shared_inputs(halted, ["MU", "WDC", "STX"]), SESSION)
-    # Alone, the same halted listing is dropped by name — and dropping the last
-    # target left is the whole run, so it is refused rather than printing nothing.
-    with pytest.raises(StaleInputs, match="every requested name"):
-        fresh_targets(halted, ["MU"], SESSION)
+        judged(halted, ["MU"])
 
 
 def test_a_series_no_model_in_the_run_reads_cannot_refuse_it():
@@ -151,12 +161,12 @@ def test_a_series_no_model_in_the_run_reads_cannot_refuse_it():
     Guarding a US run on those refuses a forecast over a feed it never opens.
     """
     loaded = panel(**{"^GSPC": 1, "^FTSE": 1, "EXH8.DE": 20, "ISF.L": 20})
-    guard(_shared_inputs(loaded, ["^GSPC"]), SESSION)
+    assert judged(loaded, ["^GSPC"]) == ["^GSPC"]
     # The same two series, read by the models that do read them.
     with pytest.raises(StaleInputs, match=r"EXH8\.DE"):
-        guard(_shared_inputs(loaded, ["^GDAXI"]), SESSION)
+        judged(loaded, ["^GDAXI"])
     with pytest.raises(StaleInputs, match=r"ISF\.L"):
-        guard(_shared_inputs(loaded, ["^FTSE"]), SESSION)
+        judged(loaded, ["^FTSE"])
 
 
 def test_half_a_paired_block_is_read_by_nothing_and_so_judges_nothing():
@@ -167,11 +177,11 @@ def test_half_a_paired_block_is_read_by_nothing_and_so_judges_nothing():
     is the same over-broad judgement as guarding a sector tracker nobody reads.
     """
     orphaned = panel(**{"^GSPC": 1, "USO": 20, "ZQ=F": 20})
-    guard(_shared_inputs(orphaned, ["^GSPC"]), SESSION)
+    assert judged(orphaned, ["^GSPC"]) == ["^GSPC"]
     # Both legs present: the feature is built, so its silence stops the run.
     paired = panel(**{"^GSPC": 1, "USO": 20, "USL": 20})
     with pytest.raises(StaleInputs, match=r"USO"):
-        guard(_shared_inputs(paired, ["^GSPC"]), SESSION)
+        judged(paired, ["^GSPC"])
 
 
 def test_a_leg_that_arrived_empty_does_not_complete_its_pair():
@@ -182,7 +192,7 @@ def test_a_leg_that_arrived_empty_does_not_complete_its_pair():
     """
     loaded = panel(**{"^GSPC": 1, "ZQ=F": 20})
     loaded["^IRX"] = pd.DataFrame()
-    guard(_shared_inputs(loaded, ["^GSPC"]), SESSION)
+    assert judged(loaded, ["^GSPC"]) == ["^GSPC"]
 
 
 def test_an_empty_leg_is_still_named_as_a_download_that_returned_nothing(caplog):
@@ -195,14 +205,14 @@ def test_an_empty_leg_is_still_named_as_a_download_that_returned_nothing(caplog)
     loaded = panel(**{"^GSPC": 1, "ZQ=F": 1})
     loaded["^IRX"] = pd.DataFrame()
     with caplog.at_level("WARNING"):
-        guard(_shared_inputs(loaded, ["^GSPC"]), SESSION)
+        judged(loaded, ["^GSPC"])
     assert "^IRX" in caplog.text and "no bars at all" in caplog.text
 
 
 def test_a_run_that_names_no_target_is_judged_on_everything_loaded():
     """Nothing is known about what it will read, so nothing is excused."""
     with pytest.raises(StaleInputs):
-        guard(_shared_inputs(panel(**{"EXH8.DE": 20}), []), SESSION)
+        guard(_model_inputs(panel(**{"EXH8.DE": 20}), []), SESSION)
 
 
 def test_an_empty_series_is_neither_counted_nor_flagged():

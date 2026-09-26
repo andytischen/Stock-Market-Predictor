@@ -81,7 +81,7 @@ from .shortlist import render_text as render_shortlist_text
 from .shortlist import to_frame as shortlist_to_frame
 from .social_arb import CORRELATION_WINDOW, build_social_arb
 from .social_arb import to_frame as social_arb_to_frame
-from .staleness import STALE_DAYS, fresh_targets, guard, today
+from .staleness import STALE_DAYS, fresh_forecasts, today
 from .stocks import (
     BLIND_SPOTS,
     SHORTLISTED,
@@ -249,42 +249,10 @@ def _model_inputs(
     return {symbol: bars for symbol, bars in panel.items() if symbol in read}
 
 
-def _shared_inputs(
-    panel: dict[str, pd.DataFrame], targets: Sequence[str]
-) -> dict[str, pd.DataFrame]:
-    """The series this run reads for someone other than themselves.
-
-    A stock panel is loaded whole — every curated name and every peer — whatever
-    was asked for, and a shortlist panel carries the sixty-odd listings it ranks.
-    Those series are read by one model each, so holding the whole run to their
-    freshness would let a single halted listing cancel sixty-five sound
-    forecasts. A name that is a *peer* of something requested stays here: it is
-    then a feature, read by a model other than its own, and its silence is
-    everyone's problem.
-    """
-    peers = {peer.symbol for symbol in targets for peer in peers_of(symbol)}
-    inputs = _model_inputs(panel, targets)
-    target_only = {s for s in inputs if s in SHORTLISTED or s in STOCKS_BY_SYMBOL} - peers
-    return {symbol: bars for symbol, bars in inputs.items() if symbol not in target_only}
-
-
-def _forecast_inputs(
-    panel: dict[str, pd.DataFrame], targets: Sequence[str]
-) -> dict[str, pd.DataFrame]:
-    """Exactly the series the run read: the shared inputs and the names kept.
-
-    What the report's stale-input footer should describe. Handed the whole loaded
-    panel it would count a name the run skipped, and say its last value was
-    carried forward when the reason it is not in the table is that it was not.
-    """
-    shared = _shared_inputs(panel, targets)
-    return shared | {symbol: panel[symbol] for symbol in targets if symbol in panel}
-
-
 def _fresh_enough(
     panel: dict[str, pd.DataFrame],
     args: argparse.Namespace,
-    targets: Sequence[str] = (),
+    targets: Sequence[str],
 ) -> list[str]:
     """Stop a forecasting command before it fits anything on dead inputs.
 
@@ -294,19 +262,12 @@ def _fresh_enough(
     conclusion a reader draws from a probability built by forward-filling a feed
     that stopped a week ago.
 
-    Returns the targets still worth forecasting: the shared inputs either pass
-    for everyone or fail the run, while a target with no recent bar of its own
-    is dropped by name.
+    Returns the targets still worth forecasting. Each is judged on the series
+    its own model reads, so a quiet feed costs the forecasts that read it and no
+    others; a run in which every requested name reads one is refused whole.
     """
-    guard(
-        _shared_inputs(panel, targets),
-        today(),
-        max_days=args.max_stale_days,
-        allow=args.allow_stale,
-    )
-    return fresh_targets(
-        panel,
-        targets,
+    return fresh_forecasts(
+        {target: _model_inputs(panel, [target]) for target in targets},
         today(),
         max_days=args.max_stale_days,
         allow=args.allow_stale,
@@ -940,7 +901,7 @@ def _cmd_shortlist(args: argparse.Namespace) -> None:
         render_shortlist_text(
             picks,
             top=args.top,
-            panel=_forecast_inputs(panel, symbols),
+            panel=_model_inputs(panel, symbols),
             max_stale_days=args.max_stale_days,
             selection=selection,
             as_of=today(),
