@@ -467,21 +467,21 @@ cache that stops early shortens the record rather than misdating it.
 `--allow-stale` forecasts anyway, warning on stderr instead of failing — so a
 snapshot piped from `export` stays valid JSON either way.
 
-Only shared inputs can fail a whole run. A single name that `stock` or
-`shortlist` was asked to forecast is read by one model — its own — so a listing
-that stopped trading is dropped by name and the rest of the universe is still
-ranked. A name that is a *peer* of something requested counts as a shared input,
-because it is a column in another company's model.
+A stale series costs exactly the forecasts that read it. Each requested name is
+judged on the series its own model opens — its own history, the indices and
+cross-asset indicators every target reads, and its peers — so a listing that
+stopped trading loses its own row and takes with it the models holding it as a
+peer, while the rest of the universe is still ranked. In a default `gapmodel
+stock` run MU is a column in WDC's model and in STX's, so a halted MU skips all
+three; AAPL never opens MU and is forecast as usual. A shared input everything
+reads — the S&P, crude, the dollar — blocks every name, which is a refusal, and
+the run fails rather than printing an empty table.
 
-That rule reaches further than it looks for `stock`, whose curated names are each
-other's peers: MU is a column in WDC's model, so a default `gapmodel stock` run
-holds the whole command to MU's freshness and fails outright if MU stops trading
-rather than losing its row. A curated name is dropped by name only when it is
-asked for alone and no other requested name lists it as a peer — `gapmodel stock
-MU`. Everywhere else the recovery is `--allow-stale`, which forecasts the rest
-from MU's carried-forward last price and says so. Dropping the name from the
-other models instead would fit them without a column their metrics were earned
-with, which is the substitution the guard exists to refuse.
+What the skipped models do not do is drop the dead column and fit without it:
+their AUC and Brier skill were earned over a history in which it was live, so
+the number would answer a different question from the one its metrics describe.
+The recovery is `--allow-stale`, which forecasts them from the carried-forward
+last price and says so.
 
 "Input" means a series the requested forecasts actually read, not everything the
 download happened to fetch. One panel serves every command and every model reads

@@ -628,6 +628,44 @@ hostname still dies at bind time with
 `nohup ... &` inside a shell call that later hits the tool's timeout dies with it (the log file can
 end up never created). Use `setsid nohup ... > /tmp/log 2>&1 < /dev/null &` and poll the log.
 
+## Per-forecast staleness (`fresh_forecasts`, PR #158 onward)
+
+Staleness is judged per *forecast*, not per run: each requested name is measured against the
+series its own model reads (`cli._model_inputs(panel, [target])`), so a quiet series costs only
+the forecasts that read it.
+
+How to synthesise the cases without touching the warm cache (see `--cache` above):
+
+```bash
+cp -a ~/.cache/gapmodel /tmp/mu-stale-cache
+python3 - <<'EOF'   # drop MU's last 45 bars -> ~101 days stale
+rows=open("/tmp/mu-stale-cache/MU.csv").read().strip().split("\n")
+open("/tmp/mu-stale-cache/MU.csv","w").write("\n".join([rows[0]]+rows[1:][:-45])+"\n")
+EOF
+python -W ignore -m gapmodel --cache /tmp/mu-stale-cache --max-stale-days 40 stock
+```
+
+Expected shapes (all with `--max-stale-days 40` because the warm cache is weeks behind):
+
+- A stale *curated target* (`MU`) skips exactly the forecasts that hold it as a column — `MU`,
+  `WDC`, `STX` in a default `stock` run — and still forecasts `AAPL`/`NVDA`/`AMD`/`AVGO`, with
+  `skipping 3 of 7 requested forecasts ...` on **stderr** only. On `main` the same cache aborted
+  the whole run, so this is the branch's headline behaviour.
+- A stale *shared* series (`idx_GSPC.csv`, read by every model) still aborts the run with
+  `error: 1 of N input series have no bar within 40 days of ...`.
+- When *every* requested name is blocked (`stock MU WDC` on the MU-stale cache) the run is
+  refused with `error: every requested forecast reads a series with no bar within 40 days of ...`,
+  and no `skipping` line (correct: skip and abort would contradict each other).
+- `--allow-stale` keeps everything, prints the warning on stderr only, and is the only way to get
+  a `shortlist` `stale inputs:` footer to name a stale target. Without it the footer is built from
+  `_model_inputs(panel, kept)`, so a skipped name is legitimately *absent* from the footer — use an
+  `--allow-stale` run as the positive control, otherwise "no footer" proves nothing.
+
+Gotchas found while testing this: `--market` is `append`-style, so `--market ^GSPC --market ^DJI`
+(a second bare value is rejected as `unrecognized arguments`); `sectors` only accepts European
+markets (`^GSPC` errors with "carries no sector features"); a full `predict` is ~12 min and
+`stock` ~1.3 min per kept name on this box, so launch the long runs in the background first.
+
 ## Devin Secrets Needed
 
 None. Yahoo Finance is reachable unauthenticated from the test box.
