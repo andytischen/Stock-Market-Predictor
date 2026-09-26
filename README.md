@@ -167,6 +167,7 @@ python -m gapmodel backtest --reliability
 python -m gapmodel scorecard          # the last 21 sessions: called, realised, hit
 python -m gapmodel dashboard --at 05:00 --html asia.html   # crude vs the Asian session
 python -m gapmodel web --region Asia --at 05:00             # local browser interface
+python -m gapmodel weather --location London                # local weather dashboard (Open-Meteo)
 python -m gapmodel brief --html brief.html   # the calls, the tape and the caveats, for a reader
 python -m gapmodel screen             # US stocks: liquid, unusually active, moving
 python -m gapmodel shortlist --top 10 # rank the US universe by demonstrated edge
@@ -209,6 +210,17 @@ It binds loopback for a reason: there is no authentication, and every request
 fits models, so `--host 0.0.0.0` hands anyone who can route to the machine both
 the board and a way to spend its CPU. Bind a wider address only behind something
 that authenticates, and expect a warning on startup when you do.
+
+### Weather dashboard
+
+`weather` serves a separate local dashboard that looks up a location with
+Open-Meteo geocoding, then shows current weather and a short forecast.
+No API key is required.
+
+```bash
+python -m gapmodel weather --location London
+python -m gapmodel weather --port 8081 --no-browser
+```
 
 ```
 Crude:
