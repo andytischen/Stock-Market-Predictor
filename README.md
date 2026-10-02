@@ -289,7 +289,7 @@ observation rather than silently borrowing a future one.
 | Market | AUC | Accuracy | Brier skill |
 | --- | --- | --- | --- |
 | ASX 200 | 0.85 | 0.78 | 0.38 |
-| KOSPI | 0.85 | 0.78 | 0.37 |
+| KOSPI | 0.85 | 0.77 | 0.37 |
 | Nikkei 225 | 0.85 | 0.77 | 0.36 |
 | DAX | 0.81 | 0.73 | 0.27 |
 | Euro Stoxx 50 | 0.80 | 0.73 | 0.26 |
