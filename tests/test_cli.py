@@ -64,6 +64,20 @@ def test_web_command_starts_server_with_expected_arguments(monkeypatch):
     ]
 
 
+def test_weather_command_starts_server_with_expected_arguments(monkeypatch):
+    called = {}
+
+    def fake_serve_weather(**kwargs):
+        called.update(kwargs)
+
+    monkeypatch.setattr("gapmodel.cli.serve_weather", fake_serve_weather)
+    main(["weather", "--location", "Seoul", "--no-browser", "--port", "8124"])
+    assert called["host"] == "127.0.0.1"
+    assert called["port"] == 8124
+    assert called["launch_browser"] is False
+    assert called["default_query"] == "Seoul"
+
+
 def test_web_serves_only_the_markets_that_passed_the_staleness_check(monkeypatch):
     called = {}
 
